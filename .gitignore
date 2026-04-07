@@ -1,0 +1,71 @@
+# Xcode
+.DS_Store
+build/
+DerivedData/
+*.xcworkspace
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+project.xcworkspace/
+*.mode1v3
+*.pbxuser
+*.perspectivev3
+*.xcsettings
+*.xcuserdatad
+
+# Swift Package Manager
+.build/
+.swiftpm/
+.swift-home/
+Package.resolved
+
+# CocoaPods
+Pods/
+Podfile.lock
+
+# Carthage
+Carthage/Build/
+
+# fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+
+# Rust
+target/
+**/target/
+Cargo.lock
+.cargo/
+
+# macOS
+*.DS_Store
+.AppleDouble
+.LSOverride
+
+# Logs
+*.log
+
+# Editor
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Temporary
+*.tmp
+*.temp
+*.cache
+
+# Build artifacts
+*.o
+*.so
+*.dylib
+*.dll
+*.exe
+*.app
+
+# Rust FFI
+**/target/
+**/Cargo.lock

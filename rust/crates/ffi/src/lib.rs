@@ -1,0 +1,214 @@
+use anyhow::{Context, Result, anyhow};
+use billlens_apple_core::{AppService, DraftInput, EngineBootstrap, EntrySource, LlmConfig};
+use billlens_apple_db::BillRepository;
+use chrono::{DateTime, FixedOffset};
+use serde::{Deserialize, Serialize};
+use std::ffi::{CStr, CString, c_char};
+use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+use tokio::runtime::Runtime;
+use uuid::Uuid;
+
+static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+static APP: OnceLock<Mutex<Option<AppService>>> = OnceLock::new();
+
+#[derive(Debug, Serialize)]
+struct Envelope<T> {
+    ok: bool,
+    data: Option<T>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+enum EngineRequest {
+    Bootstrap {
+        database_path: String,
+        profile_id: String,
+        device_id: String,
+        llm: Option<LlmConfig>,
+        log_file_path: Option<String>,
+    },
+    Home {
+        profile_id: String,
+    },
+    SubmitText {
+        profile_id: String,
+        content: String,
+        auto_confirm: bool,
+        source: Option<EntrySource>,
+    },
+    SaveDraft {
+        profile_id: String,
+        draft_id: String,
+        draft: DraftInput,
+    },
+    ConfirmDraft {
+        profile_id: String,
+        draft_id: String,
+    },
+    DiscardDraft {
+        profile_id: String,
+        draft_id: String,
+    },
+    Ledger {
+        profile_id: String,
+        preset: String,
+        start_at: Option<DateTime<FixedOffset>>,
+        end_at: Option<DateTime<FixedOffset>>,
+    },
+}
+
+fn runtime() -> &'static Runtime {
+    RUNTIME.get_or_init(|| Runtime::new().expect("failed to create tokio runtime"))
+}
+
+fn app_slot() -> &'static Mutex<Option<AppService>> {
+    APP.get_or_init(|| Mutex::new(None))
+}
+
+fn with_app<T>(f: impl FnOnce(&AppService) -> Result<T>) -> Result<T> {
+    let guard = app_slot()
+        .lock()
+        .map_err(|_| anyhow!("ffi app mutex poisoned"))?;
+    let app = guard
+        .as_ref()
+        .ok_or_else(|| anyhow!("engine is not bootstrapped"))?;
+    f(app)
+}
+
+fn encode_ok<T: Serialize>(data: T) -> *mut c_char {
+    encode_envelope(Envelope {
+        ok: true,
+        data: Some(data),
+        error: None,
+    })
+}
+
+fn encode_error(message: String) -> *mut c_char {
+    encode_envelope::<serde_json::Value>(Envelope {
+        ok: false,
+        data: None,
+        error: Some(message),
+    })
+}
+
+fn encode_envelope<T: Serialize>(payload: Envelope<T>) -> *mut c_char {
+    let json = serde_json::to_string(&payload).unwrap_or_else(|error| {
+        format!(r#"{{"ok":false,"data":null,"error":"failed to encode response: {error}"}}"#)
+    });
+    CString::new(json).unwrap().into_raw()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn billlens_handle_request(request_json: *const c_char) -> *mut c_char {
+    let response = handle_request_inner(request_json).unwrap_or_else(|error| encode_error(error.to_string()));
+    response
+}
+
+fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
+    if request_json.is_null() {
+        return Ok(encode_error("request_json must not be null".to_string()));
+    }
+
+    let request_str = unsafe { CStr::from_ptr(request_json) }
+        .to_str()
+        .context("request_json is not valid utf-8")?;
+    let request: EngineRequest =
+        serde_json::from_str(request_str).context("failed to decode engine request")?;
+
+    match request {
+        EngineRequest::Bootstrap {
+            database_path,
+            profile_id,
+            device_id,
+            llm,
+            log_file_path,
+        } => {
+            let db_path = PathBuf::from(database_path);
+            let repo = runtime().block_on(BillRepository::connect(&db_path))?;
+            let app = AppService::new(
+                repo,
+                EngineBootstrap {
+                    device_id,
+                    llm,
+                    log_file_path,
+                },
+            )?;
+            runtime().block_on(app.bootstrap(&profile_id))?;
+            let mut slot = app_slot()
+                .lock()
+                .map_err(|_| anyhow!("ffi app mutex poisoned"))?;
+            *slot = Some(app.clone());
+            Ok(encode_ok(serde_json::json!({ "profile_id": profile_id })))
+        }
+        EngineRequest::Home { profile_id } => with_app(|app| {
+            let snapshot = runtime().block_on(app.home(&profile_id))?;
+            Ok(encode_ok(snapshot))
+        }),
+        EngineRequest::SubmitText {
+            profile_id,
+            content,
+            auto_confirm,
+            source,
+        } => with_app(|app| {
+            let result = runtime().block_on(app.submit_text(
+                &profile_id,
+                content,
+                auto_confirm,
+                source.unwrap_or(EntrySource::Text),
+            ))?;
+            Ok(encode_ok(result))
+        }),
+        EngineRequest::SaveDraft {
+            profile_id,
+            draft_id,
+            draft,
+        } => {
+            let draft_id = Uuid::parse_str(&draft_id).context("invalid draft_id")?;
+            with_app(|app| {
+                let result = runtime().block_on(app.save_draft(&profile_id, draft_id, draft))?;
+                Ok(encode_ok(result))
+            })
+        }
+        EngineRequest::ConfirmDraft {
+            profile_id,
+            draft_id,
+        } => {
+            let draft_id = Uuid::parse_str(&draft_id).context("invalid draft_id")?;
+            with_app(|app| {
+                let result = runtime().block_on(app.confirm_draft(&profile_id, draft_id))?;
+                Ok(encode_ok(result))
+            })
+        }
+        EngineRequest::DiscardDraft {
+            profile_id,
+            draft_id,
+        } => {
+            let draft_id = Uuid::parse_str(&draft_id).context("invalid draft_id")?;
+            with_app(|app| {
+                let result = runtime().block_on(app.discard_draft(&profile_id, draft_id))?;
+                Ok(encode_ok(result))
+            })
+        }
+        EngineRequest::Ledger {
+            profile_id,
+            preset,
+            start_at,
+            end_at,
+        } => with_app(|app| {
+            let result = runtime().block_on(app.ledger(&profile_id, &preset, start_at, end_at))?;
+            Ok(encode_ok(result))
+        }),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn billlens_free_string(value: *mut c_char) {
+    if value.is_null() {
+        return;
+    }
+    unsafe {
+        let _ = CString::from_raw(value);
+    }
+}

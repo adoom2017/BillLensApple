@@ -1,0 +1,346 @@
+import Foundation
+import SwiftUI
+import BillLensAppleServices
+
+@MainActor
+public final class BillLensStore: ObservableObject {
+    public struct TransientProgressMessage: Identifiable {
+        public let id = UUID()
+        public var content: String
+    }
+
+    @Published public var messages: [ConversationMessage] = []
+    @Published public var draft: RecordDraft?
+    @Published public var latestRecord: RecordItem?
+    @Published public var ledger: LedgerSnapshot?
+    @Published public var transientProgressMessage: TransientProgressMessage?
+    @Published public var composerText = ""
+    @Published public var autoConfirm = false
+    @Published public var statusText = "正在初始化"
+    @Published public var errorText: String?
+    @Published public var isBusy = false
+    @Published public var selectedPreset: LedgerPreset = .month
+    @Published public var customStart = Calendar.current.date(byAdding: .day, value: -30, to: Date.now) ?? Date.now
+    @Published public var customEnd = Date.now
+    @Published public var draftDirection = "expense"
+    @Published public var draftAmount = ""
+    @Published public var draftCategory = "其他"
+    @Published public var draftMerchant = ""
+    @Published public var draftNote = ""
+    @Published public var draftTransactionAt = Date()
+
+    public let speechService = SpeechCaptureService()
+
+    private let bridge = RustBridge()
+    private let ocrService: ReceiptTextRecognizing
+    private let profileID = "local-default"
+    private let deviceID = Host.current().localizedName ?? UUID().uuidString
+
+    public init(ocrService: ReceiptTextRecognizing = ReceiptOCRService()) {
+        self.ocrService = ocrService
+        bootstrap()
+    }
+
+    public var availableCategories: [String] {
+        draftDirection == "income"
+            ? ["工资收入", "投资收益", "报销", "退款", "其他"]
+            : ["餐饮", "交通", "日用", "购物", "住房", "医疗", "娱乐", "教育", "通讯", "人情", "其他"]
+    }
+
+    public func bootstrap() {
+        Task {
+            do {
+                let dbURL = try databaseURL()
+                AppLogger.log("bootstrap", "database_path=\(dbURL.path)")
+                let _: [String: String] = try await bridge.sendAsync([
+                    "action": "bootstrap",
+                    "database_path": dbURL.path,
+                    "profile_id": profileID,
+                    "device_id": deviceID,
+                    "llm": self.llmConfigDictionary,
+                    "log_file_path": AppLogger.defaultLogFilePath
+                ])
+                statusText = "已连接本地账本"
+                AppLogger.log("bootstrap", "engine bootstrapped successfully")
+                try await refreshHome()
+                try await refreshLedger()
+            } catch {
+                AppLogger.log("bootstrap.error", error.localizedDescription)
+                errorText = error.localizedDescription
+                statusText = "初始化失败"
+            }
+        }
+    }
+
+    public func submitText() {
+        let content = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty else { return }
+        perform("正在解析账单") {
+            AppLogger.log("entry.text", content)
+            self.startProgress("已接收文本，准备调用大模型。")
+            self.advanceProgress("正在发送文本到 LLM…")
+            let result: SubmitTextResult = try await self.bridge.sendAsync([
+                "action": "submit_text",
+                "profile_id": self.profileID,
+                "content": content,
+                "auto_confirm": self.autoConfirm,
+                "source": "text"
+            ])
+            self.advanceProgress("LLM 已返回，正在更新草稿与账本…")
+            self.apply(home: result.home)
+            self.composerText = ""
+            self.statusText = result.autoConfirmed ? "已自动入库" : "已生成待确认草稿"
+            AppLogger.log("entry.text.result", "auto_confirmed=\(result.autoConfirmed) parsed=\(String(describing: result.parsed))")
+            try await self.refreshLedger()
+            self.finishProgress()
+        }
+    }
+
+    public func importReceipt(url: URL) {
+        perform("正在识别图片") {
+            AppLogger.log("entry.ocr.file", url.path)
+            self.startProgress("已接收图片，准备执行 OCR。")
+            self.advanceProgress("正在识别票据文字…")
+            let text = try await self.ocrService.recognizeText(from: url)
+            self.advanceProgress("OCR 完成，正在调用大模型解析…")
+            let result: SubmitTextResult = try await self.bridge.sendAsync([
+                "action": "submit_text",
+                "profile_id": self.profileID,
+                "content": text,
+                "auto_confirm": self.autoConfirm,
+                "source": "ocr"
+            ])
+            self.advanceProgress("大模型已返回，正在整理结构化账单…")
+            self.apply(home: result.home)
+            self.statusText = "图片已解析"
+            AppLogger.log("entry.ocr.result", "auto_confirmed=\(result.autoConfirmed) parsed=\(String(describing: result.parsed))")
+            try await self.refreshLedger()
+            self.finishProgress()
+        }
+    }
+
+    public func toggleRecording() {
+        Task {
+            do {
+                if speechService.isRecording {
+                    let transcript = try await speechService.stop()
+                    composerText = transcript
+                    AppLogger.log("speech.transcript", transcript)
+                    statusText = "语音已转写，可直接发送"
+                } else {
+                    try await speechService.start()
+                    AppLogger.log("speech.start", "recording started")
+                    statusText = "录音中..."
+                }
+            } catch {
+                AppLogger.log("speech.error", error.localizedDescription)
+                errorText = error.localizedDescription
+                statusText = "语音识别失败"
+            }
+        }
+    }
+
+    public func saveDraft() {
+        guard let draft else { return }
+        perform("正在保存草稿") {
+            let payload = self.currentDraftPayload()
+            let result: SaveDraftResult = try await self.bridge.sendAsync([
+                "action": "save_draft",
+                "profile_id": self.profileID,
+                "draft_id": draft.id,
+                "draft": payload.dictionary
+            ])
+            self.apply(home: result.home)
+            self.statusText = "草稿已保存"
+            AppLogger.log("draft.save", "draft_id=\(draft.id)")
+        }
+    }
+
+    public func confirmDraft() {
+        guard let draft else { return }
+        perform("正在确认账单") {
+            let _: SaveDraftResult = try await self.bridge.sendAsync([
+                "action": "confirm_draft",
+                "profile_id": self.profileID,
+                "draft_id": draft.id
+            ])
+            try await self.refreshHome()
+            try await self.refreshLedger()
+            self.statusText = "账单已入库"
+            AppLogger.log("draft.confirm", "draft_id=\(draft.id)")
+        }
+    }
+
+    public func discardDraft() {
+        guard let draft else { return }
+        perform("正在丢弃草稿") {
+            let home: HomeSnapshot = try await self.bridge.sendAsync([
+                "action": "discard_draft",
+                "profile_id": self.profileID,
+                "draft_id": draft.id
+            ])
+            self.apply(home: home)
+            self.statusText = "草稿已丢弃"
+            AppLogger.log("draft.discard", "draft_id=\(draft.id)")
+        }
+    }
+
+    public func refreshLedger() async throws {
+        let payload = ledgerPayload()
+        let snapshot: LedgerSnapshot = try await bridge.sendAsync(payload)
+        ledger = snapshot
+        AppLogger.log("ledger.refresh", "preset=\(selectedPreset.rawValue) groups=\(snapshot.byDay.count) pending_sync=\(snapshot.pendingSyncCount)")
+    }
+
+    public func refreshHome() async throws {
+        let snapshot: HomeSnapshot = try await bridge.sendAsync([
+            "action": "home",
+            "profile_id": profileID
+        ])
+        apply(home: snapshot)
+        AppLogger.log("home.refresh", "messages=\(snapshot.messages.count) has_draft=\(snapshot.draft != nil)")
+    }
+
+    public func applyPreset(_ preset: LedgerPreset) {
+        selectedPreset = preset
+        perform("正在刷新账单") {
+            try await self.refreshLedger()
+            self.statusText = "账单视图已更新"
+        }
+    }
+
+    private func apply(home: HomeSnapshot) {
+        messages = home.messages
+        draft = home.draft
+        latestRecord = home.latestRecord
+        hydrateDraftFields()
+    }
+
+    private func hydrateDraftFields() {
+        guard let draft else {
+            draftDirection = "expense"
+            draftAmount = ""
+            draftCategory = "其他"
+            draftMerchant = ""
+            draftNote = ""
+            draftTransactionAt = .now
+            return
+        }
+        draftDirection = draft.direction ?? "expense"
+        draftAmount = draft.amount.map { String(format: "%.2f", $0) } ?? ""
+        draftCategory = draft.category ?? "其他"
+        draftMerchant = draft.merchant ?? ""
+        draftNote = draft.note ?? ""
+        draftTransactionAt = BillLensFormatters.parseISO(draft.transactionAt) ?? .now
+    }
+
+    private func perform(_ status: String, operation: @MainActor @escaping () async throws -> Void) {
+        errorText = nil
+        isBusy = true
+        statusText = status
+        Task {
+            do {
+                try await operation()
+            } catch {
+                AppLogger.log("operation.error", error.localizedDescription)
+                errorText = error.localizedDescription
+                statusText = "操作失败"
+                finishProgress()
+            }
+            isBusy = false
+        }
+    }
+
+    private func startProgress(_ text: String) {
+        transientProgressMessage = TransientProgressMessage(content: "处理中：\(text)")
+    }
+
+    private func advanceProgress(_ text: String) {
+        if transientProgressMessage == nil {
+            startProgress(text)
+            return
+        }
+        transientProgressMessage?.content.append("\n• \(text)")
+    }
+
+    private func finishProgress() {
+        transientProgressMessage = nil
+    }
+
+    private func currentDraftPayload() -> DraftInputPayload {
+        DraftInputPayload(
+            direction: draftDirection,
+            amount: Double(draftAmount),
+            currency: "CNY",
+            category: draftCategory,
+            merchant: draftMerchant,
+            transactionAt: BillLensFormatters.timestampFallback.string(from: draftTransactionAt),
+            note: draftNote
+        )
+    }
+
+    private func ledgerPayload() -> [String: Any] {
+        let formatter = BillLensFormatters.timestampFallback
+        var payload: [String: Any] = [
+            "action": "ledger",
+            "profile_id": profileID,
+            "preset": selectedPreset.rawValue
+        ]
+        if selectedPreset == .custom {
+            payload["start_at"] = formatter.string(from: customStart)
+            payload["end_at"] = formatter.string(from: customEnd)
+        }
+        return payload
+    }
+
+    private func databaseURL() throws -> URL {
+        let supportURL = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let directory = supportURL.appendingPathComponent("BillLensApple", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent("billlens.sqlite")
+    }
+
+    private var llmConfigDictionary: Any {
+        let environment = ProcessInfo.processInfo.environment
+        guard
+            let baseURL = environment["LLM_BASE_URL"],
+            let apiKey = environment["LLM_API_KEY"],
+            let model = environment["LLM_MODEL"]
+        else {
+            return NSNull()
+        }
+        return [
+            "base_url": baseURL,
+            "api_key": apiKey,
+            "model": model,
+            "provider": environment["LLM_PROVIDER"] ?? "openai"
+        ]
+    }
+}
+
+private struct DraftInputPayload {
+    let direction: String?
+    let amount: Double?
+    let currency: String?
+    let category: String?
+    let merchant: String?
+    let transactionAt: String?
+    let note: String?
+
+    var dictionary: [String: Any] {
+        [
+            "direction": direction ?? NSNull(),
+            "amount": amount ?? NSNull(),
+            "currency": currency ?? NSNull(),
+            "category": category ?? NSNull(),
+            "merchant": merchant ?? NSNull(),
+            "transaction_at": transactionAt ?? NSNull(),
+            "note": note ?? NSNull()
+        ]
+    }
+}
