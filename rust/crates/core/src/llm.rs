@@ -78,23 +78,12 @@ pub struct LlmConfig {
 
 impl LlmConfig {
     pub fn from_env_optional() -> Result<Option<Self>> {
-        let base_url = env::var("LLM_BASE_URL").ok();
-        let api_key = env::var("LLM_API_KEY").ok();
-        let model = env::var("LLM_MODEL").ok();
-        let provider = env::var("LLM_PROVIDER").unwrap_or_else(|_| "openai".to_string());
-
-        match (base_url, api_key, model) {
-            (Some(base_url), Some(api_key), Some(model)) => Ok(Some(Self {
-                base_url,
-                api_key,
-                model,
-                provider,
-            })),
-            (None, None, None) => Ok(None),
-            _ => Err(anyhow!(
-                "LLM_BASE_URL, LLM_API_KEY and LLM_MODEL must be provided together"
-            )),
-        }
+        let base_url = env::var("LLM_BASE_URL")
+            .unwrap_or_else(|_| "http://127.0.0.1:8080/v1".to_string());
+        let api_key = env::var("LLM_API_KEY").unwrap_or_default();
+        let model = env::var("LLM_MODEL").unwrap_or_else(|_| "qwen-local".to_string());
+        let provider = env::var("LLM_PROVIDER").unwrap_or_else(|_| "llamacpp".to_string());
+        Ok(Some(Self { base_url, api_key, model, provider }))
     }
 }
 
@@ -155,7 +144,10 @@ impl LlmClient {
 
     pub fn new(base_url: String, api_key: String, model: String, provider: LlmProvider) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(60))
+                .build()
+                .expect("failed to build http client"),
             base_url,
             api_key,
             model,
@@ -200,11 +192,8 @@ impl LlmClient {
         logger::info(
             "llm.request",
             format!(
-                "provider={} model={} mode={note_fallback_mode:?} prompt={} input={}",
-                self.provider,
-                self.model,
-                truncate_for_log(&prompt, 2000),
-                truncate_for_log(&text, 4000)
+                "provider={} model={} mode={note_fallback_mode:?}",
+                self.provider, self.model,
             ),
         );
         let response = self.send_prompted_request(prompt, text.clone()).await?;
@@ -212,22 +201,9 @@ impl LlmClient {
             .text()
             .await
             .context("failed to read llm response body")?;
-        logger::info(
-            "llm.response",
-            format!(
-                "provider={} model={} raw={}",
-                self.provider,
-                self.model,
-                truncate_for_log(&raw_response_text, 6000)
-            ),
-        );
         let raw_response: Value =
             serde_json::from_str(&raw_response_text).context("failed to decode llm response")?;
         let content = extract_message_content(&self.provider, &raw_response)?;
-        logger::info(
-            "llm.response.content",
-            truncate_for_log(&content, 4000),
-        );
         let mut payload = parse_record_payload_text(&content)?;
         finalize_record_payload(&mut payload, &text, note_fallback_mode);
         logger::info(
@@ -262,14 +238,7 @@ impl LlmClient {
             self.base_url.trim_end_matches('/'),
             path.trim_start_matches('/')
         );
-        logger::info(
-            "llm.http",
-            format!(
-                "url={} body={}",
-                url,
-                truncate_for_log(&body.to_string(), 6000)
-            ),
-        );
+        logger::info("llm.http", format!("url={url}"));
         let request = self.http.post(url).header(CONTENT_TYPE, "application/json");
         let request = match self.provider {
             LlmProvider::OpenAi | LlmProvider::LlamaCpp => {
@@ -291,16 +260,6 @@ impl LlmClient {
             .context("failed to call llm provider")?
             .error_for_status()
             .context("llm provider returned error status")
-    }
-}
-
-fn truncate_for_log(value: &str, max_chars: usize) -> String {
-    let mut chars = value.chars();
-    let truncated: String = chars.by_ref().take(max_chars).collect();
-    if chars.next().is_some() {
-        format!("{truncated}…")
-    } else {
-        truncated
     }
 }
 
@@ -340,7 +299,6 @@ fn build_record_patch_prompt(draft: &RecordDraft) -> String {
 fn build_openai_request_body(model: &str, system_prompt: String, text: String) -> Value {
     json!({
         "model": model,
-        "reasoning_split": true,
         "stream": false,
         "max_tokens": 512,
         "messages": [

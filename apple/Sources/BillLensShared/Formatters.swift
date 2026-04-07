@@ -37,6 +37,13 @@ enum BillLensFormatters {
         return formatter
     }()
 
+    private static let dayInputParser: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
     static func parseISO(_ value: String?) -> Date? {
         guard let value else { return nil }
         return timestampInput.date(from: value) ?? timestampFallback.date(from: value)
@@ -48,10 +55,7 @@ enum BillLensFormatters {
     }
 
     static func displayDay(_ value: String) -> String {
-        let parser = DateFormatter()
-        parser.locale = Locale(identifier: "en_US_POSIX")
-        parser.dateFormat = "yyyy-MM-dd"
-        guard let date = parser.date(from: value) else { return value }
+        guard let date = dayInputParser.date(from: value) else { return value }
         return day.string(from: date)
     }
 

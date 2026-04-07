@@ -5,12 +5,12 @@ use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
 use std::ffi::{CStr, CString, c_char};
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{OnceLock, RwLock};
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
-static APP: OnceLock<Mutex<Option<AppService>>> = OnceLock::new();
+static APP: OnceLock<RwLock<Option<AppService>>> = OnceLock::new();
 
 #[derive(Debug, Serialize)]
 struct Envelope<T> {
@@ -63,14 +63,14 @@ fn runtime() -> &'static Runtime {
     RUNTIME.get_or_init(|| Runtime::new().expect("failed to create tokio runtime"))
 }
 
-fn app_slot() -> &'static Mutex<Option<AppService>> {
-    APP.get_or_init(|| Mutex::new(None))
+fn app_slot() -> &'static RwLock<Option<AppService>> {
+    APP.get_or_init(|| RwLock::new(None))
 }
 
 fn with_app<T>(f: impl FnOnce(&AppService) -> Result<T>) -> Result<T> {
     let guard = app_slot()
-        .lock()
-        .map_err(|_| anyhow!("ffi app mutex poisoned"))?;
+        .read()
+        .map_err(|_| anyhow!("ffi app rwlock poisoned"))?;
     let app = guard
         .as_ref()
         .ok_or_else(|| anyhow!("engine is not bootstrapped"))?;
@@ -137,8 +137,8 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
             )?;
             runtime().block_on(app.bootstrap(&profile_id))?;
             let mut slot = app_slot()
-                .lock()
-                .map_err(|_| anyhow!("ffi app mutex poisoned"))?;
+                .write()
+                .map_err(|_| anyhow!("ffi app rwlock poisoned"))?;
             *slot = Some(app.clone());
             Ok(encode_ok(serde_json::json!({ "profile_id": profile_id })))
         }

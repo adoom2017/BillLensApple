@@ -9,6 +9,15 @@ public final class BillLensStore: ObservableObject {
         public var content: String
     }
 
+    public struct DraftFormState {
+        public var direction = "expense"
+        public var amount = ""
+        public var category = "其他"
+        public var merchant = ""
+        public var note = ""
+        public var transactionAt = Date()
+    }
+
     @Published public var messages: [ConversationMessage] = []
     @Published public var draft: RecordDraft?
     @Published public var latestRecord: RecordItem?
@@ -22,12 +31,7 @@ public final class BillLensStore: ObservableObject {
     @Published public var selectedPreset: LedgerPreset = .month
     @Published public var customStart = Calendar.current.date(byAdding: .day, value: -30, to: Date.now) ?? Date.now
     @Published public var customEnd = Date.now
-    @Published public var draftDirection = "expense"
-    @Published public var draftAmount = ""
-    @Published public var draftCategory = "其他"
-    @Published public var draftMerchant = ""
-    @Published public var draftNote = ""
-    @Published public var draftTransactionAt = Date()
+    @Published public var draftForm = DraftFormState()
 
     public let speechService = SpeechCaptureService()
 
@@ -42,9 +46,18 @@ public final class BillLensStore: ObservableObject {
     }
 
     public var availableCategories: [String] {
-        draftDirection == "income"
+        draftForm.direction == "income"
             ? ["工资收入", "投资收益", "报销", "退款", "其他"]
             : ["餐饮", "交通", "日用", "购物", "住房", "医疗", "娱乐", "教育", "通讯", "人情", "其他"]
+    }
+
+    /// 切换收支方向，并将分类重置为新方向下的第一个合法值
+    public func setDraftDirection(_ direction: String) {
+        draftForm.direction = direction
+        let categories = availableCategories
+        if !categories.contains(draftForm.category) {
+            draftForm.category = categories.first ?? "其他"
+        }
     }
 
     public func bootstrap() {
@@ -218,20 +231,23 @@ public final class BillLensStore: ObservableObject {
 
     private func hydrateDraftFields() {
         guard let draft else {
-            draftDirection = "expense"
-            draftAmount = ""
-            draftCategory = "其他"
-            draftMerchant = ""
-            draftNote = ""
-            draftTransactionAt = .now
+            draftForm = DraftFormState()
             return
         }
-        draftDirection = draft.direction ?? "expense"
-        draftAmount = draft.amount.map { String(format: "%.2f", $0) } ?? ""
-        draftCategory = draft.category ?? "其他"
-        draftMerchant = draft.merchant ?? ""
-        draftNote = draft.note ?? ""
-        draftTransactionAt = BillLensFormatters.parseISO(draft.transactionAt) ?? .now
+        let direction = draft.direction ?? "expense"
+        let categories = direction == "income"
+            ? ["工资收入", "投资收益", "报销", "退款", "其他"]
+            : ["餐饮", "交通", "日用", "购物", "住房", "医疗", "娱乐", "教育", "通讯", "人情", "其他"]
+        let rawCategory = draft.category ?? "其他"
+        let category = categories.contains(rawCategory) ? rawCategory : categories.last!
+        draftForm = DraftFormState(
+            direction: direction,
+            amount: draft.amount.map { String(format: "%.2f", $0) } ?? "",
+            category: category,
+            merchant: draft.merchant ?? "",
+            note: draft.note ?? "",
+            transactionAt: BillLensFormatters.parseISO(draft.transactionAt) ?? .now
+        )
     }
 
     private func perform(_ status: String, operation: @MainActor @escaping () async throws -> Void) {
@@ -269,13 +285,13 @@ public final class BillLensStore: ObservableObject {
 
     private func currentDraftPayload() -> DraftInputPayload {
         DraftInputPayload(
-            direction: draftDirection,
-            amount: Double(draftAmount),
+            direction: draftForm.direction,
+            amount: Double(draftForm.amount),
             currency: "CNY",
-            category: draftCategory,
-            merchant: draftMerchant,
-            transactionAt: BillLensFormatters.timestampFallback.string(from: draftTransactionAt),
-            note: draftNote
+            category: draftForm.category,
+            merchant: draftForm.merchant,
+            transactionAt: BillLensFormatters.timestampFallback.string(from: draftForm.transactionAt),
+            note: draftForm.note
         )
     }
 
@@ -305,20 +321,13 @@ public final class BillLensStore: ObservableObject {
         return directory.appendingPathComponent("billlens.sqlite")
     }
 
-    private var llmConfigDictionary: Any {
-        let environment = ProcessInfo.processInfo.environment
-        guard
-            let baseURL = environment["LLM_BASE_URL"],
-            let apiKey = environment["LLM_API_KEY"],
-            let model = environment["LLM_MODEL"]
-        else {
-            return NSNull()
-        }
+    private var llmConfigDictionary: [String: String] {
+        let env = ProcessInfo.processInfo.environment
         return [
-            "base_url": baseURL,
-            "api_key": apiKey,
-            "model": model,
-            "provider": environment["LLM_PROVIDER"] ?? "openai"
+            "base_url": env["LLM_BASE_URL"] ?? "http://127.0.0.1:8080/v1",
+            "api_key":  env["LLM_API_KEY"]  ?? "",
+            "model":    env["LLM_MODEL"]    ?? "qwen-local",
+            "provider": env["LLM_PROVIDER"] ?? "llamacpp"
         ]
     }
 }

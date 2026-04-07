@@ -1,6 +1,6 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
-import AppKit
 
 private enum AppPage: String {
     case entry
@@ -69,7 +69,7 @@ public struct RootView: View {
                     colors: [
                         Color(red: 0.985, green: 0.992, blue: 0.989),
                         Color(red: 0.958, green: 0.979, blue: 0.972),
-                        Color(red: 0.946, green: 0.969, blue: 0.959)
+                        Color(red: 0.946, green: 0.969, blue: 0.959),
                     ],
                     startPoint: .top,
                     endPoint: .bottom
@@ -92,7 +92,7 @@ public struct RootView: View {
             allowedContentTypes: [.image],
             allowsMultipleSelection: false
         ) { result in
-            if case let .success(urls) = result, let url = urls.first {
+            if case .success(let urls) = result, let url = urls.first {
                 store.importReceipt(url: url)
             }
         }
@@ -118,7 +118,9 @@ public struct RootView: View {
                     Circle()
                         .fill(
                             LinearGradient(
-                                colors: [Color(red: 0.929, green: 0.974, blue: 0.958), Color.white],
+                                colors: [
+                                    Color(red: 0.929, green: 0.974, blue: 0.958), Color.white,
+                                ],
                                 startPoint: .top,
                                 endPoint: .bottom
                             )
@@ -156,7 +158,8 @@ public struct RootView: View {
                     .stroke(Color(red: 0.865, green: 0.914, blue: 0.893), lineWidth: 1)
             )
             .clipShape(Capsule())
-            .shadow(color: Color(red: 0.54, green: 0.69, blue: 0.64).opacity(0.08), radius: 12, y: 4)
+            .shadow(
+                color: Color(red: 0.54, green: 0.69, blue: 0.64).opacity(0.08), radius: 12, y: 4)
         }
     }
 
@@ -166,12 +169,18 @@ public struct RootView: View {
         } label: {
             Text(page.title)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(selectedPage == page ? Color(red: 0.165, green: 0.426, blue: 0.384) : Color(red: 0.42, green: 0.51, blue: 0.54))
+                .foregroundStyle(
+                    selectedPage == page
+                        ? Color(red: 0.165, green: 0.426, blue: 0.384)
+                        : Color(red: 0.42, green: 0.51, blue: 0.54)
+                )
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .background(
                     Capsule()
-                        .fill(selectedPage == page ? Color(red: 0.885, green: 0.949, blue: 0.922) : .clear)
+                        .fill(
+                            selectedPage == page
+                                ? Color(red: 0.885, green: 0.949, blue: 0.922) : .clear)
                 )
         }
         .buttonStyle(.plain)
@@ -214,56 +223,14 @@ private struct ChatPanel: View {
                 Text("账单录入")
                     .font(.system(size: 28, weight: .bold))
                     .foregroundStyle(Color(red: 0.09, green: 0.20, blue: 0.23))
-                Text("输入或语音记账，如“打车花了30块”，我会先解析，再帮你确认入库。")
+                Text("输入或语音记账，如\"打车花了30块\"，我会先解析，再帮你确认入库。")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
                     .frame(maxWidth: 480, alignment: .leading)
             }
 
-            GeometryReader { scrollProxy in
-                ScrollView {
-                    LazyVStack(spacing: LayoutMetrics.messageGap) {
-                        WelcomeBubble()
-
-                        ForEach(store.messages) { message in
-                            MessageBubble(message: message)
-                        }
-
-                        if let progress = store.transientProgressMessage {
-                            ProgressBubble(message: progress.content)
-                        }
-
-                        if let draft = store.draft {
-                            DraftConversationCard(
-                                title: draft.note ?? draft.merchant ?? "待确认账单",
-                                direction: draft.direction ?? "expense",
-                                amount: draft.amount,
-                                category: draft.category ?? "未分类",
-                                merchant: draft.merchant ?? "未填写商户",
-                                transactionAt: draft.transactionAt,
-                                status: "待确认",
-                                copy: "已为你解析出一张待确认账单。若要修改，可以继续说“改成300元”，右侧表单也支持直接手动编辑。"
-                            )
-                        } else if let record = store.latestRecord {
-                            DraftConversationCard(
-                                title: record.note ?? record.merchant ?? "最近入库账单",
-                                direction: record.direction,
-                                amount: record.amount,
-                                category: record.category,
-                                merchant: record.merchant ?? "未填写商户",
-                                transactionAt: record.transactionAt,
-                                status: "已入库",
-                                copy: "最近确认入库的一笔账单如下。"
-                            )
-                        }
-                    }
-                    .frame(width: max(scrollProxy.size.width - 10, 0), alignment: .leading)
-                    .padding(.trailing, 10)
-                }
-                .scrollIndicators(.hidden)
+            ChatScrollView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             ComposerPanel(
                 composerText: $store.composerText,
@@ -277,6 +244,79 @@ private struct ChatPanel: View {
         }
         .padding(LayoutMetrics.panelPadding)
         .background(PanelCardStyle())
+    }
+}
+
+private struct ChatScrollView: View {
+    @EnvironmentObject private var store: BillLensStore
+
+    var body: some View {
+        GeometryReader { scrollProxy in
+            ScrollViewReader { reader in
+                ScrollView {
+                    chatContent(width: max(scrollProxy.size.width - 10, 0))
+                        .padding(.trailing, 10)
+                }
+                .scrollIndicators(.hidden)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onAppear {
+                    reader.scrollTo("chatBottom")
+                }
+                .onChange(of: store.messages.count) {
+                    withAnimation { reader.scrollTo("chatBottom", anchor: .bottom) }
+                }
+                .onChange(of: store.draft?.id) {
+                    withAnimation { reader.scrollTo("chatBottom", anchor: .bottom) }
+                }
+                .onChange(of: store.latestRecord?.id) {
+                    withAnimation { reader.scrollTo("chatBottom", anchor: .bottom) }
+                }
+                .onChange(of: store.transientProgressMessage?.id) {
+                    withAnimation { reader.scrollTo("chatBottom", anchor: .bottom) }
+                }
+            }
+        }
+    }
+
+    private func chatContent(width: CGFloat) -> some View {
+        LazyVStack(spacing: LayoutMetrics.messageGap) {
+            WelcomeBubble()
+
+            ForEach(store.messages) { message in
+                MessageBubble(message: message)
+            }
+
+            if let progress = store.transientProgressMessage {
+                ProgressBubble(message: progress.content)
+            }
+
+            if let draft = store.draft {
+                DraftConversationCard(
+                    title: draft.note ?? draft.merchant ?? "待确认账单",
+                    direction: draft.direction ?? "expense",
+                    amount: draft.amount,
+                    category: draft.category ?? "未分类",
+                    merchant: draft.merchant ?? "未填写商户",
+                    transactionAt: draft.transactionAt,
+                    status: "待确认",
+                    copy: "已为你解析出一张待确认账单。若要修改，可以继续说\"改成300元\"，右侧表单也支持直接手动编辑。"
+                )
+            } else if let record = store.latestRecord {
+                DraftConversationCard(
+                    title: record.note ?? record.merchant ?? "最近入库账单",
+                    direction: record.direction,
+                    amount: record.amount,
+                    category: record.category,
+                    merchant: record.merchant ?? "未填写商户",
+                    transactionAt: record.transactionAt,
+                    status: "已入库",
+                    copy: "最近确认入库的一笔账单如下。"
+                )
+            }
+
+            Color.clear.frame(height: 1).id("chatBottom")
+        }
+        .frame(width: width, alignment: .leading)
     }
 }
 
@@ -306,7 +346,7 @@ private struct ReviewPanel: View {
             }
 
             ReviewSummaryCard(
-                direction: store.draft?.direction ?? "expense",
+                direction: store.draftForm.direction,
                 amount: store.draft?.amount,
                 meta: reviewSummaryMeta
             )
@@ -334,7 +374,8 @@ private struct ReviewPanel: View {
 
     private var reviewSummaryMeta: String {
         if let draft = store.draft {
-            return "\(draft.category ?? "未分类") · \(draft.merchant ?? "未填写商户") · \(BillLensFormatters.displayDateTime(draft.transactionAt))"
+            return
+                "\(draft.category ?? "未分类") · \(draft.merchant ?? "未填写商户") · \(BillLensFormatters.displayDateTime(draft.transactionAt))"
         }
         return "等待新的账单解析结果"
     }
@@ -342,7 +383,13 @@ private struct ReviewPanel: View {
     private var reviewFields: some View {
         VStack(spacing: 8) {
             ReviewField(title: "类型") {
-                Picker("", selection: $store.draftDirection) {
+                Picker(
+                    "",
+                    selection: Binding(
+                        get: { store.draftForm.direction },
+                        set: { store.setDraftDirection($0) }
+                    )
+                ) {
                     Text("支出").tag("expense")
                     Text("收入").tag("income")
                 }
@@ -350,12 +397,12 @@ private struct ReviewPanel: View {
             }
 
             ReviewField(title: "金额") {
-                TextField("0.00", text: $store.draftAmount)
+                TextField("0.00", text: $store.draftForm.amount)
                     .textFieldStyle(.plain)
             }
 
             ReviewField(title: "分类") {
-                Picker("", selection: $store.draftCategory) {
+                Picker("", selection: $store.draftForm.category) {
                     ForEach(store.availableCategories, id: \.self) { category in
                         Text(category).tag(category)
                     }
@@ -365,18 +412,18 @@ private struct ReviewPanel: View {
             }
 
             ReviewField(title: "商户") {
-                TextField("例如：牛肉馆", text: $store.draftMerchant)
+                TextField("例如：牛肉馆", text: $store.draftForm.merchant)
                     .textFieldStyle(.plain)
             }
 
             ReviewField(title: "时间") {
-                DatePicker("", selection: $store.draftTransactionAt)
+                DatePicker("", selection: $store.draftForm.transactionAt)
                     .labelsHidden()
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             ReviewField(title: "备注", minimumHeight: LayoutMetrics.noteHeight, alignTop: true) {
-                TextEditor(text: $store.draftNote)
+                TextEditor(text: $store.draftForm.note)
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
                     .scrollContentBackground(.hidden)
@@ -414,6 +461,8 @@ private struct LedgerShell: View {
     @State private var ledgerMode: LedgerViewMode = .calendar
     @State private var calendarMonthKey: String?
     @State private var selectedLedgerDate: String?
+    @State private var cachedCalendarCells: [LedgerCalendarCell] = []
+    @State private var cachedCalendarKey: String = ""
     let availableHeight: CGFloat
 
     var body: some View {
@@ -439,12 +488,19 @@ private struct LedgerShell: View {
                     } label: {
                         Text(preset.title)
                             .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(store.selectedPreset == preset ? Color(red: 0.165, green: 0.426, blue: 0.384) : Color(red: 0.40, green: 0.49, blue: 0.52))
+                            .foregroundStyle(
+                                store.selectedPreset == preset
+                                    ? Color(red: 0.165, green: 0.426, blue: 0.384)
+                                    : Color(red: 0.40, green: 0.49, blue: 0.52)
+                            )
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
                             .background(
                                 Capsule()
-                                    .fill(store.selectedPreset == preset ? Color(red: 0.885, green: 0.949, blue: 0.922) : Color.clear)
+                                    .fill(
+                                        store.selectedPreset == preset
+                                            ? Color(red: 0.885, green: 0.949, blue: 0.922)
+                                            : Color.clear)
                             )
                     }
                     .buttonStyle(.plain)
@@ -476,10 +532,22 @@ private struct LedgerShell: View {
 
             if let ledger = store.ledger {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                    LedgerSummaryCard(title: "总支出", value: BillLensFormatters.currencyString(ledger.summary.summary.expenseAmount), note: "按所选范围统计", accent: .expense, primary: true)
-                    LedgerSummaryCard(title: "总收入", value: BillLensFormatters.currencyString(ledger.summary.summary.incomeAmount), note: "按所选范围统计", accent: .income, primary: true)
-                    LedgerSummaryCard(title: "覆盖账单", value: "\(ledger.byDay.reduce(0) { $0 + $1.records.count })", note: "总记录数", accent: .neutral, primary: false)
-                    LedgerSummaryCard(title: "待同步变更", value: "\(ledger.pendingSyncCount)", note: "sync_outbox 中待同步项目", accent: .neutral, primary: false)
+                    LedgerSummaryCard(
+                        title: "总支出",
+                        value: BillLensFormatters.currencyString(
+                            ledger.summary.summary.expenseAmount), note: "按所选范围统计",
+                        accent: .expense, primary: true)
+                    LedgerSummaryCard(
+                        title: "总收入",
+                        value: BillLensFormatters.currencyString(
+                            ledger.summary.summary.incomeAmount), note: "按所选范围统计", accent: .income,
+                        primary: true)
+                    LedgerSummaryCard(
+                        title: "覆盖账单", value: "\(ledger.byDay.reduce(0) { $0 + $1.records.count })",
+                        note: "总记录数", accent: .neutral, primary: false)
+                    LedgerSummaryCard(
+                        title: "待同步变更", value: "\(ledger.pendingSyncCount)",
+                        note: "sync_outbox 中待同步项目", accent: .neutral, primary: false)
                 }
 
                 HStack(spacing: 8) {
@@ -505,9 +573,17 @@ private struct LedgerShell: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .onAppear {
                     syncCalendarState(for: ledger)
+                    rebuildCalendarCellsIfNeeded(for: ledger)
                 }
-                .onChange(of: ledgerSignature(ledger)) { _ in
+                .onChange(of: ledgerSignature(ledger)) {
                     syncCalendarState(for: ledger)
+                    rebuildCalendarCellsIfNeeded(for: ledger)
+                }
+                .onChange(of: calendarMonthKey) {
+                    rebuildCalendarCellsIfNeeded(for: ledger)
+                }
+                .onChange(of: selectedLedgerDate) {
+                    updateCalendarCellSelection()
                 }
             } else {
                 VStack(alignment: .leading, spacing: 8) {
@@ -531,12 +607,18 @@ private struct LedgerShell: View {
         } label: {
             Text(title)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(ledgerMode == mode ? Color(red: 0.165, green: 0.426, blue: 0.384) : Color(red: 0.40, green: 0.49, blue: 0.52))
+                .foregroundStyle(
+                    ledgerMode == mode
+                        ? Color(red: 0.165, green: 0.426, blue: 0.384)
+                        : Color(red: 0.40, green: 0.49, blue: 0.52)
+                )
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .background(
                     Capsule()
-                        .fill(ledgerMode == mode ? Color(red: 0.885, green: 0.949, blue: 0.922) : Color.clear)
+                        .fill(
+                            ledgerMode == mode
+                                ? Color(red: 0.885, green: 0.949, blue: 0.922) : Color.clear)
                 )
         }
         .buttonStyle(.plain)
@@ -607,7 +689,9 @@ private struct LedgerShell: View {
                 .disabled(!canShiftMonth(in: ledger, direction: 1))
             }
 
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 7), spacing: 8) {
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 7), spacing: 8
+            ) {
                 ForEach(["日", "一", "二", "三", "四", "五", "六"], id: \.self) { label in
                     Text(label)
                         .font(.system(size: 12, weight: .bold))
@@ -616,8 +700,10 @@ private struct LedgerShell: View {
                 }
             }
 
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 7), spacing: 8) {
-                ForEach(calendarCells(for: ledger)) { cell in
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 7), spacing: 8
+            ) {
+                ForEach(cachedCalendarCells) { cell in
                     if let day = cell.dayNumber, let date = cell.date {
                         Button {
                             selectedLedgerDate = date
@@ -625,10 +711,18 @@ private struct LedgerShell: View {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text("\(day)")
                                     .font(.system(size: 14, weight: .bold))
-                                    .foregroundStyle(cell.isSelected ? .white : Color(red: 0.10, green: 0.21, blue: 0.24))
+                                    .foregroundStyle(
+                                        cell.isSelected
+                                            ? .white : Color(red: 0.10, green: 0.21, blue: 0.24))
                                 Text(cell.amountText)
                                     .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(cell.isSelected ? Color.white.opacity(0.9) : (cell.isHot ? Color(red: 0.84, green: 0.38, blue: 0.29) : Color(red: 0.40, green: 0.49, blue: 0.52)))
+                                    .foregroundStyle(
+                                        cell.isSelected
+                                            ? Color.white.opacity(0.9)
+                                            : (cell.isHot
+                                                ? Color(red: 0.84, green: 0.38, blue: 0.29)
+                                                : Color(red: 0.40, green: 0.49, blue: 0.52))
+                                    )
                                     .lineLimit(1)
                                 Spacer(minLength: 0)
                             }
@@ -636,15 +730,24 @@ private struct LedgerShell: View {
                             .frame(maxWidth: .infinity, minHeight: 82, alignment: .topLeading)
                             .background(calendarCellBackground(for: cell))
                             .overlay(
-                                RoundedRectangle(cornerRadius: LayoutMetrics.fieldRadius, style: .continuous)
-                                    .stroke(cell.isSelected ? Color(red: 0.16, green: 0.42, blue: 0.35) : Color(red: 0.89, green: 0.937, blue: 0.918), lineWidth: cell.isSelected ? 1.5 : 1)
+                                RoundedRectangle(
+                                    cornerRadius: LayoutMetrics.fieldRadius, style: .continuous
+                                )
+                                .stroke(
+                                    cell.isSelected
+                                        ? Color(red: 0.16, green: 0.42, blue: 0.35)
+                                        : Color(red: 0.89, green: 0.937, blue: 0.918),
+                                    lineWidth: cell.isSelected ? 1.5 : 1)
                             )
                         }
                         .buttonStyle(.plain)
                     } else {
-                        RoundedRectangle(cornerRadius: LayoutMetrics.fieldRadius, style: .continuous)
-                            .fill(Color.clear)
-                            .frame(minHeight: 82)
+                        RoundedRectangle(
+                            cornerRadius: LayoutMetrics.fieldRadius, style: .continuous
+                        )
+                        .fill(Color.clear)
+                        .frame(minHeight: 82)
+                        .allowsHitTesting(false)
                     }
                 }
             }
@@ -670,14 +773,19 @@ private struct LedgerShell: View {
                                 Text(BillLensFormatters.displayDay(day.day))
                                     .font(.system(size: 22, weight: .bold))
                                     .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
-                                Text("收入 \(BillLensFormatters.currencyString(day.incomeAmount)) · 支出 \(BillLensFormatters.currencyString(day.expenseAmount))")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                                Text(
+                                    "收入 \(BillLensFormatters.currencyString(day.incomeAmount)) · 支出 \(BillLensFormatters.currencyString(day.expenseAmount))"
+                                )
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
                             }
                             Spacer()
                             Text("净额 \(BillLensFormatters.currencyString(day.netAmount))")
                                 .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(day.netAmount >= 0 ? Color(red: 0.84, green: 0.38, blue: 0.29) : Color(red: 0.16, green: 0.42, blue: 0.35))
+                                .foregroundStyle(
+                                    day.netAmount >= 0
+                                        ? Color(red: 0.84, green: 0.38, blue: 0.29)
+                                        : Color(red: 0.16, green: 0.42, blue: 0.35))
                         }
 
                         ForEach(day.records) { record in
@@ -686,16 +794,21 @@ private struct LedgerShell: View {
                                     Text(record.merchant ?? record.category)
                                         .font(.system(size: 16, weight: .semibold))
                                         .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
-                                    Text("\(record.category) · \(BillLensFormatters.displayDateTime(record.transactionAt))")
-                                        .font(.system(size: 13, weight: .medium))
-                                        .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                                    Text(
+                                        "\(record.category) · \(BillLensFormatters.displayDateTime(record.transactionAt))"
+                                    )
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
                                 }
                                 Spacer()
                                 VStack(alignment: .trailing, spacing: 4) {
                                     DirectionBadge(direction: record.direction)
                                     Text(BillLensFormatters.currencyString(record.amount))
                                         .font(.system(size: 18, weight: .bold))
-                                        .foregroundStyle(record.direction == "income" ? Color(red: 0.84, green: 0.38, blue: 0.29) : Color(red: 0.10, green: 0.21, blue: 0.24))
+                                        .foregroundStyle(
+                                            record.direction == "income"
+                                                ? Color(red: 0.84, green: 0.38, blue: 0.29)
+                                                : Color(red: 0.10, green: 0.21, blue: 0.24))
                                 }
                             }
                             .padding(.vertical, 6)
@@ -733,14 +846,19 @@ private struct LedgerShell: View {
                         Text(record.merchant ?? record.category)
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
-                        Text("\(record.category) · \(BillLensFormatters.displayDateTime(record.transactionAt))")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                        Text(
+                            "\(record.category) · \(BillLensFormatters.displayDateTime(record.transactionAt))"
+                        )
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
                     }
                     Spacer()
                     Text(BillLensFormatters.currencyString(record.amount))
                         .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(record.direction == "income" ? Color(red: 0.84, green: 0.38, blue: 0.29) : Color(red: 0.10, green: 0.21, blue: 0.24))
+                        .foregroundStyle(
+                            record.direction == "income"
+                                ? Color(red: 0.84, green: 0.38, blue: 0.29)
+                                : Color(red: 0.10, green: 0.21, blue: 0.24))
                 }
                 .padding(14)
                 .background(
@@ -816,7 +934,9 @@ private struct LedgerShell: View {
 
     private func shiftCalendarMonth(in ledger: LedgerSnapshot, direction: Int) {
         let keys = availableMonthKeys(in: ledger)
-        guard let current = calendarMonthKey, let index = keys.firstIndex(of: current) else { return }
+        guard let current = calendarMonthKey, let index = keys.firstIndex(of: current) else {
+            return
+        }
         let next = index + direction
         guard keys.indices.contains(next) else { return }
         calendarMonthKey = keys[next]
@@ -828,22 +948,52 @@ private struct LedgerShell: View {
         return ledger.byDay.first(where: { $0.day == selectedLedgerDate })
     }
 
-    private func calendarCells(for ledger: LedgerSnapshot) -> [LedgerCalendarCell] {
+    private func rebuildCalendarCellsIfNeeded(for ledger: LedgerSnapshot) {
+        let key = (calendarMonthKey ?? "") + "|" + ledgerSignature(ledger)
+        guard key != cachedCalendarKey else { return }
+        cachedCalendarKey = key
+        cachedCalendarCells = buildCalendarCells(for: ledger)
+    }
+
+    private func updateCalendarCellSelection() {
+        cachedCalendarCells = cachedCalendarCells.map { cell in
+            guard cell.dayNumber != nil else { return cell }
+            let selected = cell.date == selectedLedgerDate
+            guard selected != cell.isSelected else { return cell }
+            return LedgerCalendarCell(
+                date: cell.date,
+                dayNumber: cell.dayNumber,
+                amountText: cell.amountText,
+                isSelected: selected,
+                isHot: cell.isHot
+            )
+        }
+    }
+
+    private func buildCalendarCells(for ledger: LedgerSnapshot) -> [LedgerCalendarCell] {
         let currentGroups = groupsForSelectedMonth(in: ledger)
         guard let monthKey = calendarMonthKey else { return [] }
         let parts = monthKey.split(separator: "-")
-        guard parts.count == 2, let year = Int(parts[0]), let month = Int(parts[1]) else { return [] }
+        guard parts.count == 2, let year = Int(parts[0]), let month = Int(parts[1]) else {
+            return []
+        }
 
         let hottestDate = currentGroups.max(by: { $0.expenseAmount < $1.expenseAmount })?.day
         let groupMap = Dictionary(uniqueKeysWithValues: currentGroups.map { ($0.day, $0) })
-        let firstWeekday = Calendar.current.component(.weekday, from: dateFrom(year: year, month: month, day: 1)) - 1
-        let daysInMonth = Calendar.current.range(of: .day, in: .month, for: dateFrom(year: year, month: month, day: 1))?.count ?? 0
+        let firstWeekday =
+            Calendar.current.component(.weekday, from: dateFrom(year: year, month: month, day: 1))
+            - 1
+        let daysInMonth =
+            Calendar.current.range(
+                of: .day, in: .month, for: dateFrom(year: year, month: month, day: 1))?.count ?? 0
 
         var cells = Array(repeating: LedgerCalendarCell.empty, count: firstWeekday)
         for day in 1...daysInMonth {
             let date = String(format: "%04d-%02d-%02d", year, month, day)
             let group = groupMap[date]
-            let amount = group.map { $0.expenseAmount > 0 ? $0.expenseAmount : max($0.incomeAmount, abs($0.netAmount)) }
+            let amount = group.map {
+                $0.expenseAmount > 0 ? $0.expenseAmount : max($0.incomeAmount, abs($0.netAmount))
+            }
             cells.append(
                 LedgerCalendarCell(
                     date: date,
@@ -864,7 +1014,10 @@ private struct LedgerShell: View {
         if cell.isSelected {
             return AnyShapeStyle(
                 LinearGradient(
-                    colors: [Color(red: 0.27, green: 0.54, blue: 0.46), Color(red: 0.19, green: 0.45, blue: 0.39)],
+                    colors: [
+                        Color(red: 0.27, green: 0.54, blue: 0.46),
+                        Color(red: 0.19, green: 0.45, blue: 0.39),
+                    ],
                     startPoint: .top,
                     endPoint: .bottom
                 )
@@ -902,7 +1055,8 @@ private struct LedgerCalendarCell: Identifiable {
     let isSelected: Bool
     let isHot: Bool
 
-    static let empty = LedgerCalendarCell(date: nil, dayNumber: nil, amountText: "", isSelected: false, isHot: false)
+    static let empty = LedgerCalendarCell(
+        date: nil, dayNumber: nil, amountText: "", isSelected: false, isHot: false)
 }
 
 private struct WelcomeBubble: View {
@@ -941,32 +1095,38 @@ private struct MessageBubble: View {
 
     var body: some View {
         if message.role == "user" {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(message.content)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
-                Text(BillLensFormatters.displayDateTime(message.createdAt))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Color(red: 0.55, green: 0.63, blue: 0.65))
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(
-                RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(red: 0.882, green: 0.949, blue: 0.922), Color(red: 0.836, green: 0.921, blue: 0.890)],
-                            startPoint: .top,
-                            endPoint: .bottom
+            HStack(alignment: .bottom, spacing: 10) {
+                Spacer(minLength: 44)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(message.content)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
+                    Text(BillLensFormatters.displayDateTime(message.createdAt))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color(red: 0.55, green: 0.63, blue: 0.65))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.882, green: 0.949, blue: 0.922),
+                                    Color(red: 0.836, green: 0.921, blue: 0.890),
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
                         )
-                    )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                    .stroke(Color(red: 0.84, green: 0.914, blue: 0.885), lineWidth: 1)
-            )
-            .frame(maxWidth: 520, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .trailing)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
+                        .stroke(Color(red: 0.84, green: 0.914, blue: 0.885), lineWidth: 1)
+                )
+                UserAvatar()
+            }
+            .frame(maxWidth: .infinity)
         } else {
             HStack(alignment: .bottom, spacing: 10) {
                 AssistantAvatar()
@@ -991,7 +1151,7 @@ private struct MessageBubble: View {
                     RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
                         .stroke(Color(red: 0.90, green: 0.937, blue: 0.921), lineWidth: 1)
                 )
-                .frame(maxWidth: 540, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -1077,10 +1237,12 @@ private struct DraftConversationCard: View {
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
                             .lineLimit(1)
-                        Text("\(category) · \(merchant) · \(BillLensFormatters.displayDateTime(transactionAt))")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
-                            .lineLimit(1)
+                        Text(
+                            "\(category) · \(merchant) · \(BillLensFormatters.displayDateTime(transactionAt))"
+                        )
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                        .lineLimit(1)
                     }
                 }
                 .padding(13)
@@ -1133,14 +1295,22 @@ private struct ComposerPanel: View {
 
                     HStack(spacing: 8) {
                         ComposerIconButton(systemImage: "photo") { onImage() }
-                        ComposerIconButton(systemImage: isRecording ? "stop.circle.fill" : "mic.fill", tint: isRecording ? Color(red: 0.82, green: 0.33, blue: 0.28) : Color(red: 0.16, green: 0.42, blue: 0.35)) {
+                        ComposerIconButton(
+                            systemImage: isRecording ? "stop.circle.fill" : "mic.fill",
+                            tint: isRecording
+                                ? Color(red: 0.82, green: 0.33, blue: 0.28)
+                                : Color(red: 0.16, green: 0.42, blue: 0.35)
+                        ) {
                             onVoice()
                         }
                         Button(action: onSubmit) {
                             Image(systemName: "paperplane.fill")
                                 .font(.system(size: 13, weight: .bold))
                                 .foregroundStyle(.white)
-                                .frame(width: LayoutMetrics.iconButtonSize, height: LayoutMetrics.iconButtonSize)
+                                .frame(
+                                    width: LayoutMetrics.iconButtonSize,
+                                    height: LayoutMetrics.iconButtonSize
+                                )
                                 .background(Color(red: 0.10, green: 0.22, blue: 0.24))
                                 .clipShape(Circle())
                         }
@@ -1164,24 +1334,12 @@ private struct ComposerPanel: View {
     private var composerEditor: some View {
         ComposerInputField(
             text: $composerText,
-            placeholder: "输入或语音记账，如“打车花了30块”…",
+            placeholder: "输入或语音记账，如\"打车花了30块\"…",
             focusToken: focusToken,
             onSubmit: onSubmit
         )
-            .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36)
-            .onAppear {
-                requestComposerFocus()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
-                requestComposerFocus()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                requestComposerFocus()
-            }
-    }
-
-    private func requestComposerFocus() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+        .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36)
+        .onAppear {
             focusToken = UUID()
         }
     }
@@ -1220,9 +1378,7 @@ private struct ComposerInputField: NSViewRepresentable {
         nsView.placeholderString = placeholder
         if context.coordinator.lastFocusToken != focusToken {
             context.coordinator.lastFocusToken = focusToken
-            DispatchQueue.main.async {
-                nsView.window?.makeFirstResponder(nsView)
-            }
+            nsView.window?.makeFirstResponder(nsView)
         }
     }
 
@@ -1239,7 +1395,9 @@ private struct ComposerInputField: NSViewRepresentable {
             parent.text = field.stringValue
         }
 
-        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        func control(
+            _ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector
+        ) -> Bool {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 parent.onSubmit()
                 return true
@@ -1300,7 +1458,10 @@ private struct ReviewSummaryCard: View {
             RoundedRectangle(cornerRadius: LayoutMetrics.fieldRadius, style: .continuous)
                 .fill(
                     LinearGradient(
-                        colors: [Color(red: 0.955, green: 0.984, blue: 0.972), Color(red: 0.930, green: 0.968, blue: 0.952)],
+                        colors: [
+                            Color(red: 0.955, green: 0.984, blue: 0.972),
+                            Color(red: 0.930, green: 0.968, blue: 0.952),
+                        ],
                         startPoint: .top,
                         endPoint: .bottom
                     )
@@ -1325,9 +1486,11 @@ private struct EmptyReviewState: View {
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
             if let latestRecord {
-                Text("最近入库：\(latestRecord.category) · \(BillLensFormatters.currencyString(latestRecord.amount))")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                Text(
+                    "最近入库：\(latestRecord.category) · \(BillLensFormatters.currencyString(latestRecord.amount))"
+                )
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1358,11 +1521,16 @@ private struct ReviewField<Content: View>: View {
             content
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignTop ? .topLeading : .leading)
+                .frame(
+                    maxWidth: .infinity, maxHeight: .infinity,
+                    alignment: alignTop ? .topLeading : .leading)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, minHeight: minimumHeight, alignment: alignTop ? .topLeading : .center)
+        .frame(
+            maxWidth: .infinity, minHeight: minimumHeight,
+            alignment: alignTop ? .topLeading : .center
+        )
         .background(
             RoundedRectangle(cornerRadius: LayoutMetrics.fieldRadius, style: .continuous)
                 .fill(Color(red: 0.974, green: 0.985, blue: 0.980))
@@ -1423,13 +1591,42 @@ private struct LedgerSummaryCard: View {
     }
 }
 
+private struct UserAvatar: View {
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.165, green: 0.426, blue: 0.384),
+                            Color(red: 0.12, green: 0.34, blue: 0.30),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 34, height: 34)
+                .overlay(
+                    Circle()
+                        .stroke(Color(red: 0.12, green: 0.38, blue: 0.33), lineWidth: 1)
+                )
+            Image(systemName: "person.fill")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.white)
+        }
+    }
+}
+
 private struct AssistantAvatar: View {
     var body: some View {
         ZStack {
             Circle()
                 .fill(
                     LinearGradient(
-                        colors: [Color(red: 0.938, green: 0.978, blue: 0.962), Color(red: 0.864, green: 0.928, blue: 0.903)],
+                        colors: [
+                            Color(red: 0.938, green: 0.978, blue: 0.962),
+                            Color(red: 0.864, green: 0.928, blue: 0.903),
+                        ],
                         startPoint: .top,
                         endPoint: .bottom
                     )
@@ -1452,12 +1649,19 @@ private struct DirectionBadge: View {
     var body: some View {
         Text(direction == "income" ? "收入" : "支出")
             .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(direction == "income" ? Color(red: 0.84, green: 0.38, blue: 0.29) : Color(red: 0.16, green: 0.42, blue: 0.35))
+            .foregroundStyle(
+                direction == "income"
+                    ? Color(red: 0.84, green: 0.38, blue: 0.29)
+                    : Color(red: 0.16, green: 0.42, blue: 0.35)
+            )
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
             .background(
                 Capsule()
-                    .fill(direction == "income" ? Color(red: 0.980, green: 0.925, blue: 0.905) : Color(red: 0.914, green: 0.964, blue: 0.940))
+                    .fill(
+                        direction == "income"
+                            ? Color(red: 0.980, green: 0.925, blue: 0.905)
+                            : Color(red: 0.914, green: 0.964, blue: 0.940))
             )
     }
 }
@@ -1469,12 +1673,19 @@ private struct StatusPill: View {
     var body: some View {
         Text(title)
             .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(warning ? Color(red: 0.58, green: 0.39, blue: 0.10) : Color(red: 0.16, green: 0.42, blue: 0.35))
+            .foregroundStyle(
+                warning
+                    ? Color(red: 0.58, green: 0.39, blue: 0.10)
+                    : Color(red: 0.16, green: 0.42, blue: 0.35)
+            )
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(
                 Capsule()
-                    .fill(warning ? Color(red: 1.0, green: 0.963, blue: 0.902) : Color(red: 0.914, green: 0.964, blue: 0.940))
+                    .fill(
+                        warning
+                            ? Color(red: 1.0, green: 0.963, blue: 0.902)
+                            : Color(red: 0.914, green: 0.964, blue: 0.940))
             )
     }
 }
@@ -1548,6 +1759,7 @@ private struct PanelCardStyle: View {
                 RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
                     .stroke(Color(red: 0.88, green: 0.929, blue: 0.912), lineWidth: 1)
             )
-            .shadow(color: Color(red: 0.54, green: 0.69, blue: 0.64).opacity(0.035), radius: 10, y: 6)
+            .shadow(
+                color: Color(red: 0.54, green: 0.69, blue: 0.64).opacity(0.035), radius: 10, y: 6)
     }
 }
