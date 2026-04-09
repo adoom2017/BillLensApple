@@ -274,6 +274,12 @@ private struct ChatScrollView: View {
                 .onChange(of: store.transientProgressMessage?.id) {
                     withAnimation { reader.scrollTo("chatBottom", anchor: .bottom) }
                 }
+                .onChange(of: store.speechService.liveTranscript) {
+                    withAnimation { reader.scrollTo("chatBottom", anchor: .bottom) }
+                }
+                .onChange(of: store.speechService.isRecording) {
+                    withAnimation { reader.scrollTo("chatBottom", anchor: .bottom) }
+                }
             }
         }
     }
@@ -284,6 +290,10 @@ private struct ChatScrollView: View {
 
             ForEach(store.messages) { message in
                 MessageBubble(message: message)
+            }
+
+            if store.speechService.isRecording {
+                SpeechLiveBubble(transcript: store.speechService.liveTranscript)
             }
 
             if let progress = store.transientProgressMessage {
@@ -467,20 +477,6 @@ private struct LedgerShell: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("账单概览")
-                    .font(.system(size: 12, weight: .bold))
-                    .kerning(1.2)
-                    .foregroundStyle(Color(red: 0.42, green: 0.51, blue: 0.54))
-                    .textCase(.uppercase)
-                Text("账单一览")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundStyle(Color(red: 0.09, green: 0.20, blue: 0.23))
-                Text("统一查看统计摘要，并用月历或明细方式浏览账单。")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
-            }
-
             HStack(spacing: 10) {
                 ForEach(LedgerPreset.allCases) { preset in
                     Button {
@@ -505,6 +501,19 @@ private struct LedgerShell: View {
                     }
                     .buttonStyle(.plain)
                 }
+                if store.selectedPreset == .custom {
+                    DatePicker("", selection: $store.customStart, displayedComponents: .date)
+                        .labelsHidden()
+                        .frame(width: 110)
+                    Text("–")
+                        .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                    DatePicker("", selection: $store.customEnd, displayedComponents: .date)
+                        .labelsHidden()
+                        .frame(width: 110)
+                    ActionButton(title: "应用", kind: .ghost) {
+                        store.applyPreset(.custom)
+                    }
+                }
             }
             .padding(6)
             .background(.white.opacity(0.72))
@@ -514,40 +523,26 @@ private struct LedgerShell: View {
             )
             .clipShape(Capsule())
 
-            if store.selectedPreset == .custom {
-                HStack(spacing: 10) {
-                    ReviewField(title: "开始") {
-                        DatePicker("", selection: $store.customStart)
-                            .labelsHidden()
-                    }
-                    ReviewField(title: "结束") {
-                        DatePicker("", selection: $store.customEnd)
-                            .labelsHidden()
-                    }
-                    ActionButton(title: "应用", kind: .ghost) {
-                        store.applyPreset(.custom)
-                    }
-                }
-            }
-
             if let ledger = store.ledger {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                HStack(spacing: 6) {
                     LedgerSummaryCard(
                         title: "总支出",
                         value: BillLensFormatters.currencyString(
-                            ledger.summary.summary.expenseAmount), note: "按所选范围统计",
-                        accent: .expense, primary: true)
+                            ledger.summary.summary.expenseAmount),
+                        accent: .expense)
                     LedgerSummaryCard(
                         title: "总收入",
                         value: BillLensFormatters.currencyString(
-                            ledger.summary.summary.incomeAmount), note: "按所选范围统计", accent: .income,
-                        primary: true)
+                            ledger.summary.summary.incomeAmount),
+                        accent: .income)
                     LedgerSummaryCard(
-                        title: "覆盖账单", value: "\(ledger.byDay.reduce(0) { $0 + $1.records.count })",
-                        note: "总记录数", accent: .neutral, primary: false)
+                        title: "账单",
+                        value: "\(ledger.byDay.reduce(0) { $0 + $1.records.count })",
+                        accent: .neutral)
                     LedgerSummaryCard(
-                        title: "待同步变更", value: "\(ledger.pendingSyncCount)",
-                        note: "sync_outbox 中待同步项目", accent: .neutral, primary: false)
+                        title: "待同步",
+                        value: "\(ledger.pendingSyncCount)",
+                        accent: .neutral)
                 }
 
                 HStack(spacing: 8) {
@@ -1158,6 +1153,58 @@ private struct MessageBubble: View {
     }
 }
 
+private struct SpeechLiveBubble: View {
+    let transcript: String
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 10) {
+            Spacer(minLength: 44)
+            VStack(alignment: .leading, spacing: 6) {
+                if transcript.isEmpty {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("正在聆听...")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Color(red: 0.55, green: 0.63, blue: 0.65))
+                    }
+                } else {
+                    Text(transcript)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
+                }
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 8, height: 8)
+                    Text("录音中")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color(red: 0.55, green: 0.63, blue: 0.65))
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(red: 0.882, green: 0.949, blue: 0.922), Color(red: 0.836, green: 0.921, blue: 0.890)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                    .foregroundStyle(Color(red: 0.84, green: 0.914, blue: 0.885))
+            )
+            UserAvatar()
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
 private struct ProgressBubble: View {
     let message: String
 
@@ -1551,27 +1598,25 @@ private struct LedgerSummaryCard: View {
 
     let title: String
     let value: String
-    let note: String
     let accent: Accent
-    let primary: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
             Text(value)
-                .font(.system(size: primary ? 30 : 24, weight: .bold))
+                .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(valueColor)
-            Text(note)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                .fill(primary ? Color(red: 0.974, green: 0.989, blue: 0.982) : .white)
+                .fill(Color(red: 0.974, green: 0.989, blue: 0.982))
         )
         .overlay(
             RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
