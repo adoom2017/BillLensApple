@@ -545,40 +545,43 @@ private struct LedgerShell: View {
                         accent: .neutral)
                 }
 
-                HStack(spacing: 8) {
-                    ledgerModeButton(.calendar, title: "月历")
-                    ledgerModeButton(.detail, title: "明细")
-                }
-                .padding(6)
-                .background(.white.opacity(0.72))
-                .overlay(
-                    Capsule()
-                        .stroke(Color(red: 0.865, green: 0.914, blue: 0.893), lineWidth: 1)
-                )
-                .clipShape(Capsule())
-
-                Group {
-                    switch ledgerMode {
-                    case .calendar:
-                        calendarLedgerView(ledger)
-                    case .detail:
-                        detailLedgerView(ledger)
+                VStack(spacing: 10) {
+                    HStack(spacing: 8) {
+                        ledgerModeButton(.calendar, title: "月历")
+                        ledgerModeButton(.detail, title: "明细")
                     }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .onAppear {
-                    syncCalendarState(for: ledger)
-                    rebuildCalendarCellsIfNeeded(for: ledger)
-                }
-                .onChange(of: ledgerSignature(ledger)) {
-                    syncCalendarState(for: ledger)
-                    rebuildCalendarCellsIfNeeded(for: ledger)
-                }
-                .onChange(of: calendarMonthKey) {
-                    rebuildCalendarCellsIfNeeded(for: ledger)
-                }
-                .onChange(of: selectedLedgerDate) {
-                    updateCalendarCellSelection()
+                    .padding(6)
+                    .background(.white.opacity(0.72))
+                    .overlay(
+                        Capsule()
+                            .stroke(Color(red: 0.865, green: 0.914, blue: 0.893), lineWidth: 1)
+                    )
+                    .clipShape(Capsule())
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Group {
+                        switch ledgerMode {
+                        case .calendar:
+                            calendarLedgerView(ledger)
+                        case .detail:
+                            detailLedgerView(ledger)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .onAppear {
+                        syncCalendarState(for: ledger)
+                        rebuildCalendarCellsIfNeeded(for: ledger)
+                    }
+                    .onChange(of: ledgerSignature(ledger)) {
+                        syncCalendarState(for: ledger)
+                        rebuildCalendarCellsIfNeeded(for: ledger)
+                    }
+                    .onChange(of: calendarMonthKey) {
+                        rebuildCalendarCellsIfNeeded(for: ledger)
+                    }
+                    .onChange(of: selectedLedgerDate) {
+                        updateCalendarCellSelection()
+                    }
                 }
             } else {
                 VStack(alignment: .leading, spacing: 8) {
@@ -620,17 +623,43 @@ private struct LedgerShell: View {
     }
 
     private func calendarLedgerView(_ ledger: LedgerSnapshot) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                calendarPanel(ledger)
+        HStack(alignment: .top, spacing: LayoutMetrics.panelGap) {
+            calendarPanel(ledger)
+                .frame(maxWidth: .infinity)
 
+            Group {
                 if let selectedGroup = selectedLedgerGroup(in: ledger) {
-                    ledgerDayDetail(selectedGroup)
+                    ScrollView {
+                        ledgerDayDetail(selectedGroup)
+                    }
+                    .scrollIndicators(.automatic)
+                    .clipShape(
+                        RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
+                    )
+                } else {
+                    VStack(spacing: 10) {
+                        Spacer()
+                        Image(systemName: "calendar.day.timeline.left")
+                            .font(.system(size: 28, weight: .light))
+                            .foregroundStyle(Color(red: 0.72, green: 0.79, blue: 0.77))
+                        Text("请在月历中选择一天查看明细")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
+                            .fill(Color.white.opacity(0.84))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
+                            .stroke(Color(red: 0.886, green: 0.929, blue: 0.912), lineWidth: 1)
+                    )
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .scrollIndicators(.hidden)
     }
 
     private func calendarPanel(_ ledger: LedgerSnapshot) -> some View {
@@ -826,13 +855,24 @@ private struct LedgerShell: View {
 
     private func ledgerDayDetail(_ day: LedgerDayGroup) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("当日消费详情")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
-                Text(BillLensFormatters.displayDay(day.day))
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("当日消费详情")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
+                    Spacer()
+                    Text(BillLensFormatters.displayDay(day.day))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                }
+                HStack(spacing: 12) {
+                    Text("支出 \(BillLensFormatters.currencyString(day.expenseAmount))")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
+                    Text("收入 \(BillLensFormatters.currencyString(day.incomeAmount))")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color(red: 0.84, green: 0.38, blue: 0.29))
+                }
             }
 
             ForEach(day.records) { record in
@@ -1612,8 +1652,8 @@ private struct LedgerSummaryCard: View {
                 .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
                 .fill(Color(red: 0.974, green: 0.989, blue: 0.982))
