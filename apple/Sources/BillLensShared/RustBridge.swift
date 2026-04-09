@@ -18,8 +18,41 @@ public enum RustBridgeError: LocalizedError {
     }
 }
 
+public struct SttStopResponse: Decodable, Sendable {
+    public let sessionId: String
+    public let transcript: String
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case transcript
+    }
+}
+
+public struct SttStartResponse: Decodable, Sendable {
+    public let sessionId: String
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+    }
+}
+
+public struct EmptyResponse: Decodable, Sendable {
+    public init() {}
+    public init(from decoder: Decoder) throws {}
+}
+
 public struct RustBridge: Sendable {
     public init() {}
+
+    /// Register Swift STT C functions with the Rust core. Call once at app launch.
+    public static func registerSttBackend() {
+        billlens_register_stt_backend(
+            billlens_swift_stt_start,
+            billlens_swift_stt_stop,
+            billlens_swift_stt_cancel,
+            billlens_swift_stt_free_string
+        )
+    }
 
     public func send<Response: Decodable>(_ payload: [String: Any]) throws -> Response {
         let jsonString = try encodePayload(payload)

@@ -1,11 +1,17 @@
 import SwiftUI
 import AppKit
 import BillLensShared
+import BillLensAppleServices
 
 final class BillLensAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
+        // Register Swift STT functions with the Rust core, then ask for permissions.
+        RustBridge.registerSttBackend()
+        Task { @MainActor in
+            await SpeechCaptureService.shared.bootstrapPermissions()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

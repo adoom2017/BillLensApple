@@ -1,5 +1,6 @@
 mod llm;
 mod logger;
+pub mod stt;
 
 use anyhow::Result;
 use billlens_apple_db::{

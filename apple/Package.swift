@@ -29,7 +29,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "BillLensMacApp",
-            dependencies: ["BillLensShared"]
+            dependencies: ["BillLensShared", "BillLensAppleServices"]
         )
     ]
 )

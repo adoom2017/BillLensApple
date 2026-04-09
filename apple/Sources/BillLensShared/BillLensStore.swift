@@ -33,7 +33,7 @@ public final class BillLensStore: ObservableObject {
     @Published public var customEnd = Date.now
     @Published public var draftForm = DraftFormState()
 
-    public let speechService = SpeechCaptureService()
+    public let speechService = SpeechCaptureService.shared
 
     private let bridge = RustBridge()
     private let ocrService: ReceiptTextRecognizing
@@ -136,19 +136,30 @@ public final class BillLensStore: ObservableObject {
         Task {
             do {
                 if speechService.isRecording {
-                    let transcript = try await speechService.stop()
-                    composerText = transcript
-                    AppLogger.log("speech.transcript", transcript)
+                    let response: SttStopResponse = try await bridge.sendAsync([
+                        "action": "stt_stop",
+                        "profile_id": profileID
+                    ])
+                    composerText = response.transcript
+                    AppLogger.log("speech.transcript", "session=\(response.sessionId) text=\(response.transcript)")
                     statusText = "语音已转写，可直接发送"
                 } else {
-                    try await speechService.start()
-                    AppLogger.log("speech.start", "recording started")
+                    let response: SttStartResponse = try await bridge.sendAsync([
+                        "action": "stt_start",
+                        "profile_id": profileID
+                    ])
+                    AppLogger.log("speech.start", "session=\(response.sessionId)")
                     statusText = "录音中..."
                 }
             } catch {
                 AppLogger.log("speech.error", error.localizedDescription)
                 errorText = error.localizedDescription
                 statusText = "语音识别失败"
+                // Best-effort cleanup: tell Rust to drop any stale session
+                let _: EmptyResponse? = try? await bridge.sendAsync([
+                    "action": "stt_cancel",
+                    "profile_id": profileID
+                ])
             }
         }
     }

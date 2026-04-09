@@ -1,4 +1,7 @@
 use anyhow::{Context, Result, anyhow};
+use billlens_apple_core::stt::{
+    self, SttBackend, SttCancelFn, SttFreeStringFn, SttStartFn, SttStopFn,
+};
 use billlens_apple_core::{AppService, DraftInput, EngineBootstrap, EntrySource, LlmConfig};
 use billlens_apple_db::BillRepository;
 use chrono::{DateTime, FixedOffset};
@@ -56,6 +59,15 @@ enum EngineRequest {
         preset: String,
         start_at: Option<DateTime<FixedOffset>>,
         end_at: Option<DateTime<FixedOffset>>,
+    },
+    SttStart {
+        profile_id: String,
+    },
+    SttStop {
+        profile_id: String,
+    },
+    SttCancel {
+        profile_id: String,
     },
 }
 
@@ -200,7 +212,39 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
             let result = runtime().block_on(app.ledger(&profile_id, &preset, start_at, end_at))?;
             Ok(encode_ok(result))
         }),
+        EngineRequest::SttStart { profile_id } => {
+            let session_id = stt::start(&profile_id)?;
+            Ok(encode_ok(serde_json::json!({
+                "session_id": session_id.to_string(),
+            })))
+        }
+        EngineRequest::SttStop { profile_id } => {
+            let (session_id, transcript) = stt::stop(&profile_id)?;
+            Ok(encode_ok(serde_json::json!({
+                "session_id": session_id.to_string(),
+                "transcript": transcript,
+            })))
+        }
+        EngineRequest::SttCancel { profile_id } => {
+            stt::cancel(&profile_id)?;
+            Ok(encode_ok(serde_json::json!({})))
+        }
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn billlens_register_stt_backend(
+    start_fn: SttStartFn,
+    stop_fn: SttStopFn,
+    cancel_fn: SttCancelFn,
+    free_fn: SttFreeStringFn,
+) {
+    stt::register(SttBackend {
+        start: start_fn,
+        stop: stop_fn,
+        cancel: cancel_fn,
+        free_string: free_fn,
+    });
 }
 
 #[unsafe(no_mangle)]

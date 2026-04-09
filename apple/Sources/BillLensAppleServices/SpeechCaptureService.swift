@@ -6,7 +6,6 @@ public enum SpeechCaptureError: LocalizedError {
     case recognizerUnavailable
     case notAuthorized
     case engineAlreadyRunning
-    case missingRecognitionRequest
     case noTranscript
 
     public var errorDescription: String? {
@@ -17,40 +16,31 @@ public enum SpeechCaptureError: LocalizedError {
             return "没有获得麦克风或语音识别权限。"
         case .engineAlreadyRunning:
             return "录音已经在进行中。"
-        case .missingRecognitionRequest:
-            return "语音识别请求尚未初始化。"
         case .noTranscript:
             return "未识别到语音内容。"
         }
     }
 }
 
-@MainActor
-public final class SpeechCaptureService: NSObject, ObservableObject {
-    @Published public private(set) var isRecording = false
-    @Published public private(set) var liveTranscript = ""
-
+// ---------------------------------------------------------------------------
+// Non-isolated audio engine wrapper.
+// AVAudioEngine's realtime tap callbacks run on audio threads. If the engine
+// lives inside a @MainActor class, Swift 6 strict concurrency propagates the
+// actor isolation to internal AVFAudio callbacks and traps. Keeping audio ops
+// in a plain (non-isolated) class avoids this entirely.
+// ---------------------------------------------------------------------------
+private final class AudioCaptureEngine: @unchecked Sendable {
     private let audioEngine = AVAudioEngine()
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh_CN"))
     private var recognitionTask: SFSpeechRecognitionTask?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var latestTranscript = ""
+    private let finishSemaphore = DispatchSemaphore(value: 0)
 
-    public override init() {
-        super.init()
-    }
-
-    public func start() async throws {
-        guard !isRecording else {
-            throw SpeechCaptureError.engineAlreadyRunning
-        }
+    func start(onPartial: @escaping @Sendable (String) -> Void,
+               onFinish: @escaping @Sendable () -> Void) throws {
         guard let recognizer, recognizer.isAvailable else {
             throw SpeechCaptureError.recognizerUnavailable
-        }
-
-        let speechAuthorized = await requestSpeechAuthorization()
-        let micAuthorized = await requestMicrophoneAuthorization()
-        guard speechAuthorized && micAuthorized else {
-            throw SpeechCaptureError.notAuthorized
         }
 
         let request = SFSpeechAudioBufferRecognitionRequest()
@@ -60,69 +50,132 @@ public final class SpeechCaptureService: NSObject, ObservableObject {
         let inputNode = audioEngine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
         inputNode.removeTap(onBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            self?.recognitionRequest?.append(buffer)
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+            request.append(buffer)
         }
 
         audioEngine.prepare()
         try audioEngine.start()
-        liveTranscript = ""
-        isRecording = true
+        latestTranscript = ""
 
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            Task { @MainActor in
-                if let text = result?.bestTranscription.formattedString {
-                    self?.liveTranscript = text
-                }
-                if error != nil || result?.isFinal == true {
-                    self?.stopInternally()
-                }
+            if let text = result?.bestTranscription.formattedString {
+                self?.latestTranscript = text
+                onPartial(text)
+            }
+            if error != nil || result?.isFinal == true {
+                self?.finishSemaphore.signal()
+                self?.teardown()
+                onFinish()
             }
         }
     }
 
-    public func stop() async throws -> String {
-        guard isRecording else {
-            let trimmed = liveTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty {
-                throw SpeechCaptureError.noTranscript
-            }
-            return trimmed
-        }
-
+    func stop() -> String {
+        // Tell recognizer no more audio; let it process the remaining buffer.
         recognitionRequest?.endAudio()
-        stopInternally()
-        try await Task.sleep(for: .milliseconds(300))
-        let trimmed = liveTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            throw SpeechCaptureError.noTranscript
-        }
-        return trimmed
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+        // Wait up to 1.5s for the recognizer to deliver the final result.
+        _ = finishSemaphore.wait(timeout: .now() + 1.5)
+        // Clean up whatever is left.
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        recognitionRequest = nil
+        return latestTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func stopInternally() {
+    func cancel() {
+        teardown()
+        latestTranscript = ""
+    }
+
+    private func teardown() {
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
         recognitionTask?.cancel()
         recognitionTask = nil
         recognitionRequest = nil
-        isRecording = false
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public @MainActor service — thin shell around AudioCaptureEngine.
+// Owns @Published state for SwiftUI and delegates audio work to the
+// non-isolated engine above.
+// ---------------------------------------------------------------------------
+@MainActor
+public final class SpeechCaptureService: NSObject, ObservableObject {
+    public static let shared = SpeechCaptureService()
+
+    @Published public private(set) var isRecording = false
+    @Published public private(set) var liveTranscript = ""
+
+    private let engine = AudioCaptureEngine()
+    private var permissionsGranted = false
+
+    public override init() {
+        super.init()
     }
 
-    private func requestSpeechAuthorization() async -> Bool {
-        await withCheckedContinuation { continuation in
+    /// Request mic + speech permissions once at app launch.
+    public nonisolated func bootstrapPermissions() async {
+        let speech = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             SFSpeechRecognizer.requestAuthorization { status in
                 continuation.resume(returning: status == .authorized)
             }
         }
-    }
-
-    private func requestMicrophoneAuthorization() async -> Bool {
-        await withCheckedContinuation { continuation in
+        let mic = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             AVCaptureDevice.requestAccess(for: .audio) { granted in
                 continuation.resume(returning: granted)
             }
         }
+        await MainActor.run {
+            self.permissionsGranted = speech && mic
+        }
+    }
+
+    public func start() throws {
+        guard !isRecording else {
+            throw SpeechCaptureError.engineAlreadyRunning
+        }
+        guard permissionsGranted else {
+            throw SpeechCaptureError.notAuthorized
+        }
+
+        try engine.start(
+            onPartial: { [weak self] text in
+                Task { @MainActor in
+                    self?.liveTranscript = text
+                }
+            },
+            onFinish: { [weak self] in
+                Task { @MainActor in
+                    self?.isRecording = false
+                }
+            }
+        )
+        liveTranscript = ""
+        isRecording = true
+    }
+
+    public func stop() throws -> String {
+        guard isRecording else {
+            let trimmed = liveTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { throw SpeechCaptureError.noTranscript }
+            return trimmed
+        }
+
+        isRecording = false
+        let transcript = engine.stop()
+        liveTranscript = transcript
+        if transcript.isEmpty { throw SpeechCaptureError.noTranscript }
+        return transcript
+    }
+
+    public func cancel() {
+        engine.cancel()
+        isRecording = false
+        liveTranscript = ""
     }
 }
-
