@@ -210,6 +210,19 @@ public final class BillLensStore: ObservableObject {
         }
     }
 
+    public func deleteRecord(_ recordId: String) {
+        perform("正在删除账单") {
+            let _: [String: String] = try await self.bridge.sendAsync([
+                "action": "delete_record",
+                "profile_id": self.profileID,
+                "record_id": recordId
+            ])
+            try await self.refreshLedger()
+            self.statusText = "账单已删除"
+            AppLogger.log("record.delete", "record_id=\(recordId)")
+        }
+    }
+
     public func refreshLedger() async throws {
         let payload = ledgerPayload()
         let snapshot: LedgerSnapshot = try await bridge.sendAsync(payload)

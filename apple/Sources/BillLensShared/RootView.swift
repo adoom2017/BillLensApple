@@ -509,6 +509,7 @@ private struct LedgerShell: View {
     @State private var cachedCalendarCells: [LedgerCalendarCell] = []
     @State private var cachedCalendarKey: String = ""
     @State private var selectedCategoryFilter: String? = nil
+    @State private var recordToDelete: RecordItem? = nil
     let availableHeight: CGFloat
 
     private let masterWidth: CGFloat = 340
@@ -639,6 +640,25 @@ private struct LedgerShell: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .frame(maxHeight: availableHeight)
+        .alert(
+            "确认删除",
+            isPresented: Binding(
+                get: { recordToDelete != nil },
+                set: { if !$0 { recordToDelete = nil } }
+            )
+        ) {
+            Button("取消", role: .cancel) { recordToDelete = nil }
+            Button("删除", role: .destructive) {
+                if let record = recordToDelete {
+                    store.deleteRecord(record.id)
+                    recordToDelete = nil
+                }
+            }
+        } message: {
+            if let record = recordToDelete {
+                Text("确定要删除「\(record.merchant ?? record.category) \(BillLensFormatters.currencyString(record.amount))」吗？")
+            }
+        }
     }
 
     private func statBar(_ ledger: LedgerSnapshot) -> some View {
@@ -903,6 +923,15 @@ private struct LedgerShell: View {
                                             record.direction == "income"
                                                 ? Color(red: 0.84, green: 0.38, blue: 0.29)
                                                 : Color(red: 0.10, green: 0.21, blue: 0.24))
+                                    Button {
+                                        recordToDelete = record
+                                    } label: {
+                                        Image(systemName: "trash")
+                                            .font(.system(size: 12, weight: .medium))
+                                            .foregroundStyle(Color(red: 0.65, green: 0.30, blue: 0.27))
+                                            .frame(width: 28, height: 28)
+                                    }
+                                    .buttonStyle(.plain)
                                 }
                                 .padding(.vertical, 6)
                             }
@@ -959,6 +988,15 @@ private struct LedgerShell: View {
                             record.direction == "income"
                                 ? Color(red: 0.84, green: 0.38, blue: 0.29)
                                 : Color(red: 0.10, green: 0.21, blue: 0.24))
+                    Button {
+                        recordToDelete = record
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Color(red: 0.65, green: 0.30, blue: 0.27))
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
                 }
                 .padding(.vertical, 8)
             }

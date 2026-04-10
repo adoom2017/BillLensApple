@@ -322,6 +322,14 @@ impl AppService {
         self.home(profile_id).await.map_err(map_internal)
     }
 
+    pub async fn delete_record(&self, profile_id: &str, record_id: Uuid) -> Result<(), CoreError> {
+        self.repo
+            .soft_delete_record(record_id, profile_id)
+            .await
+            .map_err(map_internal)?;
+        Ok(())
+    }
+
     pub async fn ledger(
         &self,
         profile_id: &str,

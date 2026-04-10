@@ -69,6 +69,10 @@ enum EngineRequest {
     SttCancel {
         profile_id: String,
     },
+    DeleteRecord {
+        profile_id: String,
+        record_id: String,
+    },
 }
 
 fn runtime() -> &'static Runtime {
@@ -228,6 +232,16 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
         EngineRequest::SttCancel { profile_id } => {
             stt::cancel(&profile_id)?;
             Ok(encode_ok(serde_json::json!({})))
+        }
+        EngineRequest::DeleteRecord {
+            profile_id,
+            record_id,
+        } => {
+            let record_id = Uuid::parse_str(&record_id).context("invalid record_id")?;
+            with_app(|app| {
+                runtime().block_on(app.delete_record(&profile_id, record_id))?;
+                Ok(encode_ok(serde_json::json!({})))
+            })
         }
     }
 }
