@@ -51,13 +51,22 @@ enum BillLensFormatters {
         return day.string(from: date)
     }
 
+    private static var currencyFormatters: [String: NumberFormatter] = [:]
+
     static func currencyString(_ amount: Double, currencyCode: String? = "CNY") -> String {
         let code = normalizedCurrencyCode(currencyCode) ?? "CNY"
-        let formatter = NumberFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.numberStyle = .currency
-        formatter.currencyCode = code
-        formatter.maximumFractionDigits = 2
+        let formatter: NumberFormatter
+        if let cached = currencyFormatters[code] {
+            formatter = cached
+        } else {
+            let f = NumberFormatter()
+            f.locale = Locale(identifier: "zh_CN")
+            f.numberStyle = .currency
+            f.currencyCode = code
+            f.maximumFractionDigits = 2
+            currencyFormatters[code] = f
+            formatter = f
+        }
 
         if let formatted = formatter.string(from: NSNumber(value: amount)) {
             return formatted

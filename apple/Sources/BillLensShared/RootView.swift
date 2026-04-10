@@ -898,7 +898,7 @@ private struct LedgerShell: View {
             LazyVGrid(
                 columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 4
             ) {
-                ForEach(Array(cachedCalendarCells.enumerated()), id: \.element.id) { _, cell in
+                ForEach(cachedCalendarCells) { cell in
                     if let day = cell.dayNumber, let date = cell.date {
                         CalendarDayCellButton(
                             day: day,
@@ -942,40 +942,8 @@ private struct LedgerShell: View {
                                             : Color(red: 0.16, green: 0.42, blue: 0.35))
                             }
                             ForEach(records) { record in
-                                HStack(spacing: 14) {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(record.merchant ?? record.category)
-                                            .font(.system(size: 14, weight: .semibold))
-                                            .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
-                                        Text(
-                                            "\(record.category) · \(BillLensFormatters.displayDateTime(record.transactionAt))"
-                                        )
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundStyle(Color(red: 0.50, green: 0.56, blue: 0.58))
-                                    }
-                                    Spacer()
-                                    Text(BillLensFormatters.currencyString(record.amount, currencyCode: record.currency))
-                                        .font(.system(size: 16, weight: .bold))
-                                        .foregroundStyle(
-                                            record.direction == "income"
-                                                ? Color(red: 0.84, green: 0.38, blue: 0.29)
-                                                : Color(red: 0.10, green: 0.21, blue: 0.24))
-                                    Button {
-                                        recordToDelete = record
-                                    } label: {
-                                        Image(systemName: "trash")
-                                            .font(.system(size: 12, weight: .medium))
-                                            .foregroundStyle(Color(red: 0.65, green: 0.30, blue: 0.27))
-                                            .frame(width: 36, height: 36)
-                                            .background(
-                                                Circle()
-                                                    .fill(Color(red: 0.98, green: 0.95, blue: 0.95))
-                                            )
-                                            .contentShape(Circle())
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                                .padding(.vertical, 6)
+                                RecordRowView(record: record) { recordToDelete = record }
+                                    .padding(.vertical, 6)
                             }
                         }
                         .padding(.horizontal, 16)
@@ -1014,40 +982,8 @@ private struct LedgerShell: View {
                 if index > 0 {
                     Divider().opacity(0.4)
                 }
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(record.merchant ?? record.category)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
-                        Text(
-                            "\(record.category) · \(BillLensFormatters.displayDateTime(record.transactionAt))"
-                        )
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
-                    }
-                    Spacer()
-                    Text(BillLensFormatters.currencyString(record.amount, currencyCode: record.currency))
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(
-                            record.direction == "income"
-                                ? Color(red: 0.84, green: 0.38, blue: 0.29)
-                                : Color(red: 0.10, green: 0.21, blue: 0.24))
-                    Button {
-                        recordToDelete = record
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Color(red: 0.65, green: 0.30, blue: 0.27))
-                            .frame(width: 36, height: 36)
-                            .background(
-                                Circle()
-                                    .fill(Color(red: 0.98, green: 0.95, blue: 0.95))
-                            )
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.vertical, 8)
+                RecordRowView(record: record) { recordToDelete = record }
+                    .padding(.vertical, 8)
             }
         }
         .padding(16)
@@ -1132,6 +1068,7 @@ private struct LedgerShell: View {
             let selected = cell.date == selectedLedgerDate
             guard selected != cell.isSelected else { return cell }
             return LedgerCalendarCell(
+                id: cell.id,
                 date: cell.date,
                 dayNumber: cell.dayNumber,
                 amountText: cell.amountText,
@@ -1158,7 +1095,12 @@ private struct LedgerShell: View {
             Calendar.current.range(
                 of: .day, in: .month, for: dateFrom(year: year, month: month, day: 1))?.count ?? 0
 
-        var cells = Array(repeating: LedgerCalendarCell.empty, count: firstWeekday)
+        var cells: [LedgerCalendarCell] = []
+        for i in 0..<firstWeekday {
+            cells.append(LedgerCalendarCell(
+                id: i, date: nil, dayNumber: nil, amountText: "", isSelected: false, isHot: false
+            ))
+        }
         for day in 1...daysInMonth {
             let date = String(format: "%04d-%02d-%02d", year, month, day)
             let group = groupMap[date]
@@ -1167,6 +1109,7 @@ private struct LedgerShell: View {
             }
             cells.append(
                 LedgerCalendarCell(
+                    id: firstWeekday + day - 1,
                     date: date,
                     dayNumber: day,
                     amountText: amount.map { compactAmount($0, currencyCode: ledger.statsCurrency) } ?? "",
@@ -1176,7 +1119,10 @@ private struct LedgerShell: View {
             )
         }
         while cells.count % 7 != 0 {
-            cells.append(.empty)
+            let idx = cells.count
+            cells.append(LedgerCalendarCell(
+                id: idx, date: nil, dayNumber: nil, amountText: "", isSelected: false, isHot: false
+            ))
         }
         return cells
     }
@@ -1218,15 +1164,12 @@ private enum LedgerViewMode {
 }
 
 private struct LedgerCalendarCell: Identifiable {
-    let id = UUID()
+    let id: Int
     let date: String?
     let dayNumber: Int?
     let amountText: String
     let isSelected: Bool
     let isHot: Bool
-
-    static let empty = LedgerCalendarCell(
-        date: nil, dayNumber: nil, amountText: "", isSelected: false, isHot: false)
 }
 
 private struct CalendarCellLabel: View {
@@ -1754,6 +1697,45 @@ private struct ReviewField<Content: View>: View {
         )
         .overlay(alignment: .bottom) {
             IMColors.divider.frame(height: 1).opacity(0.5)
+        }
+    }
+}
+
+private struct RecordRowView: View {
+    let record: RecordItem
+    let onDelete: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(record.merchant ?? record.category)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(IMColors.textPrimary)
+                Text(
+                    "\(record.category) · \(BillLensFormatters.displayDateTime(record.transactionAt))"
+                )
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(IMColors.textSecondary)
+            }
+            Spacer()
+            Text(BillLensFormatters.currencyString(record.amount, currencyCode: record.currency))
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(
+                    record.direction == "income"
+                        ? Color(red: 0.84, green: 0.38, blue: 0.29)
+                        : IMColors.textPrimary)
+            Button(action: onDelete) {
+                Image(systemName: "trash")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color(red: 0.65, green: 0.30, blue: 0.27))
+                    .frame(width: 36, height: 36)
+                    .background(
+                        Circle()
+                            .fill(Color(red: 0.98, green: 0.95, blue: 0.95))
+                    )
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
         }
     }
 }
