@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub const EXPENSE_CATEGORIES: &[&str] = &[
-    "餐饮", "交通", "日用", "购物", "住房", "医疗", "娱乐", "教育", "通讯", "人情", "其他",
+    "餐饮", "交通", "日用", "购物", "住房", "医疗", "娱乐", "教育", "通讯", "人情", "订阅", "其他",
 ];
 
 pub const INCOME_CATEGORIES: &[&str] = &["工资收入", "投资收益", "报销", "退款", "其他"];
@@ -19,6 +19,7 @@ pub const ALL_RECORD_CATEGORIES: &[&str] = &[
     "教育",
     "通讯",
     "人情",
+    "订阅",
     "工资收入",
     "投资收益",
     "报销",

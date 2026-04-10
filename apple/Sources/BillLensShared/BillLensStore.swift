@@ -48,7 +48,7 @@ public final class BillLensStore: ObservableObject {
     public var availableCategories: [String] {
         draftForm.direction == "income"
             ? ["工资收入", "投资收益", "报销", "退款", "其他"]
-            : ["餐饮", "交通", "日用", "购物", "住房", "医疗", "娱乐", "教育", "通讯", "人情", "其他"]
+            : ["餐饮", "交通", "日用", "购物", "住房", "医疗", "娱乐", "教育", "通讯", "人情", "订阅", "其他"]
     }
 
     /// 切换收支方向，并将分类重置为新方向下的第一个合法值
@@ -263,7 +263,7 @@ public final class BillLensStore: ObservableObject {
         let direction = draft.direction ?? "expense"
         let categories = direction == "income"
             ? ["工资收入", "投资收益", "报销", "退款", "其他"]
-            : ["餐饮", "交通", "日用", "购物", "住房", "医疗", "娱乐", "教育", "通讯", "人情", "其他"]
+            : ["餐饮", "交通", "日用", "购物", "住房", "医疗", "娱乐", "教育", "通讯", "人情", "订阅", "其他"]
         let rawCategory = draft.category ?? "其他"
         let category = categories.contains(rawCategory) ? rawCategory : categories.last!
         draftForm = DraftFormState(
