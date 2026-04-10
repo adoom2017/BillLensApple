@@ -17,14 +17,7 @@ private enum AppPage: String {
 private enum LayoutMetrics {
     static let pagePadding: CGFloat = 16
     static let pageTopPadding: CGFloat = 18
-    static let panelGap: CGFloat = 20
-    static let panelPadding: CGFloat = 18
-    static let panelRadius: CGFloat = 22
-    static let fieldRadius: CGFloat = 16
-    static let compactRadius: CGFloat = 14
-    static let formHeight: CGFloat = 52
     static let noteHeight: CGFloat = 72
-    static let inputBarHeight: CGFloat = 48
     static let iconButtonSize: CGFloat = 28
     static let actionButtonHeight: CGFloat = 40
     static let messageGap: CGFloat = 14
@@ -34,15 +27,79 @@ private enum LayoutMetrics {
 }
 
 private enum IMColors {
-    static let chatBg = Color(red: 0.953, green: 0.957, blue: 0.961)        // #F3F4F6
-    static let userBubble = Color(red: 0.859, green: 0.918, blue: 0.996)    // #DBEAFE
-    static let botBubble = Color.white
-    static let divider = Color(red: 0.894, green: 0.906, blue: 0.922)       // ~border-gray-200
-    static let sendButton = Color(red: 0.231, green: 0.510, blue: 0.965)    // #3B82F6
+    // Text hierarchy
     static let textPrimary = Color(red: 0.10, green: 0.21, blue: 0.24)
     static let textSecondary = Color(red: 0.50, green: 0.56, blue: 0.58)
+    static let textMuted = Color(red: 0.42, green: 0.51, blue: 0.54)
     static let textTertiary = Color(red: 0.55, green: 0.63, blue: 0.65)
+    static let textPlaceholder = Color(red: 0.82, green: 0.84, blue: 0.84)
+
+    // Accent / brand
+    static let accent = Color(red: 0.165, green: 0.426, blue: 0.384)
+    static let accentAlt = Color(red: 0.172, green: 0.431, blue: 0.381)
+    static let accentDark = Color(red: 0.16, green: 0.42, blue: 0.35)
+
+    // Semantic
+    static let income = Color(red: 0.84, green: 0.38, blue: 0.29)
+    static let danger = Color(red: 0.71, green: 0.25, blue: 0.23)
+    static let dangerBg = Color(red: 0.56, green: 0.22, blue: 0.19)
+    static let dangerSubtle = Color(red: 0.65, green: 0.30, blue: 0.27)
+    static let dangerBorder = Color(red: 0.95, green: 0.84, blue: 0.82)
+    static let dangerBgLight = Color(red: 0.98, green: 0.95, blue: 0.95)
+    static let warningText = Color(red: 0.58, green: 0.39, blue: 0.10)
+
+    // Chat
+    static let chatBg = Color(red: 0.953, green: 0.957, blue: 0.961)
+    static let userBubble = Color(red: 0.859, green: 0.918, blue: 0.996)
+    static let botBubble = Color.white
+    static let sendButton = Color(red: 0.231, green: 0.510, blue: 0.965)
+    static let sendButtonDark = Color(red: 0.18, green: 0.42, blue: 0.85)
     static let systemMsgBg = Color(red: 0.92, green: 0.93, blue: 0.94)
+
+    // Surfaces & borders
+    static let divider = Color(red: 0.894, green: 0.906, blue: 0.922)
+    static let dividerLegacy = Color(red: 0.88, green: 0.88, blue: 0.88)
+    static let panelBg = Color(red: 0.975, green: 0.975, blue: 0.975)
+    static let controlBg = Color(red: 0.93, green: 0.94, blue: 0.94)
+    static let statBg = Color(red: 0.965, green: 0.97, blue: 0.97)
+
+    // Tag backgrounds
+    static let accentBgLight = Color(red: 0.914, green: 0.964, blue: 0.940)
+    static let accentBgActive = Color(red: 0.885, green: 0.949, blue: 0.922)
+    static let incomeBgLight = Color(red: 0.980, green: 0.925, blue: 0.905)
+    static let warningBg = Color(red: 1.0, green: 0.963, blue: 0.902)
+
+    // Global background gradient
+    static let pageBgTop = Color(red: 0.985, green: 0.992, blue: 0.989)
+    static let pageBgMid = Color(red: 0.958, green: 0.979, blue: 0.972)
+    static let pageBgBottom = Color(red: 0.946, green: 0.969, blue: 0.959)
+    static let pageBlobA = Color(red: 0.885, green: 0.944, blue: 0.915)
+    static let pageBlobB = Color(red: 0.907, green: 0.949, blue: 0.939)
+
+    // Header / logo
+    static let logoBgTop = Color(red: 0.929, green: 0.974, blue: 0.958)
+    static let logoBorder = Color(red: 0.85, green: 0.914, blue: 0.889)
+    static let headerTabBorder = Color(red: 0.865, green: 0.914, blue: 0.893)
+    static let headerShadow = Color(red: 0.54, green: 0.69, blue: 0.64)
+    static let ghostBorder = Color(red: 0.89, green: 0.937, blue: 0.918)
+
+    // Avatar gradients
+    static let assistantAvatarTop = Color(red: 0.938, green: 0.978, blue: 0.962)
+    static let assistantAvatarBottom = Color(red: 0.864, green: 0.928, blue: 0.903)
+
+    // Calendar selected cell gradient
+    static let calendarSelectedTop = Color(red: 0.27, green: 0.54, blue: 0.46)
+    static let calendarSelectedBottom = Color(red: 0.19, green: 0.45, blue: 0.39)
+
+    // Button primary background (dark)
+    static let buttonPrimary = Color(red: 0.10, green: 0.22, blue: 0.24)
+
+    // Ledger category filter pills
+    static let filterMuted = Color(red: 0.45, green: 0.52, blue: 0.55)
+
+    // Ledger special stat colors
+    static let ledgerStatGoldBold = Color(red: 0.72, green: 0.46, blue: 0.10)
+    static let ledgerStatGold = Color(red: 0.52, green: 0.37, blue: 0.12)
 }
 
 public struct RootView: View {
@@ -81,20 +138,20 @@ public struct RootView: View {
             ZStack {
                 LinearGradient(
                     colors: [
-                        Color(red: 0.985, green: 0.992, blue: 0.989),
-                        Color(red: 0.958, green: 0.979, blue: 0.972),
-                        Color(red: 0.946, green: 0.969, blue: 0.959),
+                        IMColors.pageBgTop,
+                        IMColors.pageBgMid,
+                        IMColors.pageBgBottom,
                     ],
                     startPoint: .top,
                     endPoint: .bottom
                 )
                 Circle()
-                    .fill(Color(red: 0.885, green: 0.944, blue: 0.915).opacity(0.65))
+                    .fill(IMColors.pageBlobA.opacity(0.65))
                     .frame(width: 480, height: 480)
                     .blur(radius: 30)
                     .offset(x: -440, y: -340)
                 Circle()
-                    .fill(Color(red: 0.907, green: 0.949, blue: 0.939).opacity(0.7))
+                    .fill(IMColors.pageBlobB.opacity(0.7))
                     .frame(width: 360, height: 360)
                     .blur(radius: 18)
                     .offset(x: 480, y: 300)
@@ -117,7 +174,7 @@ public struct RootView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 12)
-                    .background(Color(red: 0.56, green: 0.22, blue: 0.19))
+                    .background(IMColors.dangerBg)
                     .clipShape(Capsule())
                     .shadow(color: .black.opacity(0.12), radius: 16, y: 8)
                     .padding(.bottom, 18)
@@ -133,7 +190,7 @@ public struct RootView: View {
                         .fill(
                             LinearGradient(
                                 colors: [
-                                    Color(red: 0.929, green: 0.974, blue: 0.958), Color.white,
+                                    IMColors.logoBgTop, Color.white,
                                 ],
                                 startPoint: .top,
                                 endPoint: .bottom
@@ -142,20 +199,20 @@ public struct RootView: View {
                         .frame(width: 32, height: 32)
                         .overlay(
                             Circle()
-                                .stroke(Color(red: 0.85, green: 0.914, blue: 0.889), lineWidth: 1)
+                                .stroke(IMColors.logoBorder, lineWidth: 1)
                         )
                     Image(systemName: "list.bullet.rectangle.portrait")
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(Color(red: 0.172, green: 0.431, blue: 0.381))
+                        .foregroundStyle(IMColors.accentAlt)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("BillLens")
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(Color(red: 0.09, green: 0.20, blue: 0.23))
+                        .foregroundStyle(IMColors.textPrimary)
                     Text("账单助手")
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Color(red: 0.42, green: 0.51, blue: 0.54))
+                        .foregroundStyle(IMColors.textMuted)
                 }
             }
 
@@ -169,11 +226,11 @@ public struct RootView: View {
             .background(.white.opacity(0.82))
             .overlay(
                 Capsule()
-                    .stroke(Color(red: 0.865, green: 0.914, blue: 0.893), lineWidth: 1)
+                    .stroke(IMColors.headerTabBorder, lineWidth: 1)
             )
             .clipShape(Capsule())
             .shadow(
-                color: Color(red: 0.54, green: 0.69, blue: 0.64).opacity(0.08), radius: 12, y: 4)
+                color: IMColors.headerShadow.opacity(0.08), radius: 12, y: 4)
         }
     }
 
@@ -185,8 +242,8 @@ public struct RootView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(
                     selectedPage == page
-                        ? Color(red: 0.165, green: 0.426, blue: 0.384)
-                        : Color(red: 0.42, green: 0.51, blue: 0.54)
+                        ? IMColors.accent
+                        : IMColors.textMuted
                 )
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -194,7 +251,7 @@ public struct RootView: View {
                     Capsule()
                         .fill(
                             selectedPage == page
-                                ? Color(red: 0.885, green: 0.949, blue: 0.922) : .clear)
+                                ? IMColors.accentBgActive : .clear)
                 )
                 .contentShape(Capsule())
         }
@@ -545,8 +602,8 @@ private struct LedgerShell: View {
                                         .font(.system(size: 12, weight: .semibold))
                                         .foregroundStyle(
                                             store.selectedPreset == preset
-                                                ? Color(red: 0.10, green: 0.21, blue: 0.24)
-                                                : Color(red: 0.50, green: 0.56, blue: 0.58)
+                                                ? IMColors.textPrimary
+                                                : IMColors.textSecondary
                                         )
                                         .padding(.horizontal, 8)
                                         .padding(.vertical, 5)
@@ -554,7 +611,7 @@ private struct LedgerShell: View {
                                             RoundedRectangle(cornerRadius: 5, style: .continuous)
                                                 .fill(
                                                     store.selectedPreset == preset
-                                                        ? Color(red: 0.93, green: 0.94, blue: 0.94)
+                                                        ? IMColors.controlBg
                                                         : Color.clear)
                                         )
                                 }
@@ -567,7 +624,7 @@ private struct LedgerShell: View {
                                     .labelsHidden()
                                     .frame(width: 100)
                                 Text("–")
-                                    .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                                    .foregroundStyle(IMColors.textMuted)
                                     .font(.system(size: 12))
                                 DatePicker("", selection: $store.customEnd, displayedComponents: .date)
                                     .labelsHidden()
@@ -590,11 +647,11 @@ private struct LedgerShell: View {
                     .frame(width: masterWidth)
                     .padding(14)
                     .frame(maxHeight: .infinity, alignment: .top)
-                    .background(Color(red: 0.975, green: 0.975, blue: 0.975))
+                    .background(IMColors.panelBg)
 
                     // MARK: - Grooved Divider
                     ZStack {
-                        Color(red: 0.88, green: 0.88, blue: 0.88)
+                        IMColors.dividerLegacy
                             .frame(width: 1)
                         Color.white.opacity(0.5)
                             .frame(width: 1)
@@ -648,7 +705,7 @@ private struct LedgerShell: View {
                         .font(.system(size: 16, weight: .semibold))
                     Text("首次启动后会自动读取本地账本数据。")
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                        .foregroundStyle(IMColors.textMuted)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
@@ -707,7 +764,7 @@ private struct LedgerShell: View {
             .padding(.vertical, 8)
             .background(
                 statBg
-                    .fill(Color(red: 0.965, green: 0.97, blue: 0.97))
+                    .fill(IMColors.statBg)
                     .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
                     .overlay(statBg.stroke(Color.black.opacity(0.04), lineWidth: 0.5))
             )
@@ -716,10 +773,10 @@ private struct LedgerShell: View {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color(red: 0.72, green: 0.46, blue: 0.10))
+                        .foregroundStyle(IMColors.ledgerStatGoldBold)
                     Text(warning)
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Color(red: 0.52, green: 0.37, blue: 0.12))
+                        .foregroundStyle(IMColors.ledgerStatGold)
                         .lineLimit(2)
                 }
                 .padding(.horizontal, 10)
@@ -727,7 +784,7 @@ private struct LedgerShell: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color(red: 1.0, green: 0.963, blue: 0.902))
+                        .fill(IMColors.warningBg)
                 )
             }
         }
@@ -741,8 +798,8 @@ private struct LedgerShell: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(
                     ledgerMode == mode
-                        ? Color(red: 0.10, green: 0.21, blue: 0.24)
-                        : Color(red: 0.50, green: 0.56, blue: 0.58)
+                        ? IMColors.textPrimary
+                        : IMColors.textSecondary
                 )
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
@@ -750,7 +807,7 @@ private struct LedgerShell: View {
                     RoundedRectangle(cornerRadius: 5, style: .continuous)
                         .fill(
                             ledgerMode == mode
-                                ? Color(red: 0.93, green: 0.94, blue: 0.94)
+                                ? IMColors.controlBg
                                 : Color.clear)
                 )
                 .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
@@ -770,10 +827,10 @@ private struct LedgerShell: View {
                     Spacer()
                     Image(systemName: "calendar.day.timeline.left")
                         .font(.system(size: 28, weight: .light))
-                        .foregroundStyle(Color(red: 0.82, green: 0.84, blue: 0.84))
+                        .foregroundStyle(IMColors.textPlaceholder)
                     Text("请在月历中选择一天查看明细")
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Color(red: 0.50, green: 0.56, blue: 0.58))
+                        .foregroundStyle(IMColors.textSecondary)
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -786,7 +843,7 @@ private struct LedgerShell: View {
         return VStack(alignment: .leading, spacing: 8) {
             Text("筛选分类")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Color(red: 0.50, green: 0.56, blue: 0.58))
+                .foregroundStyle(IMColors.textSecondary)
             WrappingHStack(alignment: .leading, spacing: 6) {
                 categoryPill(title: "全部", isSelected: selectedCategoryFilter == nil) {
                     selectedCategoryFilter = nil
@@ -807,8 +864,8 @@ private struct LedgerShell: View {
                 .font(.system(size: 11, weight: isSelected ? .bold : .medium))
                 .foregroundStyle(
                     isSelected
-                        ? Color(red: 0.10, green: 0.21, blue: 0.24)
-                        : Color(red: 0.45, green: 0.52, blue: 0.55)
+                        ? IMColors.textPrimary
+                        : IMColors.filterMuted
                 )
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
@@ -843,7 +900,7 @@ private struct LedgerShell: View {
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                        .foregroundStyle(IMColors.textMuted)
                         .frame(width: 36, height: 36)
                         .background(
                             Circle()
@@ -858,10 +915,10 @@ private struct LedgerShell: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(currentCalendarTitle(in: ledger))
                         .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
+                        .foregroundStyle(IMColors.textPrimary)
                     Text(currentCalendarMeta(in: ledger))
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                        .foregroundStyle(IMColors.textMuted)
                 }
 
                 Spacer()
@@ -871,7 +928,7 @@ private struct LedgerShell: View {
                 } label: {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                        .foregroundStyle(IMColors.textMuted)
                         .frame(width: 36, height: 36)
                         .background(
                             Circle()
@@ -890,7 +947,7 @@ private struct LedgerShell: View {
                 ForEach(["日", "一", "二", "三", "四", "五", "六"], id: \.self) { label in
                     Text(label)
                         .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(Color(red: 0.42, green: 0.51, blue: 0.54))
+                        .foregroundStyle(IMColors.textMuted)
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -930,7 +987,7 @@ private struct LedgerShell: View {
                             HStack(alignment: .firstTextBaseline) {
                                 Text(BillLensFormatters.displayDay(day.day))
                                     .font(.system(size: 15, weight: .bold))
-                                    .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
+                                    .foregroundStyle(IMColors.textPrimary)
                                 Spacer()
                                 Text(
                                     "净额 \(BillLensFormatters.currencyString(day.netAmount, currencyCode: ledger.statsCurrency))"
@@ -938,8 +995,8 @@ private struct LedgerShell: View {
                                     .font(.system(size: 12, weight: .medium))
                                     .foregroundStyle(
                                         day.netAmount >= 0
-                                            ? Color(red: 0.84, green: 0.38, blue: 0.29)
-                                            : Color(red: 0.16, green: 0.42, blue: 0.35))
+                                            ? IMColors.income
+                                            : IMColors.accentDark)
                             }
                             ForEach(records) { record in
                                 RecordRowView(record: record) { recordToDelete = record }
@@ -968,13 +1025,13 @@ private struct LedgerShell: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text(BillLensFormatters.displayDay(day.day))
                         .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
+                        .foregroundStyle(IMColors.textPrimary)
                     Spacer()
                     Text(
                         "支出 \(BillLensFormatters.currencyString(day.expenseAmount, currencyCode: statsCurrency))"
                     )
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                        .foregroundStyle(IMColors.textMuted)
                 }
             }
 
@@ -1132,8 +1189,8 @@ private struct LedgerShell: View {
             return AnyShapeStyle(
                 LinearGradient(
                     colors: [
-                        Color(red: 0.27, green: 0.54, blue: 0.46),
-                        Color(red: 0.19, green: 0.45, blue: 0.39),
+                        IMColors.calendarSelectedTop,
+                        IMColors.calendarSelectedBottom,
                     ],
                     startPoint: .top,
                     endPoint: .bottom
@@ -1191,7 +1248,7 @@ private struct CalendarCellLabel: View {
     }
 
     private var dayTextColor: Color {
-        isSelected ? .white : Color(red: 0.10, green: 0.21, blue: 0.24)
+        isSelected ? .white : IMColors.textPrimary
     }
 
     private var amountTextColor: Color {
@@ -1199,9 +1256,9 @@ private struct CalendarCellLabel: View {
             return Color.white.opacity(0.9)
         }
         if isHot {
-            return Color(red: 0.84, green: 0.38, blue: 0.29)
+            return IMColors.income
         }
-        return Color(red: 0.40, green: 0.49, blue: 0.52)
+        return IMColors.textMuted
     }
 }
 
@@ -1470,7 +1527,7 @@ private struct ComposerPanel: View {
                 ComposerIconButton(systemImage: "photo") { onImage() }
                 ComposerIconButton(
                     systemImage: isRecording ? "stop.circle.fill" : "mic.fill",
-                    tint: isRecording ? Color(red: 0.82, green: 0.33, blue: 0.28) : IMColors.textSecondary
+                    tint: isRecording ? Color.red : IMColors.textSecondary
                 ) {
                     onVoice()
                 }
@@ -1555,7 +1612,7 @@ private struct ComposerInputField: NSViewRepresentable {
         field.drawsBackground = false
         field.focusRingType = .none
         field.font = .systemFont(ofSize: 14, weight: .medium)
-        field.textColor = NSColor(Color(red: 0.10, green: 0.21, blue: 0.24))
+        field.textColor = NSColor(IMColors.textPrimary)
         field.placeholderString = placeholder
         field.lineBreakMode = .byTruncatingTail
         field.usesSingleLineMode = true
@@ -1722,16 +1779,16 @@ private struct RecordRowView: View {
                 .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(
                     record.direction == "income"
-                        ? Color(red: 0.84, green: 0.38, blue: 0.29)
+                        ? IMColors.income
                         : IMColors.textPrimary)
             Button(action: onDelete) {
                 Image(systemName: "trash")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Color(red: 0.65, green: 0.30, blue: 0.27))
+                    .foregroundStyle(IMColors.dangerSubtle)
                     .frame(width: 36, height: 36)
                     .background(
                         Circle()
-                            .fill(Color(red: 0.98, green: 0.95, blue: 0.95))
+                            .fill(IMColors.dangerBgLight)
                     )
                     .contentShape(Circle())
             }
@@ -1755,7 +1812,7 @@ private struct LedgerSummaryCard: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                .foregroundStyle(IMColors.textMuted)
             Text(value)
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(valueColor)
@@ -1768,11 +1825,11 @@ private struct LedgerSummaryCard: View {
     private var valueColor: Color {
         switch accent {
         case .expense:
-            return Color(red: 0.10, green: 0.21, blue: 0.24)
+            return IMColors.textPrimary
         case .income:
-            return Color(red: 0.84, green: 0.38, blue: 0.29)
+            return IMColors.income
         case .neutral:
-            return Color(red: 0.10, green: 0.21, blue: 0.24)
+            return IMColors.textPrimary
         }
     }
 }
@@ -1784,8 +1841,8 @@ private struct UserAvatar: View {
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color(red: 0.231, green: 0.510, blue: 0.965),
-                            Color(red: 0.18, green: 0.42, blue: 0.85),
+                            IMColors.sendButton,
+                            IMColors.sendButtonDark,
                         ],
                         startPoint: .top,
                         endPoint: .bottom
@@ -1806,8 +1863,8 @@ private struct AssistantAvatar: View {
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color(red: 0.938, green: 0.978, blue: 0.962),
-                            Color(red: 0.864, green: 0.928, blue: 0.903),
+                            IMColors.assistantAvatarTop,
+                            IMColors.assistantAvatarBottom,
                         ],
                         startPoint: .top,
                         endPoint: .bottom
@@ -1816,7 +1873,7 @@ private struct AssistantAvatar: View {
                 .frame(width: LayoutMetrics.avatarSize, height: LayoutMetrics.avatarSize)
             Image(systemName: "cpu")
                 .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(Color(red: 0.165, green: 0.426, blue: 0.384))
+                .foregroundStyle(IMColors.accent)
         }
     }
 }
@@ -1829,8 +1886,8 @@ private struct DirectionBadge: View {
             .font(.system(size: 11, weight: .bold))
             .foregroundStyle(
                 direction == "income"
-                    ? Color(red: 0.84, green: 0.38, blue: 0.29)
-                    : Color(red: 0.16, green: 0.42, blue: 0.35)
+                    ? IMColors.income
+                    : IMColors.accentDark
             )
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
@@ -1838,8 +1895,8 @@ private struct DirectionBadge: View {
                 Capsule()
                     .fill(
                         direction == "income"
-                            ? Color(red: 0.980, green: 0.925, blue: 0.905)
-                            : Color(red: 0.914, green: 0.964, blue: 0.940))
+                            ? IMColors.incomeBgLight
+                            : IMColors.accentBgLight)
             )
     }
 }
@@ -1853,8 +1910,8 @@ private struct StatusPill: View {
             .font(.system(size: 11, weight: .bold))
             .foregroundStyle(
                 warning
-                    ? Color(red: 0.58, green: 0.39, blue: 0.10)
-                    : Color(red: 0.16, green: 0.42, blue: 0.35)
+                    ? IMColors.warningText
+                    : IMColors.accentDark
             )
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -1862,8 +1919,8 @@ private struct StatusPill: View {
                 Capsule()
                     .fill(
                         warning
-                            ? Color(red: 1.0, green: 0.963, blue: 0.902)
-                            : Color(red: 0.914, green: 0.964, blue: 0.940))
+                            ? IMColors.warningBg
+                            : IMColors.accentBgLight)
             )
     }
 }
@@ -1903,9 +1960,9 @@ private struct ActionButton: View {
         case .primary:
             return .white
         case .ghost:
-            return Color(red: 0.40, green: 0.49, blue: 0.52)
+            return IMColors.textMuted
         case .dangerGhost:
-            return Color(red: 0.71, green: 0.25, blue: 0.23)
+            return IMColors.danger
         }
     }
 
@@ -1913,7 +1970,7 @@ private struct ActionButton: View {
         Capsule()
             .fill(
                 kind == .primary
-                    ? Color(red: 0.10, green: 0.22, blue: 0.24)
+                    ? IMColors.buttonPrimary
                     : Color.clear
             )
     }
@@ -1923,23 +1980,10 @@ private struct ActionButton: View {
         case .primary:
             return .clear
         case .ghost:
-            return Color(red: 0.89, green: 0.937, blue: 0.918)
+            return IMColors.ghostBorder
         case .dangerGhost:
-            return Color(red: 0.95, green: 0.84, blue: 0.82)
+            return IMColors.dangerBorder
         }
-    }
-}
-
-private struct PanelCardStyle: View {
-    var body: some View {
-        RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-            .fill(Color.white.opacity(0.88))
-            .overlay(
-                RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                    .stroke(Color(red: 0.88, green: 0.929, blue: 0.912), lineWidth: 1)
-            )
-            .shadow(
-                color: Color(red: 0.54, green: 0.69, blue: 0.64).opacity(0.035), radius: 10, y: 6)
     }
 }
 

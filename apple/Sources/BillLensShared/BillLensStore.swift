@@ -174,12 +174,12 @@ public final class BillLensStore: ObservableObject {
     public func saveDraft() {
         guard let draft else { return }
         perform("正在保存草稿") {
-            let payload = self.currentDraftPayload()
+            let draftDict = try self.currentDraftPayload()
             let result: SaveDraftResult = try await self.bridge.sendAsync([
                 "action": "save_draft",
                 "profile_id": self.profileID,
                 "draft_id": draft.id,
-                "draft": payload.dictionary
+                "draft": draftDict
             ])
             self.apply(home: result.home)
             self.statusText = "草稿已保存"
@@ -330,8 +330,8 @@ public final class BillLensStore: ObservableObject {
         transientProgressMessage = nil
     }
 
-    private func currentDraftPayload() -> DraftInputPayload {
-        DraftInputPayload(
+    private func currentDraftPayload() throws -> [String: Any] {
+        let input = DraftInput(
             direction: draftForm.direction,
             amount: Double(draftForm.amount),
             currency: BillLensFormatters.normalizedCurrencyCode(draftForm.currency),
@@ -340,6 +340,8 @@ public final class BillLensStore: ObservableObject {
             transactionAt: BillLensFormatters.timestampFallback.string(from: draftForm.transactionAt),
             note: draftForm.note
         )
+        let data = try JSONEncoder().encode(input)
+        return try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
     }
 
     private func ledgerPayload() -> [String: Any] {
@@ -379,24 +381,3 @@ public final class BillLensStore: ObservableObject {
     }
 }
 
-private struct DraftInputPayload {
-    let direction: String?
-    let amount: Double?
-    let currency: String?
-    let category: String?
-    let merchant: String?
-    let transactionAt: String?
-    let note: String?
-
-    var dictionary: [String: Any] {
-        [
-            "direction": direction ?? NSNull(),
-            "amount": amount ?? NSNull(),
-            "currency": currency ?? NSNull(),
-            "category": category ?? NSNull(),
-            "merchant": merchant ?? NSNull(),
-            "transaction_at": transactionAt ?? NSNull(),
-            "note": note ?? NSNull()
-        ]
-    }
-}

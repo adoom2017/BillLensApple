@@ -24,14 +24,14 @@ public final class ReceiptOCRService: ReceiptTextRecognizing, @unchecked Sendabl
     public init() {}
 
     public func recognizeText(from imageURL: URL) async throws -> String {
-        await AppLogger.shared.log("ocr.start", "image_url=\(imageURL.path)")
+        AppLogger.log("ocr.start", "image_url=\(imageURL.path)")
         guard
             let image = NSImage(contentsOf: imageURL),
             let data = image.tiffRepresentation,
             let bitmap = NSBitmapImageRep(data: data),
             let cgImage = bitmap.cgImage
         else {
-            await AppLogger.shared.log("ocr.error", "failed to load image at \(imageURL.path)")
+            AppLogger.log("ocr.error", "failed to load image at \(imageURL.path)")
             throw OCRServiceError.failedToLoadImage
         }
 
