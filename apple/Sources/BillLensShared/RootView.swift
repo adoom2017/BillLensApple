@@ -477,25 +477,25 @@ private struct LedgerShell: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 10) {
+            HStack(spacing: 4) {
                 ForEach(LedgerPreset.allCases) { preset in
                     Button {
                         store.applyPreset(preset)
                     } label: {
                         Text(preset.title)
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(
                                 store.selectedPreset == preset
-                                    ? Color(red: 0.165, green: 0.426, blue: 0.384)
+                                    ? Color(red: 0.10, green: 0.21, blue: 0.24)
                                     : Color(red: 0.40, green: 0.49, blue: 0.52)
                             )
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
                             .background(
-                                Capsule()
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
                                     .fill(
                                         store.selectedPreset == preset
-                                            ? Color(red: 0.885, green: 0.949, blue: 0.922)
+                                            ? Color(red: 0.95, green: 0.96, blue: 0.96)
                                             : Color.clear)
                             )
                     }
@@ -515,30 +515,26 @@ private struct LedgerShell: View {
                     }
                 }
             }
-            .padding(6)
-            .background(.white.opacity(0.72))
-            .overlay(
-                Capsule()
-                    .stroke(Color(red: 0.865, green: 0.914, blue: 0.893), lineWidth: 1)
-            )
-            .clipShape(Capsule())
 
             if let ledger = store.ledger {
-                HStack(spacing: 6) {
+                HStack(spacing: 0) {
                     LedgerSummaryCard(
                         title: "总支出",
                         value: BillLensFormatters.currencyString(
                             ledger.summary.summary.expenseAmount),
                         accent: .expense)
+                    Divider().frame(height: 28).opacity(0.3).padding(.horizontal, 12)
                     LedgerSummaryCard(
                         title: "总收入",
                         value: BillLensFormatters.currencyString(
                             ledger.summary.summary.incomeAmount),
                         accent: .income)
+                    Divider().frame(height: 28).opacity(0.3).padding(.horizontal, 12)
                     LedgerSummaryCard(
                         title: "账单",
                         value: "\(ledger.byDay.reduce(0) { $0 + $1.records.count })",
                         accent: .neutral)
+                    Divider().frame(height: 28).opacity(0.3).padding(.horizontal, 12)
                     LedgerSummaryCard(
                         title: "待同步",
                         value: "\(ledger.pendingSyncCount)",
@@ -546,17 +542,10 @@ private struct LedgerShell: View {
                 }
 
                 VStack(spacing: 10) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 4) {
                         ledgerModeButton(.calendar, title: "月历")
                         ledgerModeButton(.detail, title: "明细")
                     }
-                    .padding(6)
-                    .background(.white.opacity(0.72))
-                    .overlay(
-                        Capsule()
-                            .stroke(Color(red: 0.865, green: 0.914, blue: 0.893), lineWidth: 1)
-                    )
-                    .clipShape(Capsule())
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                     Group {
@@ -596,7 +585,6 @@ private struct LedgerShell: View {
         }
         .padding(LayoutMetrics.panelPadding)
         .frame(maxHeight: availableHeight)
-        .background(PanelCardStyle())
     }
 
     private func ledgerModeButton(_ mode: LedgerViewMode, title: String) -> some View {
@@ -604,28 +592,32 @@ private struct LedgerShell: View {
             ledgerMode = mode
         } label: {
             Text(title)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(
                     ledgerMode == mode
-                        ? Color(red: 0.165, green: 0.426, blue: 0.384)
+                        ? Color(red: 0.10, green: 0.21, blue: 0.24)
                         : Color(red: 0.40, green: 0.49, blue: 0.52)
                 )
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(
-                    Capsule()
-                        .fill(
-                            ledgerMode == mode
-                                ? Color(red: 0.885, green: 0.949, blue: 0.922) : Color.clear)
-                )
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .overlay(alignment: .bottom) {
+                    if ledgerMode == mode {
+                        Rectangle()
+                            .fill(Color(red: 0.165, green: 0.426, blue: 0.384))
+                            .frame(height: 2)
+                    }
+                }
         }
         .buttonStyle(.plain)
     }
 
     private func calendarLedgerView(_ ledger: LedgerSnapshot) -> some View {
-        HStack(alignment: .top, spacing: LayoutMetrics.panelGap) {
+        HStack(alignment: .top, spacing: 0) {
             calendarPanel(ledger)
                 .frame(maxWidth: .infinity)
+                .padding(.trailing, 12)
+
+            Divider().opacity(0.4)
 
             Group {
                 if let selectedGroup = selectedLedgerGroup(in: ledger) {
@@ -633,9 +625,6 @@ private struct LedgerShell: View {
                         ledgerDayDetail(selectedGroup)
                     }
                     .scrollIndicators(.automatic)
-                    .clipShape(
-                        RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                    )
                 } else {
                     VStack(spacing: 10) {
                         Spacer()
@@ -648,39 +637,25 @@ private struct LedgerShell: View {
                         Spacer()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(
-                        RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                            .fill(Color.white.opacity(0.84))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                            .stroke(Color(red: 0.886, green: 0.929, blue: 0.912), lineWidth: 1)
-                    )
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.leading, 12)
         }
     }
 
     private func calendarPanel(_ ledger: LedgerSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Button {
                     shiftCalendarMonth(in: ledger, direction: -1)
                 } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 13, weight: .bold))
-                        .frame(width: 32, height: 32)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                        .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
-                .background(
-                    RoundedRectangle(cornerRadius: LayoutMetrics.compactRadius, style: .continuous)
-                        .fill(Color(red: 0.969, green: 0.981, blue: 0.976))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: LayoutMetrics.compactRadius, style: .continuous)
-                        .stroke(Color(red: 0.89, green: 0.937, blue: 0.918), lineWidth: 1)
-                )
                 .disabled(!canShiftMonth(in: ledger, direction: -1))
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -698,23 +673,16 @@ private struct LedgerShell: View {
                     shiftCalendarMonth(in: ledger, direction: 1)
                 } label: {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .bold))
-                        .frame(width: 32, height: 32)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                        .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
-                .background(
-                    RoundedRectangle(cornerRadius: LayoutMetrics.compactRadius, style: .continuous)
-                        .fill(Color(red: 0.969, green: 0.981, blue: 0.976))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: LayoutMetrics.compactRadius, style: .continuous)
-                        .stroke(Color(red: 0.89, green: 0.937, blue: 0.918), lineWidth: 1)
-                )
                 .disabled(!canShiftMonth(in: ledger, direction: 1))
             }
 
             LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 7), spacing: 8
+                columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 4
             ) {
                 ForEach(["日", "一", "二", "三", "四", "五", "六"], id: \.self) { label in
                     Text(label)
@@ -725,21 +693,21 @@ private struct LedgerShell: View {
             }
 
             LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 7), spacing: 8
+                columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 4
             ) {
                 ForEach(cachedCalendarCells) { cell in
                     if let day = cell.dayNumber, let date = cell.date {
                         Button {
                             selectedLedgerDate = date
                         } label: {
-                            VStack(alignment: .leading, spacing: 6) {
+                            VStack(spacing: 1) {
                                 Text("\(day)")
-                                    .font(.system(size: 14, weight: .bold))
+                                    .font(.system(size: 12, weight: .bold))
                                     .foregroundStyle(
                                         cell.isSelected
                                             ? .white : Color(red: 0.10, green: 0.21, blue: 0.24))
                                 Text(cell.amountText)
-                                    .font(.system(size: 11, weight: .semibold))
+                                    .font(.system(size: 9, weight: .medium))
                                     .foregroundStyle(
                                         cell.isSelected
                                             ? Color.white.opacity(0.9)
@@ -748,43 +716,22 @@ private struct LedgerShell: View {
                                                 : Color(red: 0.40, green: 0.49, blue: 0.52))
                                     )
                                     .lineLimit(1)
-                                Spacer(minLength: 0)
                             }
-                            .padding(10)
-                            .frame(maxWidth: .infinity, minHeight: 82, alignment: .topLeading)
-                            .background(calendarCellBackground(for: cell))
-                            .overlay(
-                                RoundedRectangle(
-                                    cornerRadius: LayoutMetrics.fieldRadius, style: .continuous
-                                )
-                                .stroke(
-                                    cell.isSelected
-                                        ? Color(red: 0.16, green: 0.42, blue: 0.35)
-                                        : Color(red: 0.89, green: 0.937, blue: 0.918),
-                                    lineWidth: cell.isSelected ? 1.5 : 1)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(calendarCellBackground(for: cell))
                             )
                         }
                         .buttonStyle(.plain)
                     } else {
-                        RoundedRectangle(
-                            cornerRadius: LayoutMetrics.fieldRadius, style: .continuous
-                        )
-                        .fill(Color.clear)
-                        .frame(minHeight: 82)
-                        .allowsHitTesting(false)
+                        Color.clear
+                            .frame(minHeight: 44)
+                            .allowsHitTesting(false)
                     }
                 }
             }
         }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                .fill(Color.white.opacity(0.84))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                .stroke(Color(red: 0.886, green: 0.929, blue: 0.912), lineWidth: 1)
-        )
     }
 
     private func detailLedgerView(_ ledger: LedgerSnapshot) -> some View {
@@ -838,15 +785,10 @@ private struct LedgerShell: View {
                             .padding(.vertical, 6)
                         }
                     }
-                    .padding(18)
-                    .background(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .fill(Color.white.opacity(0.84))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .stroke(Color(red: 0.886, green: 0.929, blue: 0.912), lineWidth: 1)
-                    )
+                    .padding(.horizontal, 4)
+                    if day.id != ledger.byDay.last?.id {
+                        Divider().opacity(0.3).padding(.vertical, 2)
+                    }
                 }
             }
         }
@@ -875,7 +817,10 @@ private struct LedgerShell: View {
                 }
             }
 
-            ForEach(day.records) { record in
+            ForEach(Array(day.records.enumerated()), id: \.element.id) { index, record in
+                if index > 0 {
+                    Divider().opacity(0.4)
+                }
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(record.merchant ?? record.category)
@@ -895,26 +840,10 @@ private struct LedgerShell: View {
                                 ? Color(red: 0.84, green: 0.38, blue: 0.29)
                                 : Color(red: 0.10, green: 0.21, blue: 0.24))
                 }
-                .padding(14)
-                .background(
-                    RoundedRectangle(cornerRadius: LayoutMetrics.fieldRadius, style: .continuous)
-                        .fill(Color(red: 0.977, green: 0.987, blue: 0.982))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: LayoutMetrics.fieldRadius, style: .continuous)
-                        .stroke(Color(red: 0.89, green: 0.937, blue: 0.918), lineWidth: 1)
-                )
+                .padding(.vertical, 8)
             }
         }
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                .fill(Color.white.opacity(0.84))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                .stroke(Color(red: 0.886, green: 0.929, blue: 0.912), lineWidth: 1)
-        )
     }
 
     private func syncCalendarState(for ledger: LedgerSnapshot) {
@@ -1058,10 +987,7 @@ private struct LedgerShell: View {
                 )
             )
         }
-        if cell.isHot {
-            return AnyShapeStyle(Color(red: 0.994, green: 0.948, blue: 0.915))
-        }
-        return AnyShapeStyle(Color(red: 0.977, green: 0.987, blue: 0.982))
+        return AnyShapeStyle(Color.clear)
     }
 
     private func compactAmount(_ amount: Double) -> String {
@@ -1646,22 +1572,12 @@ private struct LedgerSummaryCard: View {
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
             Text(value)
-                .font(.system(size: 16, weight: .bold))
+                .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(valueColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                .fill(Color(red: 0.974, green: 0.989, blue: 0.982))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                .stroke(Color(red: 0.89, green: 0.937, blue: 0.918), lineWidth: 1)
-        )
     }
 
     private var valueColor: Color {
