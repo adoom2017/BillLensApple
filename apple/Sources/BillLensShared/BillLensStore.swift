@@ -88,6 +88,8 @@ public final class BillLensStore: ObservableObject {
     public func submitText() {
         let content = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty else { return }
+        composerText = ""
+        appendLocalUserMessage(content)
         perform("正在解析账单") {
             AppLogger.log("entry.text", content)
             self.startProgress("已接收文本，准备调用大模型。")
@@ -101,7 +103,6 @@ public final class BillLensStore: ObservableObject {
             ])
             self.advanceProgress("LLM 已返回，正在更新草稿与账本…")
             self.apply(home: result.home)
-            self.composerText = ""
             self.statusText = result.autoConfirmed ? "已自动入库" : "已生成待确认草稿"
             AppLogger.log("entry.text.result", "auto_confirmed=\(result.autoConfirmed) parsed=\(String(describing: result.parsed))")
             try await self.refreshLedger()
@@ -238,6 +239,20 @@ public final class BillLensStore: ObservableObject {
         draft = home.draft
         latestRecord = home.latestRecord
         hydrateDraftFields()
+    }
+
+    private func appendLocalUserMessage(_ content: String) {
+        let now = ISO8601DateFormatter().string(from: Date())
+        let local = ConversationMessage(
+            id: "local-\(UUID().uuidString)",
+            profileId: profileID,
+            role: "user",
+            content: content,
+            draftId: nil,
+            recordId: nil,
+            createdAt: now
+        )
+        messages.append(local)
     }
 
     private func hydrateDraftFields() {

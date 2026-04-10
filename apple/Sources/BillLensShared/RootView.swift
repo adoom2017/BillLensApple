@@ -25,10 +25,24 @@ private enum LayoutMetrics {
     static let formHeight: CGFloat = 52
     static let noteHeight: CGFloat = 72
     static let inputBarHeight: CGFloat = 48
-    static let iconButtonSize: CGFloat = 36
+    static let iconButtonSize: CGFloat = 28
     static let actionButtonHeight: CGFloat = 40
     static let messageGap: CGFloat = 14
     static let headerSpacing: CGFloat = 14
+    static let bubbleRadius: CGFloat = 6
+    static let avatarSize: CGFloat = 32
+}
+
+private enum IMColors {
+    static let chatBg = Color(red: 0.953, green: 0.957, blue: 0.961)        // #F3F4F6
+    static let userBubble = Color(red: 0.859, green: 0.918, blue: 0.996)    // #DBEAFE
+    static let botBubble = Color.white
+    static let divider = Color(red: 0.894, green: 0.906, blue: 0.922)       // ~border-gray-200
+    static let sendButton = Color(red: 0.231, green: 0.510, blue: 0.965)    // #3B82F6
+    static let textPrimary = Color(red: 0.10, green: 0.21, blue: 0.24)
+    static let textSecondary = Color(red: 0.50, green: 0.56, blue: 0.58)
+    static let textTertiary = Color(red: 0.55, green: 0.63, blue: 0.65)
+    static let systemMsgBg = Color(red: 0.92, green: 0.93, blue: 0.94)
 }
 
 public struct RootView: View {
@@ -193,18 +207,44 @@ private struct EntryShell: View {
     let availableWidth: CGFloat
     let availableHeight: CGFloat
 
+    private var reviewWidth: CGFloat {
+        let w = availableWidth * 0.38
+        return min(max(360, w), 440)
+    }
+
     var body: some View {
-        let rightWidth = min(max(340, availableWidth * 0.31), 360)
-        let leftWidth = max(availableWidth - rightWidth - LayoutMetrics.panelGap, 0)
-
-        HStack(alignment: .top, spacing: LayoutMetrics.panelGap) {
-            ChatPanel(isImportingImage: $isImportingImage)
-                .frame(width: leftWidth, height: availableHeight)
-
-            ReviewPanel()
-                .frame(width: rightWidth, height: availableHeight)
+        HStack(spacing: 0) {
+            chatSide
+            groovedDivider
+            reviewSide
         }
         .frame(width: availableWidth, height: availableHeight, alignment: .topLeading)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var chatWidth: CGFloat {
+        availableWidth - reviewWidth - 1
+    }
+
+    private var chatSide: some View {
+        ChatPanel(isImportingImage: $isImportingImage)
+            .frame(width: chatWidth)
+            .frame(maxHeight: .infinity)
+            .background(IMColors.chatBg)
+            .clipShape(Rectangle())
+    }
+
+    private var groovedDivider: some View {
+        IMColors.divider
+            .frame(width: 1)
+    }
+
+    private var reviewSide: some View {
+        ReviewPanel()
+            .frame(width: reviewWidth)
+            .frame(maxHeight: .infinity)
+            .background(Color.white)
+            .clipShape(Rectangle())
     }
 }
 
@@ -213,24 +253,12 @@ private struct ChatPanel: View {
     @Binding var isImportingImage: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("账单录入")
-                    .font(.system(size: 12, weight: .bold))
-                    .kerning(1.2)
-                    .foregroundStyle(Color(red: 0.42, green: 0.51, blue: 0.54))
-                    .textCase(.uppercase)
-                Text("账单录入")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundStyle(Color(red: 0.09, green: 0.20, blue: 0.23))
-                Text("输入或语音记账，如\"打车花了30块\"，我会先解析，再帮你确认入库。")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
-                    .frame(maxWidth: 480, alignment: .leading)
-            }
-
+        VStack(alignment: .leading, spacing: 0) {
             ChatScrollView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 14)
+                .padding(.top, 14)
+                .clipShape(Rectangle())
 
             ComposerPanel(
                 composerText: $store.composerText,
@@ -242,8 +270,6 @@ private struct ChatPanel: View {
                 onSubmit: { store.submitText() }
             )
         }
-        .padding(LayoutMetrics.panelPadding)
-        .background(PanelCardStyle())
     }
 }
 
@@ -334,35 +360,40 @@ private struct ReviewPanel: View {
     @EnvironmentObject private var store: BillLensStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("待确认记录")
-                        .font(.system(size: 12, weight: .bold))
-                        .kerning(1.2)
-                        .foregroundStyle(Color(red: 0.42, green: 0.51, blue: 0.54))
-                        .textCase(.uppercase)
-                    Text("核对后确认入库")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundStyle(Color(red: 0.09, green: 0.20, blue: 0.23))
-                    Text("左侧继续补充会自动更新这里；你也可以直接手动修改结构化字段。")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("核对确认")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(IMColors.textPrimary)
+                    Spacer()
+                    StatusPill(title: store.draft == nil ? "等待解析" : "待确认", warning: store.draft != nil)
                 }
-
-                Spacer(minLength: 8)
-
-                StatusPill(title: store.draft == nil ? "等待解析" : "待确认", warning: store.draft != nil)
+                Text("左侧发送后自动更新，也可直接手动修改。")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(IMColors.textSecondary)
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
 
+            IMColors.divider.frame(height: 1)
+
+            // Amount summary — flat, no border
             ReviewSummaryCard(
                 direction: store.draftForm.direction,
                 amount: store.draft?.amount,
                 meta: reviewSummaryMeta
             )
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+
+            IMColors.divider.frame(height: 1)
 
             if store.draft == nil {
                 EmptyReviewState(latestRecord: store.latestRecord)
+                    .padding(16)
                 Spacer(minLength: 0)
             } else {
                 GeometryReader { scrollProxy in
@@ -374,12 +405,16 @@ private struct ReviewPanel: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+
+                IMColors.divider.frame(height: 1)
 
                 reviewActions
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
             }
         }
-        .padding(LayoutMetrics.panelPadding)
-        .background(PanelCardStyle())
     }
 
     private var reviewSummaryMeta: String {
@@ -435,7 +470,7 @@ private struct ReviewPanel: View {
             ReviewField(title: "备注", minimumHeight: LayoutMetrics.noteHeight, alignTop: true) {
                 TextEditor(text: $store.draftForm.note)
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
+                    .foregroundStyle(IMColors.textPrimary)
                     .scrollContentBackground(.hidden)
                     .frame(minHeight: 44, maxHeight: 44)
             }
@@ -446,7 +481,7 @@ private struct ReviewPanel: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("确认后将写入数据库，并同步出现在账单一览中。")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                .foregroundStyle(IMColors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: 10) {
@@ -473,104 +508,123 @@ private struct LedgerShell: View {
     @State private var selectedLedgerDate: String?
     @State private var cachedCalendarCells: [LedgerCalendarCell] = []
     @State private var cachedCalendarKey: String = ""
+    @State private var selectedCategoryFilter: String? = nil
     let availableHeight: CGFloat
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 4) {
-                ForEach(LedgerPreset.allCases) { preset in
-                    Button {
-                        store.applyPreset(preset)
-                    } label: {
-                        Text(preset.title)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(
-                                store.selectedPreset == preset
-                                    ? Color(red: 0.10, green: 0.21, blue: 0.24)
-                                    : Color(red: 0.40, green: 0.49, blue: 0.52)
-                            )
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(
-                                        store.selectedPreset == preset
-                                            ? Color(red: 0.95, green: 0.96, blue: 0.96)
-                                            : Color.clear)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                }
-                if store.selectedPreset == .custom {
-                    DatePicker("", selection: $store.customStart, displayedComponents: .date)
-                        .labelsHidden()
-                        .frame(width: 110)
-                    Text("–")
-                        .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
-                    DatePicker("", selection: $store.customEnd, displayedComponents: .date)
-                        .labelsHidden()
-                        .frame(width: 110)
-                    ActionButton(title: "应用", kind: .ghost) {
-                        store.applyPreset(.custom)
-                    }
-                }
-            }
+    private let masterWidth: CGFloat = 340
 
+    var body: some View {
+        Group {
             if let ledger = store.ledger {
                 HStack(spacing: 0) {
-                    LedgerSummaryCard(
-                        title: "总支出",
-                        value: BillLensFormatters.currencyString(
-                            ledger.summary.summary.expenseAmount),
-                        accent: .expense)
-                    Divider().frame(height: 28).opacity(0.3).padding(.horizontal, 12)
-                    LedgerSummaryCard(
-                        title: "总收入",
-                        value: BillLensFormatters.currencyString(
-                            ledger.summary.summary.incomeAmount),
-                        accent: .income)
-                    Divider().frame(height: 28).opacity(0.3).padding(.horizontal, 12)
-                    LedgerSummaryCard(
-                        title: "账单",
-                        value: "\(ledger.byDay.reduce(0) { $0 + $1.records.count })",
-                        accent: .neutral)
-                    Divider().frame(height: 28).opacity(0.3).padding(.horizontal, 12)
-                    LedgerSummaryCard(
-                        title: "待同步",
-                        value: "\(ledger.pendingSyncCount)",
-                        accent: .neutral)
-                }
-
-                VStack(spacing: 10) {
-                    HStack(spacing: 4) {
-                        ledgerModeButton(.calendar, title: "月历")
-                        ledgerModeButton(.detail, title: "明细")
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Group {
-                        switch ledgerMode {
-                        case .calendar:
-                            calendarLedgerView(ledger)
-                        case .detail:
-                            detailLedgerView(ledger)
+                    // MARK: - Left Master Panel
+                    VStack(alignment: .leading, spacing: 16) {
+                        // Time preset tabs
+                        HStack(spacing: 4) {
+                            ForEach(LedgerPreset.allCases) { preset in
+                                Button {
+                                    store.applyPreset(preset)
+                                } label: {
+                                    Text(preset.title)
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(
+                                            store.selectedPreset == preset
+                                                ? Color(red: 0.10, green: 0.21, blue: 0.24)
+                                                : Color(red: 0.50, green: 0.56, blue: 0.58)
+                                        )
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 5)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                                .fill(
+                                                    store.selectedPreset == preset
+                                                        ? Color(red: 0.93, green: 0.94, blue: 0.94)
+                                                        : Color.clear)
+                                        )
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
+                        if store.selectedPreset == .custom {
+                            HStack(spacing: 6) {
+                                DatePicker("", selection: $store.customStart, displayedComponents: .date)
+                                    .labelsHidden()
+                                    .frame(width: 100)
+                                Text("–")
+                                    .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                                    .font(.system(size: 12))
+                                DatePicker("", selection: $store.customEnd, displayedComponents: .date)
+                                    .labelsHidden()
+                                    .frame(width: 100)
+                                ActionButton(title: "应用", kind: .ghost) {
+                                    store.applyPreset(.custom)
+                                }
+                            }
+                        }
+
+                        // Stat bar with inset shadow
+                        statBar(ledger)
+
+                        // Calendar
+                        calendarPanel(ledger)
+
+                        // Quick category filters
+                        quickCategoryFilters(ledger)
+                    }
+                    .frame(width: masterWidth)
+                    .padding(14)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .background(Color(red: 0.975, green: 0.975, blue: 0.975))
+
+                    // MARK: - Grooved Divider
+                    ZStack {
+                        Color(red: 0.88, green: 0.88, blue: 0.88)
+                            .frame(width: 1)
+                        Color.white.opacity(0.5)
+                            .frame(width: 1)
+                            .offset(x: 1)
+                    }
+                    .frame(width: 2)
+
+                    // MARK: - Right Detail Panel
+                    VStack(alignment: .leading, spacing: 0) {
+                        // Mode tabs at top of detail
+                        HStack(spacing: 4) {
+                            ledgerModeButton(.calendar, title: "按日")
+                            ledgerModeButton(.detail, title: "全部明细")
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                        .padding(.bottom, 8)
+
+                        Divider().opacity(0.2)
+
+                        Group {
+                            switch ledgerMode {
+                            case .calendar:
+                                rightPanelCalendarDetail(ledger)
+                            case .detail:
+                                detailLedgerView(ledger)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .onAppear {
-                        syncCalendarState(for: ledger)
-                        rebuildCalendarCellsIfNeeded(for: ledger)
-                    }
-                    .onChange(of: ledgerSignature(ledger)) {
-                        syncCalendarState(for: ledger)
-                        rebuildCalendarCellsIfNeeded(for: ledger)
-                    }
-                    .onChange(of: calendarMonthKey) {
-                        rebuildCalendarCellsIfNeeded(for: ledger)
-                    }
-                    .onChange(of: selectedLedgerDate) {
-                        updateCalendarCellSelection()
-                    }
+                    .background(Color.white)
+                }
+                .onAppear {
+                    syncCalendarState(for: ledger)
+                    rebuildCalendarCellsIfNeeded(for: ledger)
+                }
+                .onChange(of: ledgerSignature(ledger)) {
+                    syncCalendarState(for: ledger)
+                    rebuildCalendarCellsIfNeeded(for: ledger)
+                }
+                .onChange(of: calendarMonthKey) {
+                    rebuildCalendarCellsIfNeeded(for: ledger)
+                }
+                .onChange(of: selectedLedgerDate) {
+                    updateCalendarCellSelection()
                 }
             } else {
                 VStack(alignment: .leading, spacing: 8) {
@@ -583,8 +637,34 @@ private struct LedgerShell: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
         }
-        .padding(LayoutMetrics.panelPadding)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .frame(maxHeight: availableHeight)
+    }
+
+    private func statBar(_ ledger: LedgerSnapshot) -> some View {
+        let billCount = ledger.byDay.reduce(0) { $0 + $1.records.count }
+        let statBg = RoundedRectangle(cornerRadius: 8, style: .continuous)
+        return HStack(spacing: 0) {
+            LedgerSummaryCard(title: "支出",
+                value: BillLensFormatters.currencyString(ledger.summary.summary.expenseAmount),
+                accent: .expense)
+            Divider().frame(height: 24).opacity(0.2).padding(.horizontal, 8)
+            LedgerSummaryCard(title: "收入",
+                value: BillLensFormatters.currencyString(ledger.summary.summary.incomeAmount),
+                accent: .income)
+            Divider().frame(height: 24).opacity(0.2).padding(.horizontal, 8)
+            LedgerSummaryCard(title: "笔数", value: "\(billCount)", accent: .neutral)
+            Divider().frame(height: 24).opacity(0.2).padding(.horizontal, 8)
+            LedgerSummaryCard(title: "同步", value: "\(ledger.pendingSyncCount)", accent: .neutral)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            statBg
+                .fill(Color(red: 0.965, green: 0.97, blue: 0.97))
+                .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
+                .overlay(statBg.stroke(Color.black.opacity(0.04), lineWidth: 0.5))
+        )
     }
 
     private func ledgerModeButton(_ mode: LedgerViewMode, title: String) -> some View {
@@ -596,52 +676,95 @@ private struct LedgerShell: View {
                 .foregroundStyle(
                     ledgerMode == mode
                         ? Color(red: 0.10, green: 0.21, blue: 0.24)
-                        : Color(red: 0.40, green: 0.49, blue: 0.52)
+                        : Color(red: 0.50, green: 0.56, blue: 0.58)
                 )
                 .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .overlay(alignment: .bottom) {
-                    if ledgerMode == mode {
-                        Rectangle()
-                            .fill(Color(red: 0.165, green: 0.426, blue: 0.384))
-                            .frame(height: 2)
-                    }
-                }
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(
+                            ledgerMode == mode
+                                ? Color(red: 0.93, green: 0.94, blue: 0.94)
+                                : Color.clear)
+                )
         }
         .buttonStyle(.plain)
     }
 
-    private func calendarLedgerView(_ ledger: LedgerSnapshot) -> some View {
-        HStack(alignment: .top, spacing: 0) {
-            calendarPanel(ledger)
-                .frame(maxWidth: .infinity)
-                .padding(.trailing, 12)
+    private func rightPanelCalendarDetail(_ ledger: LedgerSnapshot) -> some View {
+        Group {
+            if let selectedGroup = selectedLedgerGroup(in: ledger) {
+                ScrollView {
+                    ledgerDayDetail(selectedGroup)
+                }
+                .scrollIndicators(.automatic)
+            } else {
+                VStack(spacing: 10) {
+                    Spacer()
+                    Image(systemName: "calendar.day.timeline.left")
+                        .font(.system(size: 28, weight: .light))
+                        .foregroundStyle(Color(red: 0.82, green: 0.84, blue: 0.84))
+                    Text("请在月历中选择一天查看明细")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color(red: 0.50, green: 0.56, blue: 0.58))
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
 
-            Divider().opacity(0.4)
-
-            Group {
-                if let selectedGroup = selectedLedgerGroup(in: ledger) {
-                    ScrollView {
-                        ledgerDayDetail(selectedGroup)
+    private func quickCategoryFilters(_ ledger: LedgerSnapshot) -> some View {
+        let allCategories = Array(Set(ledger.byDay.flatMap { $0.records.map(\.category) })).sorted()
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("筛选分类")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color(red: 0.50, green: 0.56, blue: 0.58))
+            WrappingHStack(alignment: .leading, spacing: 6) {
+                categoryPill(title: "全部", isSelected: selectedCategoryFilter == nil) {
+                    selectedCategoryFilter = nil
+                }
+                ForEach(allCategories, id: \.self) { cat in
+                    categoryPill(title: cat, isSelected: selectedCategoryFilter == cat) {
+                        selectedCategoryFilter = (selectedCategoryFilter == cat) ? nil : cat
                     }
-                    .scrollIndicators(.automatic)
-                } else {
-                    VStack(spacing: 10) {
-                        Spacer()
-                        Image(systemName: "calendar.day.timeline.left")
-                            .font(.system(size: 28, weight: .light))
-                            .foregroundStyle(Color(red: 0.72, green: 0.79, blue: 0.77))
-                        Text("请在月历中选择一天查看明细")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
-                        Spacer()
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.leading, 12)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func categoryPill(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                .foregroundStyle(
+                    isSelected
+                        ? Color(red: 0.10, green: 0.21, blue: 0.24)
+                        : Color(red: 0.45, green: 0.52, blue: 0.55)
+                )
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(Color.white)
+                        .shadow(
+                            color: isSelected ? Color.clear : Color.black.opacity(0.06),
+                            radius: isSelected ? 0 : 2, x: 0, y: 1
+                        )
+                )
+                .overlay(
+                    Capsule()
+                        .strokeBorder(Color.black.opacity(isSelected ? 0.08 : 0.03), lineWidth: 0.5)
+                )
+                .overlay(
+                    isSelected
+                        ? Capsule()
+                            .fill(Color.black.opacity(0.03))
+                        : nil
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private func calendarPanel(_ ledger: LedgerSnapshot) -> some View {
@@ -722,6 +845,14 @@ private struct LedgerShell: View {
                                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                                     .fill(calendarCellBackground(for: cell))
                             )
+                            .overlay(
+                                cell.isSelected
+                                    ? RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .stroke(Color.black.opacity(0.15), lineWidth: 1)
+                                        .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 1)
+                                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                    : nil
+                            )
                         }
                         .buttonStyle(.plain)
                     } else {
@@ -736,58 +867,49 @@ private struct LedgerShell: View {
 
     private func detailLedgerView(_ ledger: LedgerSnapshot) -> some View {
         ScrollView {
-            LazyVStack(spacing: 14) {
+            LazyVStack(spacing: 0) {
                 ForEach(ledger.byDay) { day in
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
+                    let records = filteredRecords(day.records)
+                    if !records.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(alignment: .firstTextBaseline) {
                                 Text(BillLensFormatters.displayDay(day.day))
-                                    .font(.system(size: 22, weight: .bold))
+                                    .font(.system(size: 15, weight: .bold))
                                     .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
-                                Text(
-                                    "收入 \(BillLensFormatters.currencyString(day.incomeAmount)) · 支出 \(BillLensFormatters.currencyString(day.expenseAmount))"
-                                )
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
-                            }
-                            Spacer()
-                            Text("净额 \(BillLensFormatters.currencyString(day.netAmount))")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(
-                                    day.netAmount >= 0
-                                        ? Color(red: 0.84, green: 0.38, blue: 0.29)
-                                        : Color(red: 0.16, green: 0.42, blue: 0.35))
-                        }
-
-                        ForEach(day.records) { record in
-                            HStack(spacing: 14) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(record.merchant ?? record.category)
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
-                                    Text(
-                                        "\(record.category) · \(BillLensFormatters.displayDateTime(record.transactionAt))"
-                                    )
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
-                                }
                                 Spacer()
-                                VStack(alignment: .trailing, spacing: 4) {
-                                    DirectionBadge(direction: record.direction)
+                                Text("净额 \(BillLensFormatters.currencyString(day.netAmount))")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(
+                                        day.netAmount >= 0
+                                            ? Color(red: 0.84, green: 0.38, blue: 0.29)
+                                            : Color(red: 0.16, green: 0.42, blue: 0.35))
+                            }
+                            ForEach(records) { record in
+                                HStack(spacing: 14) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(record.merchant ?? record.category)
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
+                                        Text(
+                                            "\(record.category) · \(BillLensFormatters.displayDateTime(record.transactionAt))"
+                                        )
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundStyle(Color(red: 0.50, green: 0.56, blue: 0.58))
+                                    }
+                                    Spacer()
                                     Text(BillLensFormatters.currencyString(record.amount))
-                                        .font(.system(size: 18, weight: .bold))
+                                        .font(.system(size: 16, weight: .bold))
                                         .foregroundStyle(
                                             record.direction == "income"
                                                 ? Color(red: 0.84, green: 0.38, blue: 0.29)
                                                 : Color(red: 0.10, green: 0.21, blue: 0.24))
                                 }
+                                .padding(.vertical, 6)
                             }
-                            .padding(.vertical, 6)
                         }
-                    }
-                    .padding(.horizontal, 4)
-                    if day.id != ledger.byDay.last?.id {
-                        Divider().opacity(0.3).padding(.vertical, 2)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        Divider().opacity(0.15).padding(.horizontal, 16)
                     }
                 }
             }
@@ -795,29 +917,27 @@ private struct LedgerShell: View {
         .scrollIndicators(.hidden)
     }
 
+    private func filteredRecords(_ records: [RecordItem]) -> [RecordItem] {
+        guard let filter = selectedCategoryFilter else { return records }
+        return records.filter { $0.category == filter }
+    }
+
     private func ledgerDayDetail(_ day: LedgerDayGroup) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let records = filteredRecords(day.records)
+        return VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text("当日消费详情")
-                        .font(.system(size: 16, weight: .bold))
+                    Text(BillLensFormatters.displayDay(day.day))
+                        .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
                     Spacer()
-                    Text(BillLensFormatters.displayDay(day.day))
+                    Text("支出 \(BillLensFormatters.currencyString(day.expenseAmount))")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
                 }
-                HStack(spacing: 12) {
-                    Text("支出 \(BillLensFormatters.currencyString(day.expenseAmount))")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
-                    Text("收入 \(BillLensFormatters.currencyString(day.incomeAmount))")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color(red: 0.84, green: 0.38, blue: 0.29))
-                }
             }
 
-            ForEach(Array(day.records.enumerated()), id: \.element.id) { index, record in
+            ForEach(Array(records.enumerated()), id: \.element.id) { index, record in
                 if index > 0 {
                     Divider().opacity(0.4)
                 }
@@ -1022,31 +1142,27 @@ private struct LedgerCalendarCell: Identifiable {
 
 private struct WelcomeBubble: View {
     var body: some View {
-        HStack(alignment: .bottom, spacing: 10) {
+        HStack(alignment: .top, spacing: 8) {
             AssistantAvatar()
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text("账单助手")
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                    .foregroundStyle(IMColors.textSecondary)
                 Text("输入一句账单描述，或上传图片、语音记账，我会先生成待确认记录。")
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
+                    .foregroundStyle(IMColors.textPrimary)
                 Text("刚刚")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Color(red: 0.55, green: 0.63, blue: 0.65))
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(IMColors.textTertiary)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                    .fill(Color.white)
+                RoundedRectangle(cornerRadius: LayoutMetrics.bubbleRadius, style: .continuous)
+                    .fill(IMColors.botBubble)
             )
-            .overlay(
-                RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                    .stroke(Color(red: 0.90, green: 0.937, blue: 0.921), lineWidth: 1)
-            )
+            Spacer(minLength: 44)
         }
-        .frame(maxWidth: 520, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -1056,63 +1172,43 @@ private struct MessageBubble: View {
 
     var body: some View {
         if message.role == "user" {
-            HStack(alignment: .bottom, spacing: 10) {
-                Spacer(minLength: 44)
-                VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 8) {
+                Spacer(minLength: 60)
+                VStack(alignment: .trailing, spacing: 2) {
                     Text(message.content)
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
+                        .foregroundStyle(IMColors.textPrimary)
                     Text(BillLensFormatters.displayDateTime(message.createdAt))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Color(red: 0.55, green: 0.63, blue: 0.65))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(IMColors.textTertiary)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
                 .background(
-                    RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 0.882, green: 0.949, blue: 0.922),
-                                    Color(red: 0.836, green: 0.921, blue: 0.890),
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                        .stroke(Color(red: 0.84, green: 0.914, blue: 0.885), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: LayoutMetrics.bubbleRadius, style: .continuous)
+                        .fill(IMColors.userBubble)
                 )
                 UserAvatar()
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .trailing)
         } else {
-            HStack(alignment: .bottom, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
                 AssistantAvatar()
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("账单助手")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                VStack(alignment: .leading, spacing: 2) {
                     Text(message.content)
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
+                        .foregroundStyle(IMColors.textPrimary)
                     Text(BillLensFormatters.displayDateTime(message.createdAt))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Color(red: 0.55, green: 0.63, blue: 0.65))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(IMColors.textTertiary)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
                 .background(
-                    RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                        .fill(Color.white)
+                    RoundedRectangle(cornerRadius: LayoutMetrics.bubbleRadius, style: .continuous)
+                        .fill(IMColors.botBubble)
                 )
-                .overlay(
-                    RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                        .stroke(Color(red: 0.90, green: 0.937, blue: 0.921), lineWidth: 1)
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Spacer(minLength: 60)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -1123,51 +1219,40 @@ private struct SpeechLiveBubble: View {
     let transcript: String
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            Spacer(minLength: 44)
-            VStack(alignment: .leading, spacing: 6) {
+        HStack(alignment: .top, spacing: 8) {
+            Spacer(minLength: 60)
+            VStack(alignment: .trailing, spacing: 4) {
                 if transcript.isEmpty {
                     HStack(spacing: 6) {
                         ProgressView()
                             .controlSize(.small)
                         Text("正在聆听...")
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Color(red: 0.55, green: 0.63, blue: 0.65))
+                            .foregroundStyle(IMColors.textTertiary)
                     }
                 } else {
                     Text(transcript)
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
+                        .foregroundStyle(IMColors.textPrimary)
                 }
                 HStack(spacing: 6) {
                     Circle()
                         .fill(Color.red)
                         .frame(width: 8, height: 8)
                     Text("录音中")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Color(red: 0.55, green: 0.63, blue: 0.65))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(IMColors.textTertiary)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(red: 0.882, green: 0.949, blue: 0.922), Color(red: 0.836, green: 0.921, blue: 0.890)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                    .foregroundStyle(Color(red: 0.84, green: 0.914, blue: 0.885))
+                RoundedRectangle(cornerRadius: LayoutMetrics.bubbleRadius, style: .continuous)
+                    .fill(IMColors.userBubble)
             )
             UserAvatar()
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }
 
@@ -1175,38 +1260,20 @@ private struct ProgressBubble: View {
     let message: String
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            AssistantAvatar()
-            VStack(alignment: .leading, spacing: 6) {
-                Text("账单助手")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
-                Text(message)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
-                    .lineSpacing(4)
-                HStack(spacing: 6) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("处理中")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Color(red: 0.55, green: 0.63, blue: 0.65))
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(
-                RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                    .fill(Color(red: 0.978, green: 0.988, blue: 0.983))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                    .foregroundStyle(Color(red: 0.83, green: 0.90, blue: 0.87))
-            )
-            .frame(maxWidth: 540, alignment: .leading)
+        HStack(spacing: 6) {
+            ProgressView()
+                .controlSize(.small)
+            Text(message)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(IMColors.textSecondary)
+                .lineLimit(2)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .background(
+            Capsule().fill(IMColors.systemMsgBg)
+        )
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
@@ -1221,60 +1288,64 @@ private struct DraftConversationCard: View {
     let copy: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 8) {
             AssistantAvatar()
             VStack(alignment: .leading, spacing: 8) {
-                Text("账单助手")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
                 Text(copy)
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
+                    .foregroundStyle(IMColors.textPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .lineLimit(2)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: LayoutMetrics.bubbleRadius, style: .continuous)
+                            .fill(IMColors.botBubble)
+                    )
 
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            DirectionBadge(direction: direction)
-                            Text(amount.map(BillLensFormatters.currencyString) ?? "¥0.00")
-                                .font(.system(size: 24, weight: .bold))
-                                .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
-                        }
-                        Spacer()
-                        StatusPill(title: status, warning: status != "已入库")
-                    }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(title)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
-                            .lineLimit(1)
-                        Text(
-                            "\(category) · \(merchant) · \(BillLensFormatters.displayDateTime(transactionAt))"
-                        )
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
-                        .lineLimit(1)
-                    }
-                }
-                .padding(13)
-                .background(
-                    RoundedRectangle(cornerRadius: LayoutMetrics.fieldRadius, style: .continuous)
-                        .fill(Color(red: 0.973, green: 0.985, blue: 0.979))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: LayoutMetrics.fieldRadius, style: .continuous)
-                        .stroke(Color(red: 0.89, green: 0.937, blue: 0.918), lineWidth: 1)
-                )
-                .frame(maxWidth: 540, alignment: .leading)
+                draftCardContent
+                    .padding(12)
+                    .background(
+                        RoundedRectangle(cornerRadius: LayoutMetrics.bubbleRadius, style: .continuous)
+                            .fill(IMColors.botBubble)
+                    )
+                    .frame(maxWidth: 520, alignment: .leading)
 
                 Text("刚刚")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Color(red: 0.55, green: 0.63, blue: 0.65))
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(IMColors.textTertiary)
             }
+            Spacer(minLength: 44)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var draftCardContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    DirectionBadge(direction: direction)
+                    Text(amount.map(BillLensFormatters.currencyString) ?? "¥0.00")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundStyle(IMColors.textPrimary)
+                }
+                Spacer()
+                StatusPill(title: status, warning: status != "已入库")
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(IMColors.textPrimary)
+                    .lineLimit(1)
+                Text(
+                    "\(category) · \(merchant) · \(BillLensFormatters.displayDateTime(transactionAt))"
+                )
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(IMColors.textSecondary)
+                .lineLimit(1)
+            }
+        }
     }
 }
 
@@ -1289,69 +1360,77 @@ private struct ComposerPanel: View {
     let onSubmit: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 8) {
-                Toggle("解析后自动保存", isOn: $autoConfirm)
-                    .toggleStyle(.switch)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
-                Spacer()
-                Text(statusText)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
-                    .lineLimit(1)
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            // 1px separator line
+            IMColors.divider.frame(height: 1)
 
-            HStack(spacing: 10) {
-                HStack(spacing: 10) {
-                    composerEditor
-
-                    HStack(spacing: 8) {
-                        ComposerIconButton(systemImage: "photo") { onImage() }
-                        ComposerIconButton(
-                            systemImage: isRecording ? "stop.circle.fill" : "mic.fill",
-                            tint: isRecording
-                                ? Color(red: 0.82, green: 0.33, blue: 0.28)
-                                : Color(red: 0.16, green: 0.42, blue: 0.35)
-                        ) {
-                            onVoice()
-                        }
-                        Button(action: onSubmit) {
-                            Image(systemName: "paperplane.fill")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(
-                                    width: LayoutMetrics.iconButtonSize,
-                                    height: LayoutMetrics.iconButtonSize
-                                )
-                                .background(Color(red: 0.10, green: 0.22, blue: 0.24))
-                                .clipShape(Circle())
-                        }
-                        .buttonStyle(.plain)
-                    }
+            // Toolbar row
+            HStack(spacing: 12) {
+                ComposerIconButton(systemImage: "photo") { onImage() }
+                ComposerIconButton(
+                    systemImage: isRecording ? "stop.circle.fill" : "mic.fill",
+                    tint: isRecording ? Color(red: 0.82, green: 0.33, blue: 0.28) : IMColors.textSecondary
+                ) {
+                    onVoice()
                 }
-                .frame(height: LayoutMetrics.inputBarHeight)
-                .padding(.horizontal, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                        .fill(Color.white)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: LayoutMetrics.panelRadius, style: .continuous)
-                        .stroke(Color(red: 0.88, green: 0.929, blue: 0.910), lineWidth: 1)
-                )
+
+                Divider().frame(height: 16).opacity(0.3)
+
+                Toggle("自动保存", isOn: $autoConfirm)
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(IMColors.textSecondary)
+
+                Spacer()
+
+                if !statusText.isEmpty {
+                    Text(statusText)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(IMColors.textTertiary)
+                        .lineLimit(1)
+                }
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+
+            // Text input area — borderless, transparent
+            composerEditor
+                .frame(maxWidth: .infinity, minHeight: 48, maxHeight: 48)
+                .padding(.horizontal, 12)
+
+            // Bottom bar with send button
+            HStack {
+                Spacer()
+                Text("Enter 发送")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(IMColors.textTertiary)
+                Button(action: onSubmit) {
+                    Text("发送")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(IMColors.sendButton)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 8)
         }
+        .background(IMColors.chatBg)
     }
 
     private var composerEditor: some View {
         ComposerInputField(
             text: $composerText,
-            placeholder: "输入或语音记账，如\"打车花了30块\"…",
+            placeholder: "输入账单，如\"打车花了30块\"…",
             focusToken: focusToken,
             onSubmit: onSubmit
         )
-        .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36)
         .onAppear {
             focusToken = UUID()
         }
@@ -1422,23 +1501,15 @@ private struct ComposerInputField: NSViewRepresentable {
 
 private struct ComposerIconButton: View {
     let systemImage: String
-    var tint: Color = Color(red: 0.40, green: 0.49, blue: 0.52)
+    var tint: Color = IMColors.textSecondary
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(tint)
                 .frame(width: LayoutMetrics.iconButtonSize, height: LayoutMetrics.iconButtonSize)
-                .background(
-                    RoundedRectangle(cornerRadius: LayoutMetrics.compactRadius, style: .continuous)
-                        .fill(Color(red: 0.964, green: 0.979, blue: 0.973))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: LayoutMetrics.compactRadius, style: .continuous)
-                        .stroke(Color(red: 0.89, green: 0.937, blue: 0.918), lineWidth: 1)
-                )
         }
         .buttonStyle(.plain)
     }
@@ -1451,39 +1522,18 @@ private struct ReviewSummaryCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("当前金额")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 DirectionBadge(direction: direction)
                 Text(amount.map(BillLensFormatters.currencyString) ?? "¥0.00")
                     .font(.system(size: 28, weight: .bold))
-                    .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
+                    .foregroundStyle(IMColors.textPrimary)
             }
             Text(meta)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                .foregroundStyle(IMColors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .lineLimit(1)
         }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: LayoutMetrics.fieldRadius, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.955, green: 0.984, blue: 0.972),
-                            Color(red: 0.930, green: 0.968, blue: 0.952),
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: LayoutMetrics.fieldRadius, style: .continuous)
-                .stroke(Color(red: 0.878, green: 0.929, blue: 0.908), lineWidth: 1)
-        )
     }
 }
 
@@ -1491,67 +1541,52 @@ private struct EmptyReviewState: View {
     let latestRecord: RecordItem?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("等待解析结果")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Color(red: 0.14, green: 0.26, blue: 0.29))
-            Text("左侧发送一条账单内容后，这里会显示结构化字段，可继续修改并确认入库。")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(IMColors.textPrimary)
+            Text("左侧发送账单内容后，这里会显示可编辑的结构化字段。")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(IMColors.textSecondary)
             if let latestRecord {
                 Text(
                     "最近入库：\(latestRecord.category) · \(BillLensFormatters.currencyString(latestRecord.amount))"
                 )
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(IMColors.textSecondary)
+                .padding(.top, 4)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(red: 0.988, green: 0.994, blue: 0.991))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [5, 5]))
-                .foregroundStyle(Color(red: 0.84, green: 0.90, blue: 0.88))
-        )
     }
 }
 
 private struct ReviewField<Content: View>: View {
     let title: String
-    var minimumHeight: CGFloat = LayoutMetrics.formHeight
+    var minimumHeight: CGFloat = 44
     var alignTop = false
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(Color(red: 0.42, green: 0.51, blue: 0.54))
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(IMColors.textSecondary)
             content
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
+                .foregroundStyle(IMColors.textPrimary)
                 .frame(
                     maxWidth: .infinity, maxHeight: .infinity,
                     alignment: alignTop ? .topLeading : .leading)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
         .frame(
             maxWidth: .infinity, minHeight: minimumHeight,
             alignment: alignTop ? .topLeading : .center
         )
-        .background(
-            RoundedRectangle(cornerRadius: LayoutMetrics.fieldRadius, style: .continuous)
-                .fill(Color(red: 0.974, green: 0.985, blue: 0.980))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: LayoutMetrics.fieldRadius, style: .continuous)
-                .stroke(Color(red: 0.89, green: 0.937, blue: 0.918), lineWidth: 1)
-        )
+        .overlay(alignment: .bottom) {
+            IMColors.divider.frame(height: 1).opacity(0.5)
+        }
     }
 }
 
@@ -1595,22 +1630,18 @@ private struct LedgerSummaryCard: View {
 private struct UserAvatar: View {
     var body: some View {
         ZStack {
-            Circle()
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color(red: 0.165, green: 0.426, blue: 0.384),
-                            Color(red: 0.12, green: 0.34, blue: 0.30),
+                            Color(red: 0.231, green: 0.510, blue: 0.965),
+                            Color(red: 0.18, green: 0.42, blue: 0.85),
                         ],
                         startPoint: .top,
                         endPoint: .bottom
                     )
                 )
-                .frame(width: 34, height: 34)
-                .overlay(
-                    Circle()
-                        .stroke(Color(red: 0.12, green: 0.38, blue: 0.33), lineWidth: 1)
-                )
+                .frame(width: LayoutMetrics.avatarSize, height: LayoutMetrics.avatarSize)
             Image(systemName: "person.fill")
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(.white)
@@ -1621,7 +1652,7 @@ private struct UserAvatar: View {
 private struct AssistantAvatar: View {
     var body: some View {
         ZStack {
-            Circle()
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .fill(
                     LinearGradient(
                         colors: [
@@ -1632,13 +1663,9 @@ private struct AssistantAvatar: View {
                         endPoint: .bottom
                     )
                 )
-                .frame(width: 34, height: 34)
-                .overlay(
-                    Circle()
-                        .stroke(Color(red: 0.85, green: 0.914, blue: 0.889), lineWidth: 1)
-                )
-            Image(systemName: "list.bullet.rectangle.portrait")
-                .font(.system(size: 13, weight: .bold))
+                .frame(width: LayoutMetrics.avatarSize, height: LayoutMetrics.avatarSize)
+            Image(systemName: "cpu")
+                .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(Color(red: 0.165, green: 0.426, blue: 0.384))
         }
     }
@@ -1762,5 +1789,55 @@ private struct PanelCardStyle: View {
             )
             .shadow(
                 color: Color(red: 0.54, green: 0.69, blue: 0.64).opacity(0.035), radius: 10, y: 6)
+    }
+}
+
+private struct WrappingHStack: Layout {
+    var alignment: HorizontalAlignment = .leading
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = computeRows(proposal: proposal, subviews: subviews)
+        let height = rows.reduce(CGFloat(0)) { total, row in
+            total + row.height + (total > 0 ? spacing : 0)
+        }
+        return CGSize(width: proposal.width ?? 0, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let rows = computeRows(proposal: proposal, subviews: subviews)
+        var y = bounds.minY
+        for row in rows {
+            var x = bounds.minX
+            for item in row.items {
+                let size = item.sizeThatFits(.unspecified)
+                item.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + spacing
+        }
+    }
+
+    private struct Row {
+        var items: [LayoutSubview] = []
+        var height: CGFloat = 0
+    }
+
+    private func computeRows(proposal: ProposedViewSize, subviews: Subviews) -> [Row] {
+        let maxWidth = proposal.width ?? .infinity
+        var rows: [Row] = [Row()]
+        var currentWidth: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            let needed = currentWidth > 0 ? size.width + spacing : size.width
+            if currentWidth + needed > maxWidth && currentWidth > 0 {
+                rows.append(Row())
+                currentWidth = 0
+            }
+            rows[rows.count - 1].items.append(subview)
+            rows[rows.count - 1].height = max(rows[rows.count - 1].height, size.height)
+            currentWidth += (currentWidth > 0 ? spacing : 0) + size.width
+        }
+        return rows
     }
 }
