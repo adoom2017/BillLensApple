@@ -196,6 +196,7 @@ public struct RootView: View {
                             selectedPage == page
                                 ? Color(red: 0.885, green: 0.949, blue: 0.922) : .clear)
                 )
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
     }
@@ -752,6 +753,7 @@ private struct LedgerShell: View {
                                 ? Color(red: 0.93, green: 0.94, blue: 0.94)
                                 : Color.clear)
                 )
+                .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -828,6 +830,7 @@ private struct LedgerShell: View {
                             .fill(Color.black.opacity(0.03))
                         : nil
                 )
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
     }
@@ -841,7 +844,13 @@ private struct LedgerShell: View {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
-                        .frame(width: 28, height: 28)
+                        .frame(width: 36, height: 36)
+                        .background(
+                            Circle()
+                                .fill(Color.white.opacity(0.96))
+                                .overlay(Circle().stroke(Color.black.opacity(0.06), lineWidth: 1))
+                        )
+                        .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .disabled(!canShiftMonth(in: ledger, direction: -1))
@@ -863,7 +872,13 @@ private struct LedgerShell: View {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
-                        .frame(width: 28, height: 28)
+                        .frame(width: 36, height: 36)
+                        .background(
+                            Circle()
+                                .fill(Color.white.opacity(0.96))
+                                .overlay(Circle().stroke(Color.black.opacity(0.06), lineWidth: 1))
+                        )
+                        .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
                 .disabled(!canShiftMonth(in: ledger, direction: 1))
@@ -883,46 +898,21 @@ private struct LedgerShell: View {
             LazyVGrid(
                 columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 4
             ) {
-                ForEach(cachedCalendarCells) { cell in
+                ForEach(Array(cachedCalendarCells.enumerated()), id: \.element.id) { _, cell in
                     if let day = cell.dayNumber, let date = cell.date {
-                        Button {
+                        CalendarDayCellButton(
+                            day: day,
+                            date: date,
+                            amountText: cell.amountText,
+                            isSelected: cell.isSelected,
+                            isHot: cell.isHot,
+                            backgroundStyle: calendarCellBackground(for: cell)
+                        ) {
                             selectedLedgerDate = date
-                        } label: {
-                            VStack(spacing: 1) {
-                                Text("\(day)")
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundStyle(
-                                        cell.isSelected
-                                            ? .white : Color(red: 0.10, green: 0.21, blue: 0.24))
-                                Text(cell.amountText)
-                                    .font(.system(size: 9, weight: .medium))
-                                    .foregroundStyle(
-                                        cell.isSelected
-                                            ? Color.white.opacity(0.9)
-                                            : (cell.isHot
-                                                ? Color(red: 0.84, green: 0.38, blue: 0.29)
-                                                : Color(red: 0.40, green: 0.49, blue: 0.52))
-                                    )
-                                    .lineLimit(1)
-                            }
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(calendarCellBackground(for: cell))
-                            )
-                            .overlay(
-                                cell.isSelected
-                                    ? RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                        .stroke(Color.black.opacity(0.15), lineWidth: 1)
-                                        .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 1)
-                                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                                    : nil
-                            )
                         }
-                        .buttonStyle(.plain)
                     } else {
                         Color.clear
-                            .frame(minHeight: 44)
+                            .frame(minHeight: 54)
                             .allowsHitTesting(false)
                     }
                 }
@@ -976,7 +966,12 @@ private struct LedgerShell: View {
                                         Image(systemName: "trash")
                                             .font(.system(size: 12, weight: .medium))
                                             .foregroundStyle(Color(red: 0.65, green: 0.30, blue: 0.27))
-                                            .frame(width: 28, height: 28)
+                                            .frame(width: 36, height: 36)
+                                            .background(
+                                                Circle()
+                                                    .fill(Color(red: 0.98, green: 0.95, blue: 0.95))
+                                            )
+                                            .contentShape(Circle())
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -1043,7 +1038,12 @@ private struct LedgerShell: View {
                         Image(systemName: "trash")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(Color(red: 0.65, green: 0.30, blue: 0.27))
-                            .frame(width: 28, height: 28)
+                            .frame(width: 36, height: 36)
+                            .background(
+                                Circle()
+                                    .fill(Color(red: 0.98, green: 0.95, blue: 0.95))
+                            )
+                            .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
                 }
@@ -1227,6 +1227,71 @@ private struct LedgerCalendarCell: Identifiable {
 
     static let empty = LedgerCalendarCell(
         date: nil, dayNumber: nil, amountText: "", isSelected: false, isHot: false)
+}
+
+private struct CalendarCellLabel: View {
+    let day: Int
+    let amountText: String
+    let isSelected: Bool
+    let isHot: Bool
+
+    var body: some View {
+        VStack(spacing: 1) {
+            Text("\(day)")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(dayTextColor)
+            Text(amountText)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(amountTextColor)
+                .lineLimit(1)
+        }
+    }
+
+    private var dayTextColor: Color {
+        isSelected ? .white : Color(red: 0.10, green: 0.21, blue: 0.24)
+    }
+
+    private var amountTextColor: Color {
+        if isSelected {
+            return Color.white.opacity(0.9)
+        }
+        if isHot {
+            return Color(red: 0.84, green: 0.38, blue: 0.29)
+        }
+        return Color(red: 0.40, green: 0.49, blue: 0.52)
+    }
+}
+
+private struct CalendarDayCellButton<Background: ShapeStyle>: View {
+    let day: Int
+    let date: String
+    let amountText: String
+    let isSelected: Bool
+    let isHot: Bool
+    let backgroundStyle: Background
+    let action: () -> Void
+
+    var body: some View {
+        let cellShape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+
+        Button(action: action) {
+            CalendarCellLabel(day: day, amountText: amountText, isSelected: isSelected, isHot: isHot)
+                .frame(maxWidth: .infinity, minHeight: 54)
+                .background(cellShape.fill(backgroundStyle))
+                .overlay {
+                    if isSelected {
+                        cellShape
+                            .stroke(Color.black.opacity(0.15), lineWidth: 1)
+                            .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 1)
+                            .clipShape(cellShape)
+                    } else {
+                        cellShape.stroke(Color.black.opacity(0.08), lineWidth: 1)
+                    }
+                }
+                .contentShape(cellShape)
+        }
+        .buttonStyle(.plain)
+    }
 }
 
 private struct WelcomeBubble: View {
@@ -1602,7 +1667,13 @@ private struct ComposerIconButton: View {
             Image(systemName: systemImage)
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(tint)
-                .frame(width: LayoutMetrics.iconButtonSize, height: LayoutMetrics.iconButtonSize)
+                .frame(width: 36, height: 36)
+                .background(
+                    Circle()
+                        .fill(Color.white.opacity(0.92))
+                        .overlay(Circle().stroke(Color.black.opacity(0.05), lineWidth: 1))
+                )
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
     }
@@ -1839,6 +1910,7 @@ private struct ActionButton: View {
                     Capsule()
                         .stroke(borderColor, lineWidth: kind == .primary ? 0 : 1)
                 )
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .fixedSize(horizontal: true, vertical: false)
