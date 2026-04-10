@@ -2,14 +2,6 @@ import Foundation
 
 @MainActor
 enum BillLensFormatters {
-    static let currency: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = "CNY"
-        formatter.maximumFractionDigits = 2
-        return formatter
-    }()
-
     static let timestampInput: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -59,7 +51,25 @@ enum BillLensFormatters {
         return day.string(from: date)
     }
 
-    static func currencyString(_ amount: Double) -> String {
-        currency.string(from: NSNumber(value: amount)) ?? "¥\(amount)"
+    static func currencyString(_ amount: Double, currencyCode: String? = "CNY") -> String {
+        let code = normalizedCurrencyCode(currencyCode) ?? "CNY"
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.numberStyle = .currency
+        formatter.currencyCode = code
+        formatter.maximumFractionDigits = 2
+
+        if let formatted = formatter.string(from: NSNumber(value: amount)) {
+            return formatted
+        }
+
+        return "\(code) \(String(format: "%.2f", amount))"
+    }
+
+    static func normalizedCurrencyCode(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return trimmed.uppercased()
     }
 }

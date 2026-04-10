@@ -331,6 +331,7 @@ private struct ChatScrollView: View {
                     title: draft.note ?? draft.merchant ?? "待确认账单",
                     direction: draft.direction ?? "expense",
                     amount: draft.amount,
+                    currency: draft.currency,
                     category: draft.category ?? "未分类",
                     merchant: draft.merchant ?? "未填写商户",
                     transactionAt: draft.transactionAt,
@@ -342,6 +343,7 @@ private struct ChatScrollView: View {
                     title: record.note ?? record.merchant ?? "最近入库账单",
                     direction: record.direction,
                     amount: record.amount,
+                    currency: record.currency,
                     category: record.category,
                     merchant: record.merchant ?? "未填写商户",
                     transactionAt: record.transactionAt,
@@ -384,6 +386,7 @@ private struct ReviewPanel: View {
             ReviewSummaryCard(
                 direction: store.draftForm.direction,
                 amount: store.draft?.amount,
+                currency: store.draft?.currency ?? store.draftForm.currency,
                 meta: reviewSummaryMeta
             )
             .padding(.horizontal, 16)
@@ -444,6 +447,17 @@ private struct ReviewPanel: View {
             ReviewField(title: "金额") {
                 TextField("0.00", text: $store.draftForm.amount)
                     .textFieldStyle(.plain)
+            }
+
+            ReviewField(title: "币种") {
+                TextField(
+                    "例如：CNY / USD / EUR",
+                    text: Binding(
+                        get: { store.draftForm.currency },
+                        set: { store.draftForm.currency = $0.uppercased() }
+                    )
+                )
+                .textFieldStyle(.plain)
             }
 
             ReviewField(title: "分类") {
@@ -656,7 +670,7 @@ private struct LedgerShell: View {
             }
         } message: {
             if let record = recordToDelete {
-                Text("确定要删除「\(record.merchant ?? record.category) \(BillLensFormatters.currencyString(record.amount))」吗？")
+                Text("确定要删除「\(record.merchant ?? record.category) \(BillLensFormatters.currencyString(record.amount, currencyCode: record.currency))」吗？")
             }
         }
     }
@@ -664,27 +678,58 @@ private struct LedgerShell: View {
     private func statBar(_ ledger: LedgerSnapshot) -> some View {
         let billCount = ledger.byDay.reduce(0) { $0 + $1.records.count }
         let statBg = RoundedRectangle(cornerRadius: 8, style: .continuous)
-        return HStack(spacing: 0) {
-            LedgerSummaryCard(title: "支出",
-                value: BillLensFormatters.currencyString(ledger.summary.summary.expenseAmount),
-                accent: .expense)
-            Divider().frame(height: 24).opacity(0.2).padding(.horizontal, 8)
-            LedgerSummaryCard(title: "收入",
-                value: BillLensFormatters.currencyString(ledger.summary.summary.incomeAmount),
-                accent: .income)
-            Divider().frame(height: 24).opacity(0.2).padding(.horizontal, 8)
-            LedgerSummaryCard(title: "笔数", value: "\(billCount)", accent: .neutral)
-            Divider().frame(height: 24).opacity(0.2).padding(.horizontal, 8)
-            LedgerSummaryCard(title: "同步", value: "\(ledger.pendingSyncCount)", accent: .neutral)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 0) {
+                LedgerSummaryCard(
+                    title: "支出",
+                    value: BillLensFormatters.currencyString(
+                        ledger.summary.summary.expenseAmount,
+                        currencyCode: ledger.statsCurrency
+                    ),
+                    accent: .expense
+                )
+                Divider().frame(height: 24).opacity(0.2).padding(.horizontal, 8)
+                LedgerSummaryCard(
+                    title: "收入",
+                    value: BillLensFormatters.currencyString(
+                        ledger.summary.summary.incomeAmount,
+                        currencyCode: ledger.statsCurrency
+                    ),
+                    accent: .income
+                )
+                Divider().frame(height: 24).opacity(0.2).padding(.horizontal, 8)
+                LedgerSummaryCard(title: "笔数", value: "\(billCount)", accent: .neutral)
+                Divider().frame(height: 24).opacity(0.2).padding(.horizontal, 8)
+                LedgerSummaryCard(title: "同步", value: "\(ledger.pendingSyncCount)", accent: .neutral)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                statBg
+                    .fill(Color(red: 0.965, green: 0.97, blue: 0.97))
+                    .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
+                    .overlay(statBg.stroke(Color.black.opacity(0.04), lineWidth: 0.5))
+            )
+
+            if let warning = ledger.fxWarning {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color(red: 0.72, green: 0.46, blue: 0.10))
+                    Text(warning)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color(red: 0.52, green: 0.37, blue: 0.12))
+                        .lineLimit(2)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color(red: 1.0, green: 0.963, blue: 0.902))
+                )
+            }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(
-            statBg
-                .fill(Color(red: 0.965, green: 0.97, blue: 0.97))
-                .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
-                .overlay(statBg.stroke(Color.black.opacity(0.04), lineWidth: 0.5))
-        )
     }
 
     private func ledgerModeButton(_ mode: LedgerViewMode, title: String) -> some View {
@@ -715,7 +760,7 @@ private struct LedgerShell: View {
         Group {
             if let selectedGroup = selectedLedgerGroup(in: ledger) {
                 ScrollView {
-                    ledgerDayDetail(selectedGroup)
+                    ledgerDayDetail(selectedGroup, statsCurrency: ledger.statsCurrency)
                 }
                 .scrollIndicators(.automatic)
             } else {
@@ -897,7 +942,9 @@ private struct LedgerShell: View {
                                     .font(.system(size: 15, weight: .bold))
                                     .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
                                 Spacer()
-                                Text("净额 \(BillLensFormatters.currencyString(day.netAmount))")
+                                Text(
+                                    "净额 \(BillLensFormatters.currencyString(day.netAmount, currencyCode: ledger.statsCurrency))"
+                                )
                                     .font(.system(size: 12, weight: .medium))
                                     .foregroundStyle(
                                         day.netAmount >= 0
@@ -917,7 +964,7 @@ private struct LedgerShell: View {
                                         .foregroundStyle(Color(red: 0.50, green: 0.56, blue: 0.58))
                                     }
                                     Spacer()
-                                    Text(BillLensFormatters.currencyString(record.amount))
+                                    Text(BillLensFormatters.currencyString(record.amount, currencyCode: record.currency))
                                         .font(.system(size: 16, weight: .bold))
                                         .foregroundStyle(
                                             record.direction == "income"
@@ -951,7 +998,7 @@ private struct LedgerShell: View {
         return records.filter { $0.category == filter }
     }
 
-    private func ledgerDayDetail(_ day: LedgerDayGroup) -> some View {
+    private func ledgerDayDetail(_ day: LedgerDayGroup, statsCurrency: String) -> some View {
         let records = filteredRecords(day.records)
         return VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
@@ -960,7 +1007,9 @@ private struct LedgerShell: View {
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(Color(red: 0.10, green: 0.21, blue: 0.24))
                     Spacer()
-                    Text("支出 \(BillLensFormatters.currencyString(day.expenseAmount))")
+                    Text(
+                        "支出 \(BillLensFormatters.currencyString(day.expenseAmount, currencyCode: statsCurrency))"
+                    )
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
                 }
@@ -982,7 +1031,7 @@ private struct LedgerShell: View {
                         .foregroundStyle(Color(red: 0.40, green: 0.49, blue: 0.52))
                     }
                     Spacer()
-                    Text(BillLensFormatters.currencyString(record.amount))
+                    Text(BillLensFormatters.currencyString(record.amount, currencyCode: record.currency))
                         .font(.system(size: 16, weight: .bold))
                         .foregroundStyle(
                             record.direction == "income"
@@ -1120,7 +1169,7 @@ private struct LedgerShell: View {
                 LedgerCalendarCell(
                     date: date,
                     dayNumber: day,
-                    amountText: amount.map(compactAmount) ?? "",
+                    amountText: amount.map { compactAmount($0, currencyCode: ledger.statsCurrency) } ?? "",
                     isSelected: date == selectedLedgerDate,
                     isHot: date == hottestDate && amount != nil
                 )
@@ -1148,11 +1197,13 @@ private struct LedgerShell: View {
         return AnyShapeStyle(Color.clear)
     }
 
-    private func compactAmount(_ amount: Double) -> String {
+    private func compactAmount(_ amount: Double, currencyCode: String) -> String {
+        let code = BillLensFormatters.normalizedCurrencyCode(currencyCode) ?? "CNY"
+        let prefix = code == "CNY" ? "¥" : "\(code) "
         if amount >= 1000 {
-            return String(format: "¥%.1fk", amount / 1000)
+            return prefix + String(format: "%.1fk", amount / 1000)
         }
-        return "¥\(Int(amount.rounded()))"
+        return "\(prefix)\(Int(amount.rounded()))"
     }
 
     private func dateFrom(year: Int, month: Int, day: Int) -> Date {
@@ -1319,6 +1370,7 @@ private struct DraftConversationCard: View {
     let title: String
     let direction: String
     let amount: Double?
+    let currency: String?
     let category: String
     let merchant: String
     let transactionAt: String?
@@ -1363,7 +1415,10 @@ private struct DraftConversationCard: View {
             HStack {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     DirectionBadge(direction: direction)
-                    Text(amount.map(BillLensFormatters.currencyString) ?? "¥0.00")
+                    Text(
+                        amount.map { BillLensFormatters.currencyString($0, currencyCode: currency) }
+                            ?? "¥0.00"
+                    )
                         .font(.system(size: 24, weight: .bold))
                         .foregroundStyle(IMColors.textPrimary)
                 }
@@ -1556,13 +1611,17 @@ private struct ComposerIconButton: View {
 private struct ReviewSummaryCard: View {
     let direction: String
     let amount: Double?
+    let currency: String?
     let meta: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 DirectionBadge(direction: direction)
-                Text(amount.map(BillLensFormatters.currencyString) ?? "¥0.00")
+                Text(
+                    amount.map { BillLensFormatters.currencyString($0, currencyCode: currency) }
+                        ?? "¥0.00"
+                )
                     .font(.system(size: 28, weight: .bold))
                     .foregroundStyle(IMColors.textPrimary)
             }
@@ -1588,7 +1647,7 @@ private struct EmptyReviewState: View {
                 .foregroundStyle(IMColors.textSecondary)
             if let latestRecord {
                 Text(
-                    "最近入库：\(latestRecord.category) · \(BillLensFormatters.currencyString(latestRecord.amount))"
+                    "最近入库：\(latestRecord.category) · \(BillLensFormatters.currencyString(latestRecord.amount, currencyCode: latestRecord.currency))"
                 )
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(IMColors.textSecondary)

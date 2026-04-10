@@ -1,7 +1,7 @@
 mod models;
 
 use anyhow::{Context, Result, anyhow};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 pub use models::*;
 use sqlx::{
     FromRow, QueryBuilder, Row, Sqlite, SqlitePool,
@@ -67,7 +67,8 @@ impl BillRepository {
         .context("failed to insert record")?;
 
         let record = row.try_into()?;
-        self.enqueue_sync_event(profile_id, &record, "create").await?;
+        self.enqueue_sync_event(profile_id, &record, "create")
+            .await?;
         Ok(record)
     }
 
@@ -109,7 +110,8 @@ impl BillRepository {
         .ok_or_else(|| anyhow!("record not found"))?;
 
         let record = row.try_into()?;
-        self.enqueue_sync_event(profile_id, &record, "update").await?;
+        self.enqueue_sync_event(profile_id, &record, "update")
+            .await?;
         Ok(record)
     }
 
@@ -133,7 +135,8 @@ impl BillRepository {
         .ok_or_else(|| anyhow!("record not found"))?;
 
         let record = row.try_into()?;
-        self.enqueue_sync_event(profile_id, &record, "delete").await?;
+        self.enqueue_sync_event(profile_id, &record, "delete")
+            .await?;
         Ok(record)
     }
 
@@ -232,7 +235,10 @@ impl BillRepository {
         row.try_into()
     }
 
-    pub async fn latest_active_record_draft(&self, profile_id: &str) -> Result<Option<RecordDraft>> {
+    pub async fn latest_active_record_draft(
+        &self,
+        profile_id: &str,
+    ) -> Result<Option<RecordDraft>> {
         let row = sqlx::query_as::<_, RecordDraftRow>(
             r#"
             SELECT * FROM record_drafts
@@ -266,7 +272,11 @@ impl BillRepository {
         row.map(TryInto::try_into).transpose()
     }
 
-    pub async fn mark_record_draft_confirmed(&self, draft_id: Uuid, record_id: Uuid) -> Result<RecordDraft> {
+    pub async fn mark_record_draft_confirmed(
+        &self,
+        draft_id: Uuid,
+        record_id: Uuid,
+    ) -> Result<RecordDraft> {
         let row = sqlx::query_as::<_, RecordDraftRow>(
             r#"
             UPDATE record_drafts
@@ -369,9 +379,7 @@ impl BillRepository {
         direction: Option<RecordDirection>,
         category: Option<&str>,
     ) -> Result<Vec<Record>> {
-        let mut builder = QueryBuilder::<Sqlite>::new(
-            "SELECT * FROM records WHERE profile_id = ",
-        );
+        let mut builder = QueryBuilder::<Sqlite>::new("SELECT * FROM records WHERE profile_id = ");
         builder
             .push_bind(profile_id)
             .push(" AND deleted_at IS NULL AND transaction_at >= ")
@@ -517,7 +525,12 @@ impl BillRepository {
             .context("failed to aggregate category stats")
     }
 
-    async fn enqueue_sync_event(&self, profile_id: &str, record: &Record, operation: &str) -> Result<()> {
+    async fn enqueue_sync_event(
+        &self,
+        profile_id: &str,
+        record: &Record,
+        operation: &str,
+    ) -> Result<()> {
         let payload = serde_json::to_string(record).context("failed to serialize sync payload")?;
         sqlx::query(
             r#"
@@ -552,6 +565,58 @@ impl BillRepository {
             .await
             .context("failed to ensure sync state")?;
         Ok(())
+    }
+
+    pub async fn upsert_fx_rate(
+        &self,
+        base_currency: &str,
+        quote_currency: &str,
+        rate: f64,
+        rate_date: NaiveDate,
+        fetched_at: DateTime<Utc>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO fx_rates (base_currency, quote_currency, rate, rate_date, fetched_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(base_currency, quote_currency, rate_date)
+            DO UPDATE SET
+                rate = excluded.rate,
+                fetched_at = excluded.fetched_at
+            "#,
+        )
+        .bind(base_currency)
+        .bind(quote_currency)
+        .bind(rate)
+        .bind(rate_date.to_string())
+        .bind(fetched_at)
+        .execute(&self.pool)
+        .await
+        .context("failed to upsert fx rate")?;
+        Ok(())
+    }
+
+    pub async fn latest_fx_rate(
+        &self,
+        base_currency: &str,
+        quote_currency: &str,
+    ) -> Result<Option<FxRateCache>> {
+        let row = sqlx::query_as::<_, FxRateRow>(
+            r#"
+            SELECT base_currency, quote_currency, rate, rate_date, fetched_at
+            FROM fx_rates
+            WHERE base_currency = ?1 AND quote_currency = ?2
+            ORDER BY fetched_at DESC, rate_date DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(base_currency)
+        .bind(quote_currency)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load cached fx rate")?;
+
+        row.map(TryInto::try_into).transpose()
     }
 }
 
@@ -693,7 +758,8 @@ impl TryFrom<DirectionStatsRow> for DirectionStatsItem {
 
     fn try_from(row: DirectionStatsRow) -> Result<Self> {
         Ok(Self {
-            direction: RecordDirection::try_from(row.direction.as_str()).map_err(anyhow::Error::msg)?,
+            direction: RecordDirection::try_from(row.direction.as_str())
+                .map_err(anyhow::Error::msg)?,
             total_amount: row.total_amount,
             record_count: row.record_count,
         })
@@ -708,13 +774,38 @@ struct CategoryStatsRow {
     record_count: i64,
 }
 
+#[derive(Debug, FromRow)]
+struct FxRateRow {
+    base_currency: String,
+    quote_currency: String,
+    rate: f64,
+    rate_date: String,
+    fetched_at: DateTime<Utc>,
+}
+
+impl TryFrom<FxRateRow> for FxRateCache {
+    type Error = anyhow::Error;
+
+    fn try_from(row: FxRateRow) -> Result<Self> {
+        Ok(Self {
+            base_currency: row.base_currency,
+            quote_currency: row.quote_currency,
+            rate: row.rate,
+            rate_date: NaiveDate::parse_from_str(&row.rate_date, "%Y-%m-%d")
+                .context("invalid fx rate_date")?,
+            fetched_at: row.fetched_at,
+        })
+    }
+}
+
 impl TryFrom<CategoryStatsRow> for CategoryStatsItem {
     type Error = anyhow::Error;
 
     fn try_from(row: CategoryStatsRow) -> Result<Self> {
         Ok(Self {
             category: row.category,
-            direction: RecordDirection::try_from(row.direction.as_str()).map_err(anyhow::Error::msg)?,
+            direction: RecordDirection::try_from(row.direction.as_str())
+                .map_err(anyhow::Error::msg)?,
             total_amount: row.total_amount,
             record_count: row.record_count,
         })
@@ -727,7 +818,8 @@ mod tests {
 
     #[tokio::test]
     async fn migrations_create_sync_outbox() {
-        let db_path = std::env::temp_dir().join(format!("billlens-apple-db-{}.sqlite", Uuid::new_v4()));
+        let db_path =
+            std::env::temp_dir().join(format!("billlens-apple-db-{}.sqlite", Uuid::new_v4()));
         let repo = BillRepository::connect(&db_path).await.unwrap();
         repo.ensure_sync_state("test-profile").await.unwrap();
         let row = sqlx::query("SELECT COUNT(*) AS count FROM sync_state WHERE profile_id = ?1")
@@ -740,7 +832,8 @@ mod tests {
 
     #[tokio::test]
     async fn create_record_enqueues_sync_event() {
-        let db_path = std::env::temp_dir().join(format!("billlens-apple-db-{}.sqlite", Uuid::new_v4()));
+        let db_path =
+            std::env::temp_dir().join(format!("billlens-apple-db-{}.sqlite", Uuid::new_v4()));
         let repo = BillRepository::connect(&db_path).await.unwrap();
         let _ = repo
             .create_record(
@@ -761,5 +854,24 @@ mod tests {
             .unwrap();
 
         assert_eq!(repo.pending_sync_count("test-profile").await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn upsert_fx_rate_persists_latest_cache() {
+        let db_path =
+            std::env::temp_dir().join(format!("billlens-apple-db-{}.sqlite", Uuid::new_v4()));
+        let repo = BillRepository::connect(&db_path).await.unwrap();
+        let fetched_at = Utc::now();
+        let rate_date = NaiveDate::from_ymd_opt(2026, 4, 10).unwrap();
+
+        repo.upsert_fx_rate("USD", "CNY", 6.83, rate_date, fetched_at)
+            .await
+            .unwrap();
+
+        let cached = repo.latest_fx_rate("USD", "CNY").await.unwrap().unwrap();
+        assert_eq!(cached.base_currency, "USD");
+        assert_eq!(cached.quote_currency, "CNY");
+        assert_eq!(cached.rate, 6.83);
+        assert_eq!(cached.rate_date, rate_date);
     }
 }

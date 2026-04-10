@@ -30,12 +30,18 @@ JSON 格式如下：
 {
   "direction": "income" | "expense" | null,
   "amount": number | null,
-  "currency": "CNY" | string | null,
+  "currency": "ISO 4217 code, e.g. CNY/USD/EUR/HKD/JPY/GBP" | null,
   "category": string | null,
   "merchant": string | null,
   "transaction_at": "RFC3339 datetime" | null,
   "note": string | null
-}"#;
+}
+如果原文明确出现币种，请返回对应 ISO 4217 代码：
+- 人民币 / 元 / 块 / RMB / ￥ / ¥ -> CNY
+- 美元 / 美金 / $ / USD -> USD
+- 港币 / 港元 / HK$ / HKD -> HKD
+- 欧元 / € / EUR -> EUR
+- 日元 / JPY -> JPY"#;
 
 #[allow(dead_code)]
 const RECORD_PATCH_PROMPT_TEMPLATE: &str = r#"你是一个记账草稿修改助手。你会看到当前草稿和用户最新一句修改指令。
@@ -62,7 +68,7 @@ JSON 格式如下：
 {
   "direction": "income" | "expense" | null,
   "amount": number | null,
-  "currency": "CNY" | string | null,
+  "currency": "ISO 4217 code, e.g. CNY/USD/EUR/HKD/JPY/GBP" | null,
   "category": string | null,
   "merchant": string | null,
   "transaction_at": "RFC3339 datetime" | null,
@@ -79,12 +85,17 @@ pub struct LlmConfig {
 
 impl LlmConfig {
     pub fn from_env_optional() -> Result<Option<Self>> {
-        let base_url = env::var("LLM_BASE_URL")
-            .unwrap_or_else(|_| "http://127.0.0.1:8080/v1".to_string());
+        let base_url =
+            env::var("LLM_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:8080/v1".to_string());
         let api_key = env::var("LLM_API_KEY").unwrap_or_default();
         let model = env::var("LLM_MODEL").unwrap_or_else(|_| "qwen-local".to_string());
         let provider = env::var("LLM_PROVIDER").unwrap_or_else(|_| "llamacpp".to_string());
-        Ok(Some(Self { base_url, api_key, model, provider }))
+        Ok(Some(Self {
+            base_url,
+            api_key,
+            model,
+            provider,
+        }))
     }
 }
 
@@ -367,7 +378,9 @@ fn extract_openai_message_content(raw_response: &Value) -> Result<String> {
                 .collect::<Vec<_>>()
                 .join("\n");
             if text.is_empty() {
-                Err(anyhow!("llm response content array did not contain text parts"))
+                Err(anyhow!(
+                    "llm response content array did not contain text parts"
+                ))
             } else {
                 Ok(text)
             }
@@ -483,7 +496,7 @@ fn parse_record_payload_value(value: Value) -> Result<ParsedRecordPayload> {
     let currency = object
         .get("currency")
         .and_then(Value::as_str)
-        .map(ToString::to_string);
+        .and_then(normalize_currency_code);
     let category = object
         .get("category")
         .and_then(Value::as_str)
@@ -555,6 +568,9 @@ fn finalize_record_patch_payload(payload: &mut ParsedRecordPayload) {
     if let Some(amount) = payload.amount {
         payload.amount = Some(amount.abs());
     }
+    if let Some(currency) = payload.currency.as_deref() {
+        payload.currency = normalize_currency_code(currency);
+    }
     if let Some(merchant) = payload.merchant.as_mut() {
         *merchant = clean_merchant(merchant);
     }
@@ -624,6 +640,13 @@ fn apply_record_inference_hints(payload: &mut ParsedRecordPayload, raw_text: &st
 }
 
 fn normalize_record_fields(payload: &mut ParsedRecordPayload, raw_text: &str) {
+    if let Some(currency) = payload.currency.as_deref() {
+        payload.currency = normalize_currency_code(currency);
+    }
+    if payload.currency.is_none() {
+        payload.currency = infer_currency_from_text(raw_text);
+    }
+
     let inferred_category = infer_category(raw_text, payload.direction.as_ref());
     if payload.category.as_deref().is_none_or(str::is_empty) {
         payload.category = inferred_category;
@@ -667,6 +690,106 @@ fn sanitize_note(note: &str) -> Option<String> {
     }
 
     Some(normalized.to_string())
+}
+
+pub(crate) fn normalize_currency_code(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let compact: String = trimmed
+        .chars()
+        .filter(|ch| !ch.is_whitespace() && *ch != '-' && *ch != '_')
+        .collect();
+    let upper = compact.to_ascii_uppercase();
+
+    let from_keywords: &[(&[&str], &str)] = &[
+        (&["港币", "港元", "HKD", "HK$"], "HKD"),
+        (&["美元", "美金", "USD", "US$"], "USD"),
+        (&["欧元", "EUR", "€"], "EUR"),
+        (&["日元", "JPY"], "JPY"),
+        (&["英镑", "GBP", "£"], "GBP"),
+        (&["新加坡元", "新币", "SGD", "S$"], "SGD"),
+        (&["澳元", "澳币", "AUD", "A$"], "AUD"),
+        (&["加元", "CAD", "C$"], "CAD"),
+        (&["韩元", "韩币", "KRW", "₩"], "KRW"),
+        (&["新台币", "台币", "TWD", "NT$"], "TWD"),
+        (&["澳门元", "葡币", "MOP", "MOP$"], "MOP"),
+        (&["泰铢", "THB", "฿"], "THB"),
+        (&["马币", "林吉特", "MYR", "RM"], "MYR"),
+        (&["人民币", "RMB", "CNY", "CNH", "￥", "¥"], "CNY"),
+    ];
+
+    for (keywords, code) in from_keywords {
+        if keywords
+            .iter()
+            .any(|keyword| trimmed.contains(keyword) || upper.contains(keyword))
+        {
+            return Some(code.to_string());
+        }
+    }
+
+    if upper == "$" {
+        return Some("USD".to_string());
+    }
+
+    if trimmed.contains('元') || trimmed.contains('块') {
+        return Some("CNY".to_string());
+    }
+
+    if upper.len() == 3 && upper.chars().all(|ch| ch.is_ascii_alphabetic()) {
+        return Some(upper);
+    }
+
+    None
+}
+
+fn infer_currency_from_text(raw_text: &str) -> Option<String> {
+    let compact: String = raw_text.chars().filter(|ch| !ch.is_whitespace()).collect();
+    let upper = compact.to_ascii_uppercase();
+
+    let explicit_markers: &[(&[&str], &str)] = &[
+        (&["港币", "港元", "HKD", "HK$"], "HKD"),
+        (&["美元", "美金", "USD", "US$"], "USD"),
+        (&["欧元", "EUR", "€"], "EUR"),
+        (&["日元", "JPY"], "JPY"),
+        (&["英镑", "GBP", "£"], "GBP"),
+        (&["新加坡元", "新币", "SGD", "S$"], "SGD"),
+        (&["澳元", "澳币", "AUD", "A$"], "AUD"),
+        (&["加元", "CAD", "C$"], "CAD"),
+        (&["韩元", "韩币", "KRW", "₩"], "KRW"),
+        (&["新台币", "台币", "TWD", "NT$"], "TWD"),
+        (&["澳门元", "葡币", "MOP", "MOP$"], "MOP"),
+        (&["泰铢", "THB", "฿"], "THB"),
+        (&["马币", "林吉特", "MYR"], "MYR"),
+    ];
+
+    for (keywords, code) in explicit_markers {
+        if keywords
+            .iter()
+            .any(|keyword| compact.contains(keyword) || upper.contains(keyword))
+        {
+            return Some(code.to_string());
+        }
+    }
+
+    if compact.contains('$') {
+        return Some("USD".to_string());
+    }
+
+    if compact.contains("人民币")
+        || compact.contains("RMB")
+        || compact.contains("CNY")
+        || compact.contains("￥")
+        || compact.contains('¥')
+        || compact.contains('元')
+        || compact.contains('块')
+    {
+        return Some("CNY".to_string());
+    }
+
+    None
 }
 
 fn infer_category(raw_text: &str, direction: Option<&RecordDirection>) -> Option<String> {
@@ -810,7 +933,11 @@ fn parse_record_datetime(value: &str) -> Result<DateTime<Utc>> {
         return Ok(datetime.with_timezone(&Utc));
     }
     if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S") {
-        return Ok(local_offset.from_local_datetime(&naive).single().unwrap().with_timezone(&Utc));
+        return Ok(local_offset
+            .from_local_datetime(&naive)
+            .single()
+            .unwrap()
+            .with_timezone(&Utc));
     }
     if let Ok(date) = NaiveDate::parse_from_str(trimmed, "%Y-%m-%d") {
         return Ok(local_offset
@@ -820,10 +947,18 @@ fn parse_record_datetime(value: &str) -> Result<DateTime<Utc>> {
             .with_timezone(&Utc));
     }
     if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%d%H:%M:%S") {
-        return Ok(local_offset.from_local_datetime(&naive).single().unwrap().with_timezone(&Utc));
+        return Ok(local_offset
+            .from_local_datetime(&naive)
+            .single()
+            .unwrap()
+            .with_timezone(&Utc));
     }
     if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%d %H:%M:%S") {
-        return Ok(local_offset.from_local_datetime(&naive).single().unwrap().with_timezone(&Utc));
+        return Ok(local_offset
+            .from_local_datetime(&naive)
+            .single()
+            .unwrap()
+            .with_timezone(&Utc));
     }
 
     Err(anyhow!("invalid transaction_at format"))
@@ -831,13 +966,27 @@ fn parse_record_datetime(value: &str) -> Result<DateTime<Utc>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{LlmProvider, clean_merchant, normalize_json_payload, parse_record_payload_text};
+    use billlens_apple_db::ParsedRecordPayload;
+
+    use super::{
+        LlmProvider, NoteFallbackMode, clean_merchant, finalize_record_payload,
+        normalize_currency_code, normalize_json_payload, parse_record_payload_text,
+    };
 
     #[test]
     fn provider_parse_supports_original_values() {
-        assert!(matches!(LlmProvider::parse("openai").unwrap(), LlmProvider::OpenAi));
-        assert!(matches!(LlmProvider::parse("llamacpp").unwrap(), LlmProvider::LlamaCpp));
-        assert!(matches!(LlmProvider::parse("anthropic").unwrap(), LlmProvider::Anthropic));
+        assert!(matches!(
+            LlmProvider::parse("openai").unwrap(),
+            LlmProvider::OpenAi
+        ));
+        assert!(matches!(
+            LlmProvider::parse("llamacpp").unwrap(),
+            LlmProvider::LlamaCpp
+        ));
+        assert!(matches!(
+            LlmProvider::parse("anthropic").unwrap(),
+            LlmProvider::Anthropic
+        ));
     }
 
     #[test]
@@ -853,6 +1002,43 @@ mod tests {
         let payload = parse_record_payload_text("\"{\\\"direction\\\":\\\"expense\\\",\\\"amount\\\":35,\\\"category\\\":\\\"餐饮\\\"}\"").unwrap();
         assert_eq!(payload.amount, Some(35.0));
         assert_eq!(payload.category.as_deref(), Some("餐饮"));
+    }
+
+    #[test]
+    fn parse_record_payload_normalizes_currency_aliases() {
+        let payload = parse_record_payload_text(
+            "{\"direction\":\"expense\",\"amount\":12,\"currency\":\"美元\"}",
+        )
+        .unwrap();
+        assert_eq!(payload.currency.as_deref(), Some("USD"));
+    }
+
+    #[test]
+    fn finalize_record_payload_infers_currency_from_raw_text() {
+        let mut payload = ParsedRecordPayload {
+            direction: Some(billlens_apple_db::RecordDirection::Expense),
+            amount: Some(88.0),
+            currency: None,
+            category: Some("交通".to_string()),
+            merchant: None,
+            transaction_at: None,
+            note: None,
+        };
+
+        finalize_record_payload(
+            &mut payload,
+            "打车 HK$88",
+            NoteFallbackMode::PreserveInputText,
+        );
+
+        assert_eq!(payload.currency.as_deref(), Some("HKD"));
+    }
+
+    #[test]
+    fn normalize_currency_code_accepts_iso_and_symbol_variants() {
+        assert_eq!(normalize_currency_code("usd").as_deref(), Some("USD"));
+        assert_eq!(normalize_currency_code("港币").as_deref(), Some("HKD"));
+        assert_eq!(normalize_currency_code("€").as_deref(), Some("EUR"));
     }
 
     #[test]

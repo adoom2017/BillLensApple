@@ -12,6 +12,7 @@ public final class BillLensStore: ObservableObject {
     public struct DraftFormState {
         public var direction = "expense"
         public var amount = ""
+        public var currency = "CNY"
         public var category = "其他"
         public var merchant = ""
         public var note = ""
@@ -227,7 +228,10 @@ public final class BillLensStore: ObservableObject {
         let payload = ledgerPayload()
         let snapshot: LedgerSnapshot = try await bridge.sendAsync(payload)
         ledger = snapshot
-        AppLogger.log("ledger.refresh", "preset=\(selectedPreset.rawValue) groups=\(snapshot.byDay.count) pending_sync=\(snapshot.pendingSyncCount)")
+        AppLogger.log(
+            "ledger.refresh",
+            "preset=\(selectedPreset.rawValue) groups=\(snapshot.byDay.count) pending_sync=\(snapshot.pendingSyncCount) stats_currency=\(snapshot.statsCurrency) fx_warning=\(snapshot.fxWarning ?? "")"
+        )
     }
 
     public func refreshHome() async throws {
@@ -282,6 +286,7 @@ public final class BillLensStore: ObservableObject {
         draftForm = DraftFormState(
             direction: direction,
             amount: draft.amount.map { String(format: "%.2f", $0) } ?? "",
+            currency: BillLensFormatters.normalizedCurrencyCode(draft.currency) ?? "CNY",
             category: category,
             merchant: draft.merchant ?? "",
             note: draft.note ?? "",
@@ -326,7 +331,7 @@ public final class BillLensStore: ObservableObject {
         DraftInputPayload(
             direction: draftForm.direction,
             amount: Double(draftForm.amount),
-            currency: "CNY",
+            currency: BillLensFormatters.normalizedCurrencyCode(draftForm.currency),
             category: draftForm.category,
             merchant: draftForm.merchant,
             transactionAt: BillLensFormatters.timestampFallback.string(from: draftForm.transactionAt),

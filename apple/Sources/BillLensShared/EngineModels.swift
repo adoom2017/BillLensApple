@@ -221,12 +221,16 @@ public struct LedgerSnapshot: Codable {
     public let summary: RecordsStatsResponse
     public let byDay: [LedgerDayGroup]
     public let pendingSyncCount: Int
+    public let statsCurrency: String
+    public let fxWarning: String?
 
     enum CodingKeys: String, CodingKey {
         case range
         case summary
         case byDay = "by_day"
         case pendingSyncCount = "pending_sync_count"
+        case statsCurrency = "stats_currency"
+        case fxWarning = "fx_warning"
     }
 }
 
@@ -247,4 +251,3 @@ public enum LedgerPreset: String, CaseIterable, Identifiable {
         }
     }
 }
-

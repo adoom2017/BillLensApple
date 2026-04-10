@@ -1,20 +1,25 @@
+mod fx;
 mod llm;
 mod logger;
 pub mod stt;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use billlens_apple_db::{
-    ALL_RECORD_CATEGORIES, BillRepository, ConversationMessage, ConversationRole, EXPENSE_CATEGORIES, INCOME_CATEGORIES, ParsedRecordPayload,
-    Record, RecordCreate, RecordDirection, RecordDraft, RecordDraftStatus, RecordDraftUpdate,
-    RecordsStatsRange, RecordsStatsResponse, is_valid_record_category,
-    is_valid_record_category_for_direction,
+    ALL_RECORD_CATEGORIES, BillRepository, CategoryStatsItem, ConversationMessage,
+    ConversationRole, DirectionStatsItem, EXPENSE_CATEGORIES, INCOME_CATEGORIES,
+    ParsedRecordPayload, Record, RecordCreate, RecordDirection, RecordDraft, RecordDraftStatus,
+    RecordDraftUpdate, RecordsStatsRange, RecordsStatsResponse, RecordsSummary,
+    is_valid_record_category, is_valid_record_category_for_direction,
 };
 use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, TimeZone, Utc};
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use uuid::Uuid;
-use llm::LlmClient;
+use fx::{FxClient, resolve_fx_rate};
 pub use llm::LlmConfig;
+use llm::{LlmClient, normalize_currency_code};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
+use uuid::Uuid;
+
+const STATS_CURRENCY: &str = "CNY";
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
@@ -72,6 +77,8 @@ pub struct LedgerSnapshot {
     pub summary: RecordsStatsResponse,
     pub by_day: Vec<LedgerDayGroup>,
     pub pending_sync_count: i64,
+    pub stats_currency: String,
+    pub fx_warning: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,6 +111,7 @@ pub struct AppService {
     repo: BillRepository,
     device_id: String,
     llm: Option<LlmClient>,
+    fx: FxClient,
 }
 
 impl AppService {
@@ -114,6 +122,7 @@ impl AppService {
             repo,
             device_id: bootstrap.device_id,
             llm,
+            fx: FxClient::new(),
         })
     }
 
@@ -122,7 +131,10 @@ impl AppService {
     }
 
     pub async fn home(&self, profile_id: &str) -> Result<HomeSnapshot> {
-        let messages = self.repo.list_conversation_messages(profile_id, 100).await?;
+        let messages = self
+            .repo
+            .list_conversation_messages(profile_id, 100)
+            .await?;
         let draft = self.repo.latest_active_record_draft(profile_id).await?;
         let latest_record = self.repo.latest_record(profile_id).await?;
         Ok(HomeSnapshot {
@@ -295,7 +307,11 @@ impl AppService {
         })
     }
 
-    pub async fn discard_draft(&self, profile_id: &str, draft_id: Uuid) -> Result<HomeSnapshot, CoreError> {
+    pub async fn discard_draft(
+        &self,
+        profile_id: &str,
+        draft_id: Uuid,
+    ) -> Result<HomeSnapshot, CoreError> {
         let draft = self
             .repo
             .get_record_draft(draft_id)
@@ -347,56 +363,167 @@ impl AppService {
             .list_records(profile_id, &stats_range, None, None)
             .await
             .map_err(map_internal)?;
-        let summary = self
-            .repo
-            .record_stats(profile_id, stats_range.clone(), None, None)
-            .await
-            .map_err(map_internal)?;
         let pending_sync_count = self
             .repo
             .pending_sync_count(profile_id)
             .await
             .map_err(map_internal)?;
-
-        let mut grouped = BTreeMap::<NaiveDate, Vec<Record>>::new();
-        for record in records {
-            grouped
-                .entry(record.transaction_at.with_timezone(&shanghai_offset()).date_naive())
-                .or_default()
-                .push(record);
+        let currencies = collect_record_currencies(&records).map_err(map_internal)?;
+        let mut rate_map = BTreeMap::new();
+        let mut used_cached_rate = false;
+        for currency in currencies {
+            let (rate, resolution) =
+                resolve_fx_rate(&self.repo, &self.fx, &currency, STATS_CURRENCY)
+                    .await
+                    .map_err(map_internal)?;
+            rate_map.insert(currency, rate);
+            used_cached_rate |= resolution.used_cached_rate;
         }
-
-        let by_day = grouped
-            .into_iter()
-            .rev()
-            .map(|(day, records)| {
-                let income_amount = sum_amount(&records, RecordDirection::Income);
-                let expense_amount = sum_amount(&records, RecordDirection::Expense);
-                LedgerDayGroup {
-                    day,
-                    income_amount,
-                    expense_amount,
-                    net_amount: income_amount - expense_amount,
-                    records,
-                }
-            })
-            .collect();
+        let (summary, by_day) = aggregate_converted_stats(&records, stats_range.clone(), &rate_map)
+            .map_err(map_internal)?;
 
         Ok(LedgerSnapshot {
             range,
             summary,
             by_day,
             pending_sync_count,
+            stats_currency: STATS_CURRENCY.to_string(),
+            fx_warning: used_cached_rate.then(|| "获取最新汇率失败，已使用缓存汇率".to_string()),
         })
     }
 }
 
-fn sum_amount(records: &[Record], direction: RecordDirection) -> f64 {
-    records
-        .iter()
-        .filter(|record| record.direction == direction)
-        .map(|record| record.amount)
-        .sum()
+fn collect_record_currencies(records: &[Record]) -> Result<BTreeSet<String>> {
+    let mut currencies = BTreeSet::new();
+    for record in records {
+        let currency = normalize_currency_code(&record.currency)
+            .ok_or_else(|| anyhow!("invalid stored record currency: {}", record.currency))?;
+        if currency != STATS_CURRENCY {
+            currencies.insert(currency);
+        }
+    }
+    Ok(currencies)
+}
+
+fn aggregate_converted_stats(
+    records: &[Record],
+    range: RecordsStatsRange,
+    rate_map: &BTreeMap<String, f64>,
+) -> Result<(RecordsStatsResponse, Vec<LedgerDayGroup>)> {
+    let mut income_amount = 0.0;
+    let mut income_count = 0;
+    let mut expense_amount = 0.0;
+    let mut expense_count = 0;
+    let mut by_category = BTreeMap::<(String, String), (RecordDirection, f64, i64)>::new();
+    let mut by_day = BTreeMap::<NaiveDate, (f64, f64, Vec<Record>)>::new();
+
+    for record in records {
+        let currency = normalize_currency_code(&record.currency)
+            .ok_or_else(|| anyhow!("invalid stored record currency: {}", record.currency))?;
+        let rate = if currency == STATS_CURRENCY {
+            1.0
+        } else {
+            *rate_map
+                .get(&currency)
+                .ok_or_else(|| anyhow!("missing fx rate for {currency}"))?
+        };
+        let converted_amount = record.amount * rate;
+
+        match record.direction {
+            RecordDirection::Income => {
+                income_amount += converted_amount;
+                income_count += 1;
+            }
+            RecordDirection::Expense => {
+                expense_amount += converted_amount;
+                expense_count += 1;
+            }
+        }
+
+        let direction_key = record.direction.as_str().to_string();
+        let category_entry = by_category
+            .entry((record.category.clone(), direction_key))
+            .or_insert((record.direction.clone(), 0.0, 0));
+        category_entry.1 += converted_amount;
+        category_entry.2 += 1;
+
+        let day = record
+            .transaction_at
+            .with_timezone(&shanghai_offset())
+            .date_naive();
+        let day_entry = by_day.entry(day).or_insert((0.0, 0.0, Vec::new()));
+        match record.direction {
+            RecordDirection::Income => day_entry.0 += converted_amount,
+            RecordDirection::Expense => day_entry.1 += converted_amount,
+        }
+        day_entry.2.push(record.clone());
+    }
+
+    let mut by_category_items = by_category
+        .into_iter()
+        .map(
+            |((category, _), (direction, total_amount, record_count))| CategoryStatsItem {
+                category,
+                direction,
+                total_amount,
+                record_count,
+            },
+        )
+        .collect::<Vec<_>>();
+    by_category_items.sort_by(|left, right| {
+        right
+            .total_amount
+            .partial_cmp(&left.total_amount)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| left.category.cmp(&right.category))
+            .then_with(|| left.direction.as_str().cmp(right.direction.as_str()))
+    });
+
+    let mut by_direction = Vec::new();
+    if expense_count > 0 {
+        by_direction.push(DirectionStatsItem {
+            direction: RecordDirection::Expense,
+            total_amount: expense_amount,
+            record_count: expense_count,
+        });
+    }
+    if income_count > 0 {
+        by_direction.push(DirectionStatsItem {
+            direction: RecordDirection::Income,
+            total_amount: income_amount,
+            record_count: income_count,
+        });
+    }
+
+    let by_day = by_day
+        .into_iter()
+        .rev()
+        .map(
+            |(day, (income_amount, expense_amount, records))| LedgerDayGroup {
+                day,
+                income_amount,
+                expense_amount,
+                net_amount: income_amount - expense_amount,
+                records,
+            },
+        )
+        .collect();
+
+    Ok((
+        RecordsStatsResponse {
+            range,
+            summary: RecordsSummary {
+                income_amount,
+                income_count,
+                expense_amount,
+                expense_count,
+                net_amount: income_amount - expense_amount,
+            },
+            by_direction,
+            by_category: by_category_items,
+        },
+        by_day,
+    ))
 }
 
 fn build_ledger_range(
@@ -422,7 +549,8 @@ fn build_ledger_range(
             now,
         ),
         "custom" => {
-            let start_at = start_at.ok_or_else(|| CoreError::bad_request("start_at is required"))?;
+            let start_at =
+                start_at.ok_or_else(|| CoreError::bad_request("start_at is required"))?;
             let end_at = end_at.ok_or_else(|| CoreError::bad_request("end_at is required"))?;
             if start_at > end_at {
                 return Err(CoreError::bad_request(
@@ -431,7 +559,11 @@ fn build_ledger_range(
             }
             (start_at, end_at)
         }
-        _ => return Err(CoreError::bad_request("preset must be week, month, year or custom")),
+        _ => {
+            return Err(CoreError::bad_request(
+                "preset must be week, month, year or custom",
+            ));
+        }
     };
 
     Ok(LedgerRangeSelection {
@@ -494,7 +626,10 @@ fn validate_category_for_direction(
     Ok(category.to_string())
 }
 
-fn merge_draft_input(existing: &RecordDraft, input: DraftInput) -> Result<RecordDraftUpdate, CoreError> {
+fn merge_draft_input(
+    existing: &RecordDraft,
+    input: DraftInput,
+) -> Result<RecordDraftUpdate, CoreError> {
     let direction = input.direction.or_else(|| existing.direction.clone());
     let amount = input.amount.or(existing.amount);
     if let Some(amount) = amount {
@@ -511,7 +646,8 @@ fn merge_draft_input(existing: &RecordDraft, input: DraftInput) -> Result<Record
     Ok(RecordDraftUpdate {
         direction,
         amount,
-        currency: trim_optional(input.currency).or_else(|| existing.currency.clone()),
+        currency: normalize_optional_currency(input.currency)?
+            .or_else(|| existing.currency.clone()),
         category,
         merchant: trim_optional(input.merchant).or_else(|| existing.merchant.clone()),
         transaction_at: input.transaction_at.or(existing.transaction_at),
@@ -543,13 +679,7 @@ fn record_create_from_draft(payload: &RecordDraft) -> Result<RecordCreate, CoreE
     Ok(RecordCreate {
         direction,
         amount,
-        currency: payload
-            .currency
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("CNY")
-            .to_string(),
+        currency: validate_or_default_currency(payload.currency.as_deref())?,
         category,
         merchant: trim_optional(payload.merchant.clone()),
         transaction_at,
@@ -579,13 +709,7 @@ fn record_create_from_parsed(payload: &ParsedRecordPayload) -> Result<RecordCrea
     Ok(RecordCreate {
         direction,
         amount,
-        currency: payload
-            .currency
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("CNY")
-            .to_string(),
+        currency: validate_or_default_currency(payload.currency.as_deref())?,
         category,
         merchant: trim_optional(payload.merchant.clone()),
         transaction_at,
@@ -601,7 +725,7 @@ fn format_parsed_summary(payload: &ParsedRecordPayload) -> String {
     };
     let amount = payload
         .amount
-        .map(|value| format!("¥{value:.2}"))
+        .map(|value| format_amount_with_currency(value, payload.currency.as_deref()))
         .unwrap_or_else(|| "金额待确认".to_string());
     let category = payload
         .category
@@ -626,18 +750,118 @@ fn map_internal(error: anyhow::Error) -> CoreError {
     CoreError::Internal(error.to_string())
 }
 
+fn normalize_optional_currency(value: Option<String>) -> Result<Option<String>, CoreError> {
+    match trim_optional(value) {
+        Some(value) => normalize_currency_code(&value)
+            .map(Some)
+            .ok_or_else(|| CoreError::bad_request("invalid currency code")),
+        None => Ok(None),
+    }
+}
+
+fn validate_or_default_currency(value: Option<&str>) -> Result<String, CoreError> {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => normalize_currency_code(value)
+            .ok_or_else(|| CoreError::bad_request("invalid currency code")),
+        None => Ok("CNY".to_string()),
+    }
+}
+
+fn format_amount_with_currency(amount: f64, currency: Option<&str>) -> String {
+    let currency = currency
+        .and_then(normalize_currency_code)
+        .unwrap_or_else(|| "CNY".to_string());
+    let symbol = match currency.as_str() {
+        "CNY" => "¥".to_string(),
+        "USD" => "$".to_string(),
+        "HKD" => "HK$".to_string(),
+        "EUR" => "€".to_string(),
+        "JPY" => "JPY ".to_string(),
+        "GBP" => "£".to_string(),
+        "SGD" => "S$".to_string(),
+        "AUD" => "A$".to_string(),
+        "CAD" => "C$".to_string(),
+        "KRW" => "₩".to_string(),
+        "TWD" => "NT$".to_string(),
+        "MOP" => "MOP$".to_string(),
+        "THB" => "฿".to_string(),
+        "MYR" => "RM".to_string(),
+        other => format!("{other} "),
+    };
+    format!("{symbol}{amount:.2}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn build_custom_range_rejects_inverted_range() {
-        let start = shanghai_offset().with_ymd_and_hms(2026, 4, 2, 0, 0, 0).unwrap();
-        let end = shanghai_offset().with_ymd_and_hms(2026, 4, 1, 0, 0, 0).unwrap();
+        let start = shanghai_offset()
+            .with_ymd_and_hms(2026, 4, 2, 0, 0, 0)
+            .unwrap();
+        let end = shanghai_offset()
+            .with_ymd_and_hms(2026, 4, 1, 0, 0, 0)
+            .unwrap();
         let error = build_ledger_range("custom", Some(start), Some(end)).unwrap_err();
         assert_eq!(
             error.to_string(),
             "start_at must be earlier than or equal to end_at"
         );
+    }
+
+    #[test]
+    fn aggregate_converted_stats_converts_mixed_currency_records() {
+        let range = RecordsStatsRange {
+            start_at: Utc::now(),
+            end_at: Utc::now(),
+        };
+        let transaction_at = Utc::now();
+        let records = vec![
+            Record {
+                id: Uuid::new_v4(),
+                profile_id: "local-default".to_string(),
+                direction: RecordDirection::Expense,
+                amount: 10.0,
+                currency: "USD".to_string(),
+                category: "交通".to_string(),
+                merchant: None,
+                transaction_at,
+                note: None,
+                device_id: "device-a".to_string(),
+                sync_version: 1,
+                deleted_at: None,
+                needs_sync: false,
+                created_at: transaction_at,
+                updated_at: transaction_at,
+            },
+            Record {
+                id: Uuid::new_v4(),
+                profile_id: "local-default".to_string(),
+                direction: RecordDirection::Income,
+                amount: 20.0,
+                currency: "CNY".to_string(),
+                category: "其他".to_string(),
+                merchant: None,
+                transaction_at,
+                note: None,
+                device_id: "device-a".to_string(),
+                sync_version: 1,
+                deleted_at: None,
+                needs_sync: false,
+                created_at: transaction_at,
+                updated_at: transaction_at,
+            },
+        ];
+        let rate_map = BTreeMap::from([(String::from("USD"), 7.0)]);
+
+        let (stats, by_day) = aggregate_converted_stats(&records, range, &rate_map).unwrap();
+
+        assert_eq!(stats.summary.expense_amount, 70.0);
+        assert_eq!(stats.summary.income_amount, 20.0);
+        assert_eq!(stats.summary.net_amount, -50.0);
+        assert_eq!(by_day.len(), 1);
+        assert_eq!(by_day[0].expense_amount, 70.0);
+        assert_eq!(by_day[0].income_amount, 20.0);
     }
 }

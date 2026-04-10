@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -259,6 +259,15 @@ pub struct RecordsStatsResponse {
     pub summary: RecordsSummary,
     pub by_direction: Vec<DirectionStatsItem>,
     pub by_category: Vec<CategoryStatsItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FxRateCache {
+    pub base_currency: String,
+    pub quote_currency: String,
+    pub rate: f64,
+    pub rate_date: NaiveDate,
+    pub fetched_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
