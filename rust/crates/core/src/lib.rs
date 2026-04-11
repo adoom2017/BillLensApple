@@ -11,7 +11,7 @@ use billlens_apple_db::{
     RecordDraftUpdate, RecordsStatsRange, RecordsStatsResponse, RecordsSummary,
     is_valid_record_category, is_valid_record_category_for_direction,
 };
-use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, TimeZone, Utc};
 use fx::{FxClient, resolve_fx_rate};
 pub use llm::LlmConfig;
 use llm::{LlmClient, normalize_currency_code};
@@ -535,11 +535,6 @@ fn build_ledger_range(
     let today = now.date_naive();
     let preset = preset.trim().to_ascii_lowercase();
     let (start_at, end_at) = match preset.as_str() {
-        "week" => {
-            let weekday = today.weekday().num_days_from_monday() as i64;
-            let start = today - Duration::days(weekday);
-            (at_start_of_day(start)?, now)
-        }
         "month" => (
             at_start_of_day(NaiveDate::from_ymd_opt(today.year(), today.month(), 1).unwrap())?,
             now,
@@ -561,7 +556,7 @@ fn build_ledger_range(
         }
         _ => {
             return Err(CoreError::bad_request(
-                "preset must be week, month, year or custom",
+                "preset must be month, year or custom",
             ));
         }
     };

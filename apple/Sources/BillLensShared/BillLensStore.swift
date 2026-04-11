@@ -30,6 +30,8 @@ public final class BillLensStore: ObservableObject {
     @Published public var errorText: String?
     @Published public var isBusy = false
     @Published public var selectedPreset: LedgerPreset = .month
+    @Published public var selectedYear: Int = Calendar.current.component(.year, from: Date.now)
+    @Published public var selectedMonth: Int = Calendar.current.component(.month, from: Date.now)
     @Published public var customStart = Calendar.current.date(byAdding: .day, value: -30, to: Date.now) ?? Date.now
     @Published public var customEnd = Date.now
     @Published public var draftForm = DraftFormState()
@@ -250,6 +252,33 @@ public final class BillLensStore: ObservableObject {
 
     public func applyPreset(_ preset: LedgerPreset) {
         selectedPreset = preset
+        if preset == .month {
+            selectedYear = Calendar.current.component(.year, from: Date.now)
+            selectedMonth = Calendar.current.component(.month, from: Date.now)
+        } else if preset == .year {
+            selectedYear = Calendar.current.component(.year, from: Date.now)
+        }
+        perform("正在刷新账单") {
+            try await self.refreshLedger()
+            self.statusText = "账单视图已更新"
+        }
+    }
+
+    public func shiftLedgerMonth(by delta: Int) {
+        var newMonth = selectedMonth + delta
+        var newYear = selectedYear
+        if newMonth < 1 { newMonth = 12; newYear -= 1 }
+        if newMonth > 12 { newMonth = 1; newYear += 1 }
+        selectedMonth = newMonth
+        selectedYear = newYear
+        perform("正在刷新账单") {
+            try await self.refreshLedger()
+            self.statusText = "账单视图已更新"
+        }
+    }
+
+    public func shiftLedgerYear(by delta: Int) {
+        selectedYear += delta
         perform("正在刷新账单") {
             try await self.refreshLedger()
             self.statusText = "账单视图已更新"
@@ -349,12 +378,34 @@ public final class BillLensStore: ObservableObject {
         var payload: [String: Any] = [
             "action": "ledger",
             "profile_id": profileID,
-            "preset": selectedPreset.rawValue
+            "preset": "custom"
         ]
-        if selectedPreset == .custom {
+
+        switch selectedPreset {
+        case .month:
+            let startComps = DateComponents(year: selectedYear, month: selectedMonth, day: 1)
+            let start = Calendar.current.date(from: startComps) ?? Date.now
+            var endComps = DateComponents(year: selectedYear, month: selectedMonth + 1, day: 1)
+            if selectedMonth == 12 {
+                endComps = DateComponents(year: selectedYear + 1, month: 1, day: 1)
+            }
+            let endDate = Calendar.current.date(from: endComps) ?? Date.now
+            let end = Calendar.current.date(byAdding: .second, value: -1, to: endDate) ?? endDate
+            payload["start_at"] = formatter.string(from: start)
+            payload["end_at"] = formatter.string(from: end)
+        case .year:
+            let startComps = DateComponents(year: selectedYear, month: 1, day: 1)
+            let start = Calendar.current.date(from: startComps) ?? Date.now
+            let endComps = DateComponents(year: selectedYear + 1, month: 1, day: 1)
+            let endDate = Calendar.current.date(from: endComps) ?? Date.now
+            let end = Calendar.current.date(byAdding: .second, value: -1, to: endDate) ?? endDate
+            payload["start_at"] = formatter.string(from: start)
+            payload["end_at"] = formatter.string(from: end)
+        case .custom:
             payload["start_at"] = formatter.string(from: customStart)
             payload["end_at"] = formatter.string(from: customEnd)
         }
+
         return payload
     }
 

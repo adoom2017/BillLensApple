@@ -91,6 +91,9 @@ private enum IMColors {
     static let calendarSelectedTop = Color(red: 0.27, green: 0.54, blue: 0.46)
     static let calendarSelectedBottom = Color(red: 0.19, green: 0.45, blue: 0.39)
 
+    // Calendar today marker
+    static let calendarToday = Color(red: 0.165, green: 0.426, blue: 0.384)
+
     // Button primary background (dark)
     static let buttonPrimary = Color(red: 0.10, green: 0.22, blue: 0.24)
 
@@ -576,7 +579,6 @@ private struct ReviewPanel: View {
 private struct LedgerShell: View {
     @EnvironmentObject private var store: BillLensStore
     @State private var ledgerMode: LedgerViewMode = .calendar
-    @State private var calendarMonthKey: String?
     @State private var selectedLedgerDate: String?
     @State private var cachedCalendarCells: [LedgerCalendarCell] = []
     @State private var cachedCalendarKey: String = ""
@@ -638,8 +640,12 @@ private struct LedgerShell: View {
                         // Stat bar with inset shadow
                         statBar(ledger)
 
-                        // Calendar
-                        calendarPanel(ledger)
+                        // Calendar or monthly aggregation
+                        if store.selectedPreset == .year {
+                            monthlyAggregationGrid(ledger)
+                        } else {
+                            calendarPanel(ledger)
+                        }
 
                         // Quick category filters
                         quickCategoryFilters(ledger)
@@ -661,23 +667,29 @@ private struct LedgerShell: View {
 
                     // MARK: - Right Detail Panel
                     VStack(alignment: .leading, spacing: 0) {
-                        // Mode tabs at top of detail
-                        HStack(spacing: 4) {
-                            ledgerModeButton(.calendar, title: "按日")
-                            ledgerModeButton(.detail, title: "全部明细")
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 12)
-                        .padding(.bottom, 8)
+                        // Mode tabs at top of detail (hide "按日" in year mode)
+                        if store.selectedPreset != .year {
+                            HStack(spacing: 4) {
+                                ledgerModeButton(.calendar, title: "按日")
+                                ledgerModeButton(.detail, title: "全部明细")
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.top, 12)
+                            .padding(.bottom, 8)
 
-                        Divider().opacity(0.2)
+                            Divider().opacity(0.2)
+                        }
 
                         Group {
-                            switch ledgerMode {
-                            case .calendar:
-                                rightPanelCalendarDetail(ledger)
-                            case .detail:
+                            if store.selectedPreset == .year {
                                 detailLedgerView(ledger)
+                            } else {
+                                switch ledgerMode {
+                                case .calendar:
+                                    rightPanelCalendarDetail(ledger)
+                                case .detail:
+                                    detailLedgerView(ledger)
+                                }
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -691,9 +703,6 @@ private struct LedgerShell: View {
                 }
                 .onChange(of: ledgerSignature(ledger)) {
                     syncCalendarState(for: ledger)
-                    rebuildCalendarCellsIfNeeded(for: ledger)
-                }
-                .onChange(of: calendarMonthKey) {
                     rebuildCalendarCellsIfNeeded(for: ledger)
                 }
                 .onChange(of: selectedLedgerDate) {
@@ -896,7 +905,7 @@ private struct LedgerShell: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Button {
-                    shiftCalendarMonth(in: ledger, direction: -1)
+                    store.shiftLedgerMonth(by: -1)
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 12, weight: .bold))
@@ -910,13 +919,12 @@ private struct LedgerShell: View {
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .disabled(!canShiftMonth(in: ledger, direction: -1))
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(currentCalendarTitle(in: ledger))
+                    Text("\(store.selectedYear)年\(store.selectedMonth)月")
                         .font(.system(size: 20, weight: .bold))
                         .foregroundStyle(IMColors.textPrimary)
-                    Text(currentCalendarMeta(in: ledger))
+                    Text(calendarMetaText(ledger))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(IMColors.textMuted)
                 }
@@ -924,7 +932,7 @@ private struct LedgerShell: View {
                 Spacer()
 
                 Button {
-                    shiftCalendarMonth(in: ledger, direction: 1)
+                    store.shiftLedgerMonth(by: 1)
                 } label: {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 12, weight: .bold))
@@ -938,7 +946,6 @@ private struct LedgerShell: View {
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .disabled(!canShiftMonth(in: ledger, direction: 1))
             }
 
             LazyVGrid(
@@ -963,6 +970,7 @@ private struct LedgerShell: View {
                             amountText: cell.amountText,
                             isSelected: cell.isSelected,
                             isHot: cell.isHot,
+                            isToday: cell.isToday,
                             backgroundStyle: calendarCellBackground(for: cell)
                         ) {
                             selectedLedgerDate = date
@@ -974,6 +982,102 @@ private struct LedgerShell: View {
                     }
                 }
             }
+        }
+    }
+
+    private func monthlyAggregationGrid(_ ledger: LedgerSnapshot) -> some View {
+        let monthlyData = buildMonthlyAggregation(from: ledger)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Button {
+                    store.shiftLedgerYear(by: -1)
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(IMColors.textMuted)
+                        .frame(width: 36, height: 36)
+                        .background(
+                            Circle()
+                                .fill(Color.white.opacity(0.96))
+                                .overlay(Circle().stroke(Color.black.opacity(0.06), lineWidth: 1))
+                        )
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(store.selectedYear)年")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(IMColors.textPrimary)
+                    Text("按月聚合 · \(monthlyData.filter { $0.hasData }.count) 个月有账单")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(IMColors.textMuted)
+                }
+
+                Spacer()
+
+                Button {
+                    store.shiftLedgerYear(by: 1)
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(IMColors.textMuted)
+                        .frame(width: 36, height: 36)
+                        .background(
+                            Circle()
+                                .fill(Color.white.opacity(0.96))
+                                .overlay(Circle().stroke(Color.black.opacity(0.06), lineWidth: 1))
+                        )
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8
+            ) {
+                ForEach(monthlyData) { item in
+                    MonthAggregationCard(item: item)
+                }
+            }
+        }
+    }
+
+    fileprivate struct MonthlyAggregationItem: Identifiable {
+        let id: Int
+        let month: Int
+        let expenseAmount: Double
+        let incomeAmount: Double
+        let recordCount: Int
+        let statsCurrency: String
+        var hasData: Bool { recordCount > 0 }
+    }
+
+    private func buildMonthlyAggregation(from ledger: LedgerSnapshot) -> [MonthlyAggregationItem] {
+        var byMonth: [Int: (expense: Double, income: Double, count: Int)] = [:]
+        for m in 1...12 { byMonth[m] = (0, 0, 0) }
+
+        for day in ledger.byDay {
+            let parts = day.day.split(separator: "-")
+            guard parts.count >= 2, let month = Int(parts[1]) else { continue }
+            let existing = byMonth[month] ?? (0, 0, 0)
+            byMonth[month] = (
+                existing.expense + day.expenseAmount,
+                existing.income + day.incomeAmount,
+                existing.count + day.records.count
+            )
+        }
+
+        return (1...12).map { m in
+            let data = byMonth[m]!
+            return MonthlyAggregationItem(
+                id: m,
+                month: m,
+                expenseAmount: data.expense,
+                incomeAmount: data.income,
+                recordCount: data.count,
+                statsCurrency: ledger.statsCurrency
+            )
         }
     }
 
@@ -1047,19 +1151,9 @@ private struct LedgerShell: View {
     }
 
     private func syncCalendarState(for ledger: LedgerSnapshot) {
-        let monthKeys = availableMonthKeys(in: ledger)
-        guard !monthKeys.isEmpty else {
-            calendarMonthKey = nil
-            selectedLedgerDate = nil
-            return
-        }
-        if calendarMonthKey == nil || !monthKeys.contains(calendarMonthKey!) {
-            calendarMonthKey = monthKeys.last
-        }
-        let currentGroups = groupsForSelectedMonth(in: ledger)
-        let validDates = Set(currentGroups.map(\.day))
+        let validDates = Set(ledger.byDay.map(\.day))
         if selectedLedgerDate == nil || !validDates.contains(selectedLedgerDate!) {
-            selectedLedgerDate = currentGroups.last?.day
+            selectedLedgerDate = ledger.byDay.last?.day
         }
     }
 
@@ -1067,44 +1161,9 @@ private struct LedgerShell: View {
         ledger.byDay.map(\.day).joined(separator: "|")
     }
 
-    private func availableMonthKeys(in ledger: LedgerSnapshot) -> [String] {
-        Array(Set(ledger.byDay.map { String($0.day.prefix(7)) })).sorted()
-    }
-
-    private func groupsForSelectedMonth(in ledger: LedgerSnapshot) -> [LedgerDayGroup] {
-        guard let key = calendarMonthKey else { return [] }
-        return ledger.byDay.filter { $0.day.hasPrefix(key) }
-    }
-
-    private func currentCalendarTitle(in ledger: LedgerSnapshot) -> String {
-        guard let key = calendarMonthKey else { return "账单月历" }
-        let parts = key.split(separator: "-")
-        guard parts.count == 2 else { return "账单月历" }
-        return "\(parts[0])年\(Int(parts[1]) ?? 0)月"
-    }
-
-    private func currentCalendarMeta(in ledger: LedgerSnapshot) -> String {
-        let currentGroups = groupsForSelectedMonth(in: ledger)
-        return currentGroups.isEmpty ? "暂无账单" : "按天聚合 · \(currentGroups.count) 天"
-    }
-
-    private func canShiftMonth(in ledger: LedgerSnapshot, direction: Int) -> Bool {
-        guard let current = calendarMonthKey else { return false }
-        let keys = availableMonthKeys(in: ledger)
-        guard let index = keys.firstIndex(of: current) else { return false }
-        let next = index + direction
-        return keys.indices.contains(next)
-    }
-
-    private func shiftCalendarMonth(in ledger: LedgerSnapshot, direction: Int) {
-        let keys = availableMonthKeys(in: ledger)
-        guard let current = calendarMonthKey, let index = keys.firstIndex(of: current) else {
-            return
-        }
-        let next = index + direction
-        guard keys.indices.contains(next) else { return }
-        calendarMonthKey = keys[next]
-        selectedLedgerDate = groupsForSelectedMonth(in: ledger).last?.day
+    private func calendarMetaText(_ ledger: LedgerSnapshot) -> String {
+        let daysWithData = ledger.byDay.count
+        return daysWithData == 0 ? "暂无账单" : "按天聚合 · \(daysWithData) 天"
     }
 
     private func selectedLedgerGroup(in ledger: LedgerSnapshot) -> LedgerDayGroup? {
@@ -1113,7 +1172,7 @@ private struct LedgerShell: View {
     }
 
     private func rebuildCalendarCellsIfNeeded(for ledger: LedgerSnapshot) {
-        let key = (calendarMonthKey ?? "") + "|" + ledgerSignature(ledger)
+        let key = "\(store.selectedYear)-\(store.selectedMonth)|\(ledgerSignature(ledger))"
         guard key != cachedCalendarKey else { return }
         cachedCalendarKey = key
         cachedCalendarCells = buildCalendarCells(for: ledger)
@@ -1130,21 +1189,25 @@ private struct LedgerShell: View {
                 dayNumber: cell.dayNumber,
                 amountText: cell.amountText,
                 isSelected: selected,
-                isHot: cell.isHot
+                isHot: cell.isHot,
+                isToday: cell.isToday
             )
         }
     }
 
     private func buildCalendarCells(for ledger: LedgerSnapshot) -> [LedgerCalendarCell] {
-        let currentGroups = groupsForSelectedMonth(in: ledger)
-        guard let monthKey = calendarMonthKey else { return [] }
-        let parts = monthKey.split(separator: "-")
-        guard parts.count == 2, let year = Int(parts[0]), let month = Int(parts[1]) else {
-            return []
-        }
+        let year = store.selectedYear
+        let month = store.selectedMonth
 
-        let hottestDate = currentGroups.max(by: { $0.expenseAmount < $1.expenseAmount })?.day
-        let groupMap = Dictionary(uniqueKeysWithValues: currentGroups.map { ($0.day, $0) })
+        let hottestDate = ledger.byDay.max(by: { $0.expenseAmount < $1.expenseAmount })?.day
+        let groupMap = Dictionary(uniqueKeysWithValues: ledger.byDay.map { ($0.day, $0) })
+        let todayString: String = {
+            let now = Date()
+            let y = Calendar.current.component(.year, from: now)
+            let m = Calendar.current.component(.month, from: now)
+            let d = Calendar.current.component(.day, from: now)
+            return String(format: "%04d-%02d-%02d", y, m, d)
+        }()
         let firstWeekday =
             Calendar.current.component(.weekday, from: dateFrom(year: year, month: month, day: 1))
             - 1
@@ -1155,7 +1218,7 @@ private struct LedgerShell: View {
         var cells: [LedgerCalendarCell] = []
         for i in 0..<firstWeekday {
             cells.append(LedgerCalendarCell(
-                id: i, date: nil, dayNumber: nil, amountText: "", isSelected: false, isHot: false
+                id: i, date: nil, dayNumber: nil, amountText: "", isSelected: false, isHot: false, isToday: false
             ))
         }
         for day in 1...daysInMonth {
@@ -1171,14 +1234,15 @@ private struct LedgerShell: View {
                     dayNumber: day,
                     amountText: amount.map { compactAmount($0, currencyCode: ledger.statsCurrency) } ?? "",
                     isSelected: date == selectedLedgerDate,
-                    isHot: date == hottestDate && amount != nil
+                    isHot: date == hottestDate && amount != nil,
+                    isToday: date == todayString
                 )
             )
         }
         while cells.count % 7 != 0 {
             let idx = cells.count
             cells.append(LedgerCalendarCell(
-                id: idx, date: nil, dayNumber: nil, amountText: "", isSelected: false, isHot: false
+                id: idx, date: nil, dayNumber: nil, amountText: "", isSelected: false, isHot: false, isToday: false
             ))
         }
         return cells
@@ -1227,6 +1291,7 @@ private struct LedgerCalendarCell: Identifiable {
     let amountText: String
     let isSelected: Bool
     let isHot: Bool
+    let isToday: Bool
 }
 
 private struct CalendarCellLabel: View {
@@ -1234,12 +1299,22 @@ private struct CalendarCellLabel: View {
     let amountText: String
     let isSelected: Bool
     let isHot: Bool
+    let isToday: Bool
 
     var body: some View {
         VStack(spacing: 1) {
-            Text("\(day)")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(dayTextColor)
+            ZStack(alignment: .top) {
+                Text("\(day)")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(dayTextColor)
+                if isToday && !isSelected {
+                    Circle()
+                        .fill(IMColors.calendarToday)
+                        .frame(width: 4, height: 4)
+                        .offset(y: -2)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            }
             Text(amountText)
                 .font(.system(size: 9, weight: .medium))
                 .foregroundStyle(amountTextColor)
@@ -1268,6 +1343,7 @@ private struct CalendarDayCellButton<Background: ShapeStyle>: View {
     let amountText: String
     let isSelected: Bool
     let isHot: Bool
+    let isToday: Bool
     let backgroundStyle: Background
     let action: () -> Void
 
@@ -1275,7 +1351,7 @@ private struct CalendarDayCellButton<Background: ShapeStyle>: View {
         let cellShape = RoundedRectangle(cornerRadius: 8, style: .continuous)
 
         Button(action: action) {
-            CalendarCellLabel(day: day, amountText: amountText, isSelected: isSelected, isHot: isHot)
+            CalendarCellLabel(day: day, amountText: amountText, isSelected: isSelected, isHot: isHot, isToday: isToday)
                 .frame(maxWidth: .infinity, minHeight: 54)
                 .background(cellShape.fill(backgroundStyle))
                 .overlay {
@@ -1284,6 +1360,8 @@ private struct CalendarDayCellButton<Background: ShapeStyle>: View {
                             .stroke(Color.black.opacity(0.15), lineWidth: 1)
                             .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 1)
                             .clipShape(cellShape)
+                    } else if isToday {
+                        cellShape.stroke(IMColors.calendarToday, lineWidth: 1.5)
                     } else {
                         cellShape.stroke(Color.black.opacity(0.08), lineWidth: 1)
                     }
@@ -1291,6 +1369,70 @@ private struct CalendarDayCellButton<Background: ShapeStyle>: View {
                 .contentShape(cellShape)
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct MonthAggregationCard: View {
+    let item: LedgerShell.MonthlyAggregationItem
+
+    private static let monthNames = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"]
+
+    private var titleColor: Color { item.hasData ? IMColors.textPrimary : IMColors.textPlaceholder }
+    private var bgColor: Color { item.hasData ? Color.white : IMColors.statBg }
+    private var borderColor: Color { item.hasData ? Color.black.opacity(0.08) : Color.black.opacity(0.04) }
+
+    var body: some View {
+        let cardShape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+        cardContent
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(8)
+            .background(cardShape.fill(bgColor))
+            .overlay(cardShape.stroke(borderColor, lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private var cardContent: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(Self.monthNames[item.month - 1])
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(titleColor)
+
+            if item.hasData {
+                expenseRow
+                incomeRow
+                Text("\(item.recordCount) 笔")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(IMColors.textMuted)
+            } else {
+                Text("暂无")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(IMColors.textPlaceholder)
+            }
+        }
+    }
+
+    private var expenseRow: some View {
+        HStack(spacing: 2) {
+            Text("支")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(IMColors.accent)
+            Text(BillLensFormatters.currencyString(item.expenseAmount, currencyCode: item.statsCurrency))
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(IMColors.textSecondary)
+                .lineLimit(1)
+        }
+    }
+
+    private var incomeRow: some View {
+        HStack(spacing: 2) {
+            Text("收")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(IMColors.income)
+            Text(BillLensFormatters.currencyString(item.incomeAmount, currencyCode: item.statsCurrency))
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(IMColors.textSecondary)
+                .lineLimit(1)
+        }
     }
 }
 

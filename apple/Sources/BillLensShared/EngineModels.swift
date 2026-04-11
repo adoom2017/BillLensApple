@@ -235,7 +235,6 @@ public struct LedgerSnapshot: Codable {
 }
 
 public enum LedgerPreset: String, CaseIterable, Identifiable {
-    case week
     case month
     case year
     case custom
@@ -244,9 +243,8 @@ public enum LedgerPreset: String, CaseIterable, Identifiable {
 
     public var title: String {
         switch self {
-        case .week: "本周"
-        case .month: "本月"
-        case .year: "本年"
+        case .month: "按月"
+        case .year: "按年"
         case .custom: "自定义"
         }
     }
