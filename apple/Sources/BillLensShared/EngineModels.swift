@@ -120,12 +120,12 @@ public struct RecordItem: Codable, Identifiable {
 
 public struct HomeSnapshot: Codable {
     public let messages: [ConversationMessage]
-    public let draft: RecordDraft?
+    public let drafts: [RecordDraft]
     public let latestRecord: RecordItem?
 
     enum CodingKeys: String, CodingKey {
         case messages
-        case draft
+        case drafts
         case latestRecord = "latest_record"
     }
 }
@@ -153,7 +153,7 @@ public struct ParsedRecordPayload: Codable {
 public struct SubmitTextResult: Codable {
     public let home: HomeSnapshot
     public let autoConfirmed: Bool
-    public let parsed: ParsedRecordPayload
+    public let parsed: [ParsedRecordPayload]
 
     enum CodingKeys: String, CodingKey {
         case home

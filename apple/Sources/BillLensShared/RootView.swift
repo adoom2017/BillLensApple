@@ -352,7 +352,7 @@ private struct ChatScrollView: View {
                 .onChange(of: store.messages.count) {
                     withAnimation { reader.scrollTo("chatBottom", anchor: .bottom) }
                 }
-                .onChange(of: store.draft?.id) {
+                .onChange(of: store.drafts.count) {
                     withAnimation { reader.scrollTo("chatBottom", anchor: .bottom) }
                 }
                 .onChange(of: store.latestRecord?.id) {
@@ -387,18 +387,27 @@ private struct ChatScrollView: View {
                 ProgressBubble(message: progress.content)
             }
 
-            if let draft = store.draft {
-                DraftConversationCard(
-                    title: draft.note ?? draft.merchant ?? "待确认账单",
-                    direction: draft.direction ?? "expense",
-                    amount: draft.amount,
-                    currency: draft.currency,
-                    category: draft.category ?? "未分类",
-                    merchant: draft.merchant ?? "未填写商户",
-                    transactionAt: draft.transactionAt,
-                    status: "待确认",
-                    copy: "已为你解析出一张待确认账单。若要修改，可以继续说\"改成300元\"，右侧表单也支持直接手动编辑。"
-                )
+            if !store.drafts.isEmpty {
+                let draftCount = store.drafts.count
+                ForEach(Array(store.drafts.enumerated()), id: \.element.id) { index, draft in
+                    DraftConversationCard(
+                        title: draftCount > 1
+                            ? "[\(index + 1)/\(draftCount)] \(draft.merchant ?? draft.note ?? "待确认账单")"
+                            : (draft.note ?? draft.merchant ?? "待确认账单"),
+                        direction: draft.direction ?? "expense",
+                        amount: draft.amount,
+                        currency: draft.currency,
+                        category: draft.category ?? "未分类",
+                        merchant: draft.merchant ?? "未填写商户",
+                        transactionAt: draft.transactionAt,
+                        status: "待确认",
+                        copy: draftCount > 1
+                            ? "共 \(draftCount) 笔待确认账单，点击可切换编辑。"
+                            : "已为你解析出一张待确认账单。若要修改，可以继续说\"改成300元\"，右侧表单也支持直接手动编辑。"
+                    )
+                    .opacity(index == store.activeDraftIndex ? 1.0 : 0.7)
+                    .onTapGesture { store.selectDraft(at: index) }
+                }
             } else if let record = store.latestRecord {
                 DraftConversationCard(
                     title: record.note ?? record.merchant ?? "最近入库账单",
@@ -431,7 +440,7 @@ private struct ReviewPanel: View {
                         .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(IMColors.textPrimary)
                     Spacer()
-                    StatusPill(title: store.draft == nil ? "等待解析" : "待确认", warning: store.draft != nil)
+                    StatusPill(title: store.drafts.isEmpty ? "等待解析" : "待确认 (\(store.drafts.count))", warning: !store.drafts.isEmpty)
                 }
                 Text("左侧发送后自动更新，也可直接手动修改。")
                     .font(.system(size: 12, weight: .medium))
@@ -446,8 +455,8 @@ private struct ReviewPanel: View {
             // Amount summary — flat, no border
             ReviewSummaryCard(
                 direction: store.draftForm.direction,
-                amount: store.draft?.amount,
-                currency: store.draft?.currency ?? store.draftForm.currency,
+                amount: store.currentDraft?.amount,
+                currency: store.currentDraft?.currency ?? store.draftForm.currency,
                 meta: reviewSummaryMeta
             )
             .padding(.horizontal, 16)
@@ -455,7 +464,7 @@ private struct ReviewPanel: View {
 
             IMColors.divider.frame(height: 1)
 
-            if store.draft == nil {
+            if store.currentDraft == nil {
                 EmptyReviewState(latestRecord: store.latestRecord)
                     .padding(16)
                 Spacer(minLength: 0)
@@ -482,9 +491,10 @@ private struct ReviewPanel: View {
     }
 
     private var reviewSummaryMeta: String {
-        if let draft = store.draft {
+        if let draft = store.currentDraft {
+            let indexLabel = store.drafts.count > 1 ? "第 \(store.activeDraftIndex + 1)/\(store.drafts.count) 笔 · " : ""
             return
-                "\(draft.category ?? "未分类") · \(draft.merchant ?? "未填写商户") · \(BillLensFormatters.displayDateTime(draft.transactionAt))"
+                "\(indexLabel)\(draft.category ?? "未分类") · \(draft.merchant ?? "未填写商户") · \(BillLensFormatters.displayDateTime(draft.transactionAt))"
         }
         return "等待新的账单解析结果"
     }
@@ -554,6 +564,26 @@ private struct ReviewPanel: View {
 
     private var reviewActions: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if store.drafts.count > 1 {
+                HStack(spacing: 8) {
+                    Button(action: { store.selectDraft(at: store.activeDraftIndex - 1) }) {
+                        Image(systemName: "chevron.left")
+                    }
+                    .disabled(store.activeDraftIndex <= 0)
+
+                    Text("第 \(store.activeDraftIndex + 1)/\(store.drafts.count) 笔")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(IMColors.textSecondary)
+
+                    Button(action: { store.selectDraft(at: store.activeDraftIndex + 1) }) {
+                        Image(systemName: "chevron.right")
+                    }
+                    .disabled(store.activeDraftIndex >= store.drafts.count - 1)
+
+                    Spacer()
+                }
+            }
+
             Text("确认后将写入数据库，并同步出现在账单一览中。")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(IMColors.textSecondary)
@@ -568,6 +598,11 @@ private struct ReviewPanel: View {
                 }
                 ActionButton(title: "确认入库", kind: .primary, minWidth: 96) {
                     store.confirmDraft()
+                }
+                if store.drafts.count > 1 {
+                    ActionButton(title: "全部确认", kind: .primary, minWidth: 96) {
+                        store.confirmAllDrafts()
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

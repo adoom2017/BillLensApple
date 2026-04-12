@@ -69,6 +69,9 @@ enum EngineRequest {
     SttCancel {
         profile_id: String,
     },
+    ConfirmAllDrafts {
+        profile_id: String,
+    },
     DeleteRecord {
         profile_id: String,
         record_id: String,
@@ -234,6 +237,10 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
             stt::cancel(&profile_id)?;
             Ok(encode_ok(serde_json::json!({})))
         }
+        EngineRequest::ConfirmAllDrafts { profile_id } => with_app(|app| {
+            let result = runtime().block_on(app.confirm_all_drafts(&profile_id))?;
+            Ok(encode_ok(result))
+        }),
         EngineRequest::DeleteRecord {
             profile_id,
             record_id,

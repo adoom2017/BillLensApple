@@ -255,6 +255,143 @@ impl BillRepository {
         row.map(TryInto::try_into).transpose()
     }
 
+    pub async fn list_active_record_drafts(&self, profile_id: &str) -> Result<Vec<RecordDraft>> {
+        let rows = sqlx::query_as::<_, RecordDraftRow>(
+            r#"
+            SELECT * FROM record_drafts
+            WHERE profile_id = ?1 AND status = 'parsed'
+            ORDER BY created_at ASC, rowid ASC
+            "#,
+        )
+        .bind(profile_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list active record drafts")?;
+
+        rows.into_iter().map(TryInto::try_into).collect()
+    }
+
+    /// Insert multiple draft rows inside a single transaction so a mid-batch
+    /// failure never leaves a partial set of rows committed.
+    pub async fn create_record_drafts_batch(
+        &self,
+        profile_id: &str,
+        content: &str,
+        payloads: &[ParsedRecordPayload],
+    ) -> Result<Vec<RecordDraft>> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin draft batch transaction")?;
+        let mut drafts = Vec::with_capacity(payloads.len());
+        for parsed in payloads {
+            let id = Uuid::new_v4();
+            let row = sqlx::query_as::<_, RecordDraftRow>(
+                r#"
+                INSERT INTO record_drafts (
+                    id, profile_id, content, auto_confirm, status, direction, amount, currency, category, merchant, transaction_at, note
+                )
+                VALUES (?1, ?2, ?3, false, 'parsed', ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                RETURNING *
+                "#,
+            )
+            .bind(id.to_string())
+            .bind(profile_id)
+            .bind(content)
+            .bind(parsed.direction.as_ref().map(|v| v.as_str()))
+            .bind(parsed.amount)
+            .bind(parsed.currency.clone())
+            .bind(parsed.category.clone())
+            .bind(parsed.merchant.clone())
+            .bind(parsed.transaction_at)
+            .bind(parsed.note.clone())
+            .fetch_one(&mut *tx)
+            .await
+            .context("failed to insert record draft in batch")?;
+            drafts.push(row.try_into()?);
+        }
+        tx.commit()
+            .await
+            .context("failed to commit draft batch transaction")?;
+        Ok(drafts)
+    }
+
+    /// Confirm multiple drafts and insert their records in a single transaction.
+    pub async fn confirm_record_drafts_batch(
+        &self,
+        profile_id: &str,
+        device_id: &str,
+        draft_creates: Vec<(Uuid, RecordCreate)>,
+    ) -> Result<Option<Record>> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin confirm batch transaction")?;
+        let mut last_record: Option<Record> = None;
+        for (draft_id, create) in draft_creates {
+            let record_id = Uuid::new_v4();
+            let record_row = sqlx::query_as::<_, RecordRow>(
+                r#"
+                INSERT INTO records (
+                    id, profile_id, direction, amount, currency, category, merchant, transaction_at, note, device_id
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                RETURNING *
+                "#,
+            )
+            .bind(record_id.to_string())
+            .bind(profile_id)
+            .bind(create.direction.as_str())
+            .bind(create.amount)
+            .bind(create.currency)
+            .bind(create.category)
+            .bind(create.merchant)
+            .bind(create.transaction_at)
+            .bind(create.note)
+            .bind(device_id)
+            .fetch_one(&mut *tx)
+            .await
+            .context("failed to insert record in confirm batch")?;
+            let record: Record = record_row.try_into()?;
+            sqlx::query(
+                r#"
+                UPDATE record_drafts
+                SET status = 'confirmed',
+                    confirmed_record_id = ?2,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?1
+                "#,
+            )
+            .bind(draft_id.to_string())
+            .bind(record_id.to_string())
+            .execute(&mut *tx)
+            .await
+            .context("failed to mark draft confirmed in batch")?;
+            let sync_payload = serde_json::to_string(&record)
+                .context("failed to serialize sync payload in confirm batch")?;
+            sqlx::query(
+                r#"
+                INSERT INTO sync_outbox (id, record_id, profile_id, operation, payload)
+                VALUES (?1, ?2, ?3, 'create', ?4)
+                "#,
+            )
+            .bind(Uuid::new_v4().to_string())
+            .bind(record_id.to_string())
+            .bind(profile_id)
+            .bind(sync_payload)
+            .execute(&mut *tx)
+            .await
+            .context("failed to enqueue sync event in confirm batch")?;
+            last_record = Some(record);
+        }
+        tx.commit()
+            .await
+            .context("failed to commit confirm batch transaction")?;
+        Ok(last_record)
+    }
+
     pub async fn latest_record(&self, profile_id: &str) -> Result<Option<Record>> {
         let row = sqlx::query_as::<_, RecordRow>(
             r#"

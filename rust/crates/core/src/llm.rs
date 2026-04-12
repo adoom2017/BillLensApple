@@ -16,26 +16,29 @@ const RECORD_PROMPT_TEMPLATE: &str = r#"你是一个消费记录结构化助手�
 今天的日期是：{today}
 当前的时间是：{current_time}
 必须严格返回 JSON，不要输出解释文字，不要输出 markdown。
+如果输入包含多条交易记录（如账单列表、银行流水、多笔消费），请返回 JSON 数组，每条记录一个对象。如果只有一条记录，也返回包含一个元素的数组。
 category 只能从以下固定分类中选择：
 - 支出：{expense_categories}
 - 收入：{income_categories}
-如果无法判断分类，使用“其他”。
-涉及会员、订阅、续费、月费、年费等周期性付费服务（如 ChatGPT、Netflix、iCloud、Spotify、视频会员等），应分类为“订阅”。
-如果文本明确出现“退款”“退回”“退费”“退款成功”等语义，应判断为收入，分类优先使用“其他”。
+如果无法判断分类，使用”其他”。
+涉及会员、订阅、续费、月费、年费等周期性付费服务（如 ChatGPT、Netflix、iCloud、Spotify、视频会员等），应分类为”订阅”。
+如果文本明确出现”退款””退回””退费””退款成功”等语义，应判断为收入，分类优先使用”其他”。
 amount 必须始终返回正数，不要返回负数；收支方向只放在 direction 字段里表达。
 只有当原始输入中明确出现时间线索时，才填写 transaction_at；如果原始输入没有体现任何时间信息，transaction_at 必须直接使用当前完整时间，精确到秒，不要只返回日期，不要返回当天 0 点，不要猜测、不要编造。
 如果时间缺少时区，不要臆造 Z 或 UTC；优先返回原始本地时间字符串。
 note 只保留与交易本身直接相关的简短备注；忽略积分、贴纸、奖励、营销文案、活动提示；如果没有合适备注，返回 null。
 JSON 格式如下：
-{
-  "direction": "income" | "expense" | null,
-  "amount": number | null,
-  "currency": "ISO 4217 code, e.g. CNY/USD/EUR/HKD/JPY/GBP" | null,
-  "category": string | null,
-  "merchant": string | null,
-  "transaction_at": "RFC3339 datetime" | null,
-  "note": string | null
-}
+[
+  {
+    "direction": "income" | "expense" | null,
+    "amount": number | null,
+    "currency": "ISO 4217 code, e.g. CNY/USD/EUR/HKD/JPY/GBP" | null,
+    "category": string | null,
+    "merchant": string | null,
+    "transaction_at": "RFC3339 datetime" | null,
+    "note": string | null
+  }
+]
 如果原文明确出现币种，请返回对应 ISO 4217 代码：
 - 人民币 / 元 / 块 / RMB / ￥ / ¥ -> CNY
 - 美元 / 美金 / $ / USD -> USD
@@ -167,14 +170,53 @@ impl LlmClient {
         }
     }
 
-    pub async fn parse_record_text(&self, text: String) -> Result<ParsedRecordPayload> {
-        self.parse_record_text_with_options(text, NoteFallbackMode::PreserveInputText)
+    pub async fn parse_record_ocr_text_multi(
+        &self,
+        text: String,
+    ) -> Result<Vec<ParsedRecordPayload>> {
+        self.parse_records_multi(text, NoteFallbackMode::SkipInputText)
             .await
     }
 
-    pub async fn parse_record_ocr_text(&self, text: String) -> Result<ParsedRecordPayload> {
-        self.parse_record_text_with_options(text, NoteFallbackMode::SkipInputText)
+    pub async fn parse_record_text_multi(
+        &self,
+        text: String,
+    ) -> Result<Vec<ParsedRecordPayload>> {
+        self.parse_records_multi(text, NoteFallbackMode::PreserveInputText)
             .await
+    }
+
+    async fn parse_records_multi(
+        &self,
+        text: String,
+        note_fallback_mode: NoteFallbackMode,
+    ) -> Result<Vec<ParsedRecordPayload>> {
+        let prompt = build_record_prompt();
+        logger::info(
+            "llm.request",
+            format!(
+                "provider={} model={} mode=multi note_fallback={note_fallback_mode:?}",
+                self.provider, self.model,
+            ),
+        );
+        let response = self.send_prompted_request(prompt, text.clone()).await?;
+        let raw_response_text = response
+            .text()
+            .await
+            .context("failed to read llm response body")?;
+        let raw_response: Value =
+            serde_json::from_str(&raw_response_text).context("failed to decode llm response")?;
+        let content = extract_message_content(&self.provider, &raw_response)?;
+        let mut payloads = parse_record_payloads_text(&content)?;
+        for payload in &mut payloads {
+            finalize_record_payload(payload, &text, note_fallback_mode);
+        }
+        logger::info(
+            "llm.response.parsed_multi",
+            serde_json::to_string(&payloads)
+                .unwrap_or_else(|_| "<serialize failed>".to_string()),
+        );
+        Ok(payloads)
     }
 
     #[allow(dead_code)]
@@ -192,36 +234,6 @@ impl LlmClient {
         let content = extract_message_content(&self.provider, &raw_response)?;
         let mut payload = parse_record_payload_text(&content)?;
         finalize_record_patch_payload(&mut payload);
-        Ok(payload)
-    }
-
-    async fn parse_record_text_with_options(
-        &self,
-        text: String,
-        note_fallback_mode: NoteFallbackMode,
-    ) -> Result<ParsedRecordPayload> {
-        let prompt = build_record_prompt();
-        logger::info(
-            "llm.request",
-            format!(
-                "provider={} model={} mode={note_fallback_mode:?}",
-                self.provider, self.model,
-            ),
-        );
-        let response = self.send_prompted_request(prompt, text.clone()).await?;
-        let raw_response_text = response
-            .text()
-            .await
-            .context("failed to read llm response body")?;
-        let raw_response: Value =
-            serde_json::from_str(&raw_response_text).context("failed to decode llm response")?;
-        let content = extract_message_content(&self.provider, &raw_response)?;
-        let mut payload = parse_record_payload_text(&content)?;
-        finalize_record_payload(&mut payload, &text, note_fallback_mode);
-        logger::info(
-            "llm.response.parsed",
-            serde_json::to_string(&payload).unwrap_or_else(|_| "<serialize failed>".to_string()),
-        );
         Ok(payload)
     }
 
@@ -312,7 +324,7 @@ fn build_openai_request_body(model: &str, system_prompt: String, text: String) -
     json!({
         "model": model,
         "stream": false,
-        "max_tokens": 512,
+        "max_tokens": 2048,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": text}
@@ -324,7 +336,7 @@ fn build_llamacpp_request_body(model: &str, system_prompt: String, text: String)
     json!({
         "model": model,
         "stream": false,
-        "max_tokens": 512,
+        "max_tokens": 2048,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": text}
@@ -336,7 +348,7 @@ fn build_anthropic_request_body(model: &str, system_prompt: String, text: String
     json!({
         "model": model,
         "stream": false,
-        "max_tokens": 1024,
+        "max_tokens": 2048,
         "system": system_prompt,
         "messages": [
             {
@@ -427,6 +439,39 @@ fn normalize_json_payload(content: &str) -> String {
     extract_json_object(trimmed).unwrap_or_else(|| trimmed.to_string())
 }
 
+fn normalize_json_payload_multi(content: &str) -> String {
+    let cleaned = strip_think_blocks(content);
+    let trimmed = cleaned.trim();
+    if let Some(stripped) = trimmed.strip_prefix("```json") {
+        return extract_json_content(stripped.trim().trim_end_matches("```").trim())
+            .unwrap_or_else(|| stripped.trim().trim_end_matches("```").trim().to_string());
+    }
+    if let Some(stripped) = trimmed.strip_prefix("```") {
+        return extract_json_content(stripped.trim().trim_end_matches("```").trim())
+            .unwrap_or_else(|| stripped.trim().trim_end_matches("```").trim().to_string());
+    }
+    extract_json_content(trimmed).unwrap_or_else(|| trimmed.to_string())
+}
+
+fn parse_record_payloads_text(content: &str) -> Result<Vec<ParsedRecordPayload>> {
+    let normalized = normalize_json_payload_multi(content);
+    let json_value: Value = serde_json::from_str(&normalized)
+        .or_else(|_| serde_json::from_str::<String>(content.trim()).map(Value::String))
+        .context("failed to parse llm record json payload")?;
+    match json_value {
+        Value::Array(items) => items
+            .into_iter()
+            .map(|item| {
+                let obj = coerce_json_object_value(item)?;
+                parse_record_payload_value(obj)
+            })
+            .collect(),
+        Value::Object(_) => Ok(vec![parse_record_payload_value(json_value)?]),
+        Value::String(text) => parse_record_payloads_text(&text),
+        _ => Err(anyhow!("unexpected JSON shape from LLM")),
+    }
+}
+
 fn parse_record_payload_text(content: &str) -> Result<ParsedRecordPayload> {
     let normalized = normalize_json_payload(content);
     let json_value: Value = serde_json::from_str(&normalized)
@@ -474,6 +519,18 @@ fn extract_json_object(content: &str) -> Option<String> {
     let start = content.find('{')?;
     let end = content.rfind('}')?;
     (start < end).then(|| content[start..=end].trim().to_string())
+}
+
+fn extract_json_content(content: &str) -> Option<String> {
+    let arr_start = content.find('[');
+    let obj_start = content.find('{');
+    match (arr_start, obj_start) {
+        (Some(a), Some(o)) if a < o => {
+            let end = content.rfind(']')?;
+            (a < end).then(|| content[a..=end].trim().to_string())
+        }
+        _ => extract_json_object(content),
+    }
 }
 
 fn parse_record_payload_value(value: Value) -> Result<ParsedRecordPayload> {

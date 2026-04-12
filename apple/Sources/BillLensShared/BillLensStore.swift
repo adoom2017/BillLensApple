@@ -20,7 +20,8 @@ public final class BillLensStore: ObservableObject {
     }
 
     @Published public var messages: [ConversationMessage] = []
-    @Published public var draft: RecordDraft?
+    @Published public var drafts: [RecordDraft] = []
+    @Published public var activeDraftIndex: Int = 0
     @Published public var latestRecord: RecordItem?
     @Published public var ledger: LedgerSnapshot?
     @Published public var transientProgressMessage: TransientProgressMessage?
@@ -57,6 +58,11 @@ public final class BillLensStore: ObservableObject {
 
     public var availableCategories: [String] {
         Self.categories(for: draftForm.direction)
+    }
+
+    public var currentDraft: RecordDraft? {
+        guard !drafts.isEmpty, activeDraftIndex >= 0, activeDraftIndex < drafts.count else { return nil }
+        return drafts[activeDraftIndex]
     }
 
     /// 切换收支方向，并将分类重置为新方向下的第一个合法值
@@ -174,7 +180,7 @@ public final class BillLensStore: ObservableObject {
     }
 
     public func saveDraft() {
-        guard let draft else { return }
+        guard let draft = currentDraft else { return }
         perform("正在保存草稿") {
             let draftDict = try self.currentDraftPayload()
             let result: SaveDraftResult = try await self.bridge.sendAsync([
@@ -190,7 +196,7 @@ public final class BillLensStore: ObservableObject {
     }
 
     public func confirmDraft() {
-        guard let draft else { return }
+        guard let draft = currentDraft else { return }
         perform("正在确认账单") {
             let _: SaveDraftResult = try await self.bridge.sendAsync([
                 "action": "confirm_draft",
@@ -204,8 +210,22 @@ public final class BillLensStore: ObservableObject {
         }
     }
 
+    public func confirmAllDrafts() {
+        guard !drafts.isEmpty else { return }
+        perform("正在批量确认账单") {
+            let result: SaveDraftResult = try await self.bridge.sendAsync([
+                "action": "confirm_all_drafts",
+                "profile_id": self.profileID
+            ])
+            self.apply(home: result.home)
+            try await self.refreshLedger()
+            self.statusText = "已批量入库"
+            AppLogger.log("draft.confirm_all", "count=\(self.drafts.count)")
+        }
+    }
+
     public func discardDraft() {
-        guard let draft else { return }
+        guard let draft = currentDraft else { return }
         perform("正在丢弃草稿") {
             let home: HomeSnapshot = try await self.bridge.sendAsync([
                 "action": "discard_draft",
@@ -216,6 +236,12 @@ public final class BillLensStore: ObservableObject {
             self.statusText = "草稿已丢弃"
             AppLogger.log("draft.discard", "draft_id=\(draft.id)")
         }
+    }
+
+    public func selectDraft(at index: Int) {
+        guard index >= 0, index < drafts.count else { return }
+        activeDraftIndex = index
+        hydrateDraftFields()
     }
 
     public func deleteRecord(_ recordId: String) {
@@ -247,7 +273,7 @@ public final class BillLensStore: ObservableObject {
             "profile_id": profileID
         ])
         apply(home: snapshot)
-        AppLogger.log("home.refresh", "messages=\(snapshot.messages.count) has_draft=\(snapshot.draft != nil)")
+        AppLogger.log("home.refresh", "messages=\(snapshot.messages.count) drafts=\(snapshot.drafts.count)")
     }
 
     public func applyPreset(_ preset: LedgerPreset) {
@@ -286,9 +312,18 @@ public final class BillLensStore: ObservableObject {
     }
 
     private func apply(home: HomeSnapshot) {
+        let previousCount = drafts.count
         messages = home.messages
-        draft = home.draft
+        drafts = home.drafts
         latestRecord = home.latestRecord
+        if drafts.count > previousCount {
+            // New drafts were appended (ordered by created_at ASC, rowid ASC).
+            // Jump to the first of the new batch so the review form is bound to
+            // the just-parsed bill rather than an older one.
+            activeDraftIndex = previousCount
+        } else if activeDraftIndex >= drafts.count {
+            activeDraftIndex = max(0, drafts.count - 1)
+        }
         hydrateDraftFields()
     }
 
@@ -307,7 +342,7 @@ public final class BillLensStore: ObservableObject {
     }
 
     private func hydrateDraftFields() {
-        guard let draft else {
+        guard let draft = currentDraft else {
             draftForm = DraftFormState()
             return
         }

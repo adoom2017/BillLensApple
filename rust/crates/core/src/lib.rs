@@ -38,7 +38,7 @@ impl CoreError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HomeSnapshot {
     pub messages: Vec<ConversationMessage>,
-    pub draft: Option<RecordDraft>,
+    pub drafts: Vec<RecordDraft>,
     pub latest_record: Option<Record>,
 }
 
@@ -46,7 +46,7 @@ pub struct HomeSnapshot {
 pub struct SubmitTextResult {
     pub home: HomeSnapshot,
     pub auto_confirmed: bool,
-    pub parsed: ParsedRecordPayload,
+    pub parsed: Vec<ParsedRecordPayload>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,11 +135,11 @@ impl AppService {
             .repo
             .list_conversation_messages(profile_id, 100)
             .await?;
-        let draft = self.repo.latest_active_record_draft(profile_id).await?;
+        let drafts = self.repo.list_active_record_drafts(profile_id).await?;
         let latest_record = self.repo.latest_record(profile_id).await?;
         Ok(HomeSnapshot {
             messages,
-            draft,
+            drafts,
             latest_record,
         })
     }
@@ -176,34 +176,55 @@ impl AppService {
             .llm
             .as_ref()
             .ok_or_else(|| CoreError::bad_request("LLM parser is not configured"))?;
-        let parsed = match source {
-            EntrySource::Text => llm.parse_record_text(content.clone()).await,
-            EntrySource::Ocr => llm.parse_record_ocr_text(content.clone()).await,
+        // P1: both text and OCR go through the multi-parser so the array-format
+        // prompt is decoded correctly regardless of source. Text keeps the raw
+        // input as a note fallback; OCR skips it (cleaner output).
+        let payloads = match source {
+            EntrySource::Text => llm.parse_record_text_multi(content.clone()).await,
+            EntrySource::Ocr => llm.parse_record_ocr_text_multi(content.clone()).await,
         }
         .map_err(map_internal)?;
+
+        // P2: treat an empty parse result as a failure rather than silent success.
+        if payloads.is_empty() {
+            return Err(CoreError::bad_request(
+                "未能从输入中识别出任何账单记录，请检查图片或文字内容后重试。",
+            ));
+        }
+
         logger::info(
             "submit_text",
             format!(
-                "parsed_payload={}",
-                serde_json::to_string(&parsed).unwrap_or_else(|_| "<serialize failed>".to_string())
+                "parsed_payloads={}",
+                serde_json::to_string(&payloads)
+                    .unwrap_or_else(|_| "<serialize failed>".to_string())
             ),
         );
-        let summary = format_parsed_summary(&parsed);
+        let summary = format_multi_parsed_summary(&payloads);
         if auto_confirm {
-            let create = record_create_from_parsed(&parsed)?;
-            let record = self
-                .repo
-                .create_record(Uuid::new_v4(), profile_id, &self.device_id, create)
-                .await
-                .map_err(map_internal)?;
+            // Validate all payloads before touching the DB so a bad payload never
+            // leaves earlier records committed while the rest fail.
+            let creates: Vec<RecordCreate> = payloads
+                .iter()
+                .map(record_create_from_parsed)
+                .collect::<Result<_, _>>()?;
+            let mut last_record_id = None;
+            for create in creates {
+                let record = self
+                    .repo
+                    .create_record(Uuid::new_v4(), profile_id, &self.device_id, create)
+                    .await
+                    .map_err(map_internal)?;
+                last_record_id = Some(record.id);
+            }
             self.repo
                 .create_conversation_message(
                     Uuid::new_v4(),
                     profile_id,
                     ConversationRole::Assistant,
-                    &format!("已根据当前输入自动保存账单。{summary}"),
+                    &format!("已自动保存 {} 笔账单。{summary}", payloads.len()),
                     None,
-                    Some(record.id),
+                    last_record_id,
                 )
                 .await
                 .map_err(map_internal)?;
@@ -211,22 +232,24 @@ impl AppService {
             return Ok(SubmitTextResult {
                 home,
                 auto_confirmed: true,
-                parsed,
+                parsed: payloads,
             });
         }
 
-        let draft = self
+        // Draft path — insert all rows atomically via the batch method.
+        let drafts = self
             .repo
-            .create_record_draft(Uuid::new_v4(), profile_id, &content, false, &parsed)
+            .create_record_drafts_batch(profile_id, &content, &payloads)
             .await
             .map_err(map_internal)?;
+        let first_draft_id = drafts.first().map(|d| d.id);
         self.repo
             .create_conversation_message(
                 Uuid::new_v4(),
                 profile_id,
                 ConversationRole::Assistant,
-                &format!("已生成待确认账单。{summary}"),
-                Some(draft.id),
+                &format!("已生成 {} 笔待确认账单。{summary}", payloads.len()),
+                first_draft_id,
                 None,
             )
             .await
@@ -236,7 +259,7 @@ impl AppService {
         Ok(SubmitTextResult {
             home,
             auto_confirmed: false,
-            parsed,
+            parsed: payloads,
         })
     }
 
@@ -336,6 +359,48 @@ impl AppService {
             .await
             .map_err(map_internal)?;
         self.home(profile_id).await.map_err(map_internal)
+    }
+
+    pub async fn confirm_all_drafts(
+        &self,
+        profile_id: &str,
+    ) -> Result<SaveDraftResult, CoreError> {
+        let drafts = self
+            .repo
+            .list_active_record_drafts(profile_id)
+            .await
+            .map_err(map_internal)?;
+        if drafts.is_empty() {
+            return Err(CoreError::bad_request("no active drafts to confirm"));
+        }
+        // Validate all drafts before any DB write so a single bad draft
+        // cannot leave earlier ones committed.  The batch method is transactional.
+        let creates: Vec<(Uuid, RecordCreate)> = drafts
+            .iter()
+            .filter(|d| d.status == RecordDraftStatus::Parsed)
+            .map(|d| record_create_from_draft(d).map(|c| (d.id, c)))
+            .collect::<Result<_, _>>()?;
+        let last_record = self
+            .repo
+            .confirm_record_drafts_batch(profile_id, &self.device_id, creates)
+            .await
+            .map_err(map_internal)?;
+        self.repo
+            .create_conversation_message(
+                Uuid::new_v4(),
+                profile_id,
+                ConversationRole::Assistant,
+                &format!("已批量确认 {} 笔账单入库。", drafts.len()),
+                None,
+                last_record.as_ref().map(|r| r.id),
+            )
+            .await
+            .map_err(map_internal)?;
+        let home = self.home(profile_id).await.map_err(map_internal)?;
+        Ok(SaveDraftResult {
+            home,
+            record: last_record,
+        })
     }
 
     pub async fn delete_record(&self, profile_id: &str, record_id: Uuid) -> Result<(), CoreError> {
@@ -738,6 +803,18 @@ fn format_parsed_summary(payload: &ParsedRecordPayload) -> String {
     format!(
         "解析结果：{direction} {amount}，分类：{category}，商户：{merchant}，时间：{transaction_at}。"
     )
+}
+
+fn format_multi_parsed_summary(payloads: &[ParsedRecordPayload]) -> String {
+    if payloads.len() == 1 {
+        return format_parsed_summary(&payloads[0]);
+    }
+    let lines: Vec<String> = payloads
+        .iter()
+        .enumerate()
+        .map(|(i, p)| format!("{}. {}", i + 1, format_parsed_summary(p)))
+        .collect();
+    lines.join("\n")
 }
 
 fn map_internal(error: anyhow::Error) -> CoreError {
