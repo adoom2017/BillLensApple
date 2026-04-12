@@ -589,18 +589,18 @@ private struct ReviewPanel: View {
                 .foregroundStyle(IMColors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            HStack(spacing: 10) {
-                ActionButton(title: "删除账单", kind: .dangerGhost, minWidth: 84) {
+            HStack(spacing: 6) {
+                ActionButton(title: "删除", kind: .dangerGhost, minWidth: 56) {
                     store.discardDraft()
                 }
-                ActionButton(title: "保存修改", kind: .ghost, minWidth: 84) {
+                ActionButton(title: "保存", kind: .ghost, minWidth: 56) {
                     store.saveDraft()
                 }
-                ActionButton(title: "确认入库", kind: .primary, minWidth: 96) {
+                ActionButton(title: "确认入库", kind: .primary, minWidth: 76) {
                     store.confirmDraft()
                 }
                 if store.drafts.count > 1 {
-                    ActionButton(title: "全部确认", kind: .primary, minWidth: 96) {
+                    ActionButton(title: "全部确认", kind: .primary, minWidth: 76) {
                         store.confirmAllDrafts()
                     }
                 }
