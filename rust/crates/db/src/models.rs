@@ -1,4 +1,4 @@
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -7,6 +7,34 @@ pub const EXPENSE_CATEGORIES: &[&str] = &[
 ];
 
 pub const INCOME_CATEGORIES: &[&str] = &["工资收入", "投资收益", "报销", "退款", "其他"];
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SubscriptionCycle {
+    Monthly,
+    Yearly,
+}
+
+impl SubscriptionCycle {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Monthly => "monthly",
+            Self::Yearly => "yearly",
+        }
+    }
+}
+
+impl TryFrom<&str> for SubscriptionCycle {
+    type Error = &'static str;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "monthly" => Ok(Self::Monthly),
+            "yearly" => Ok(Self::Yearly),
+            _ => Err("invalid subscription cycle"),
+        }
+    }
+}
 
 pub const ALL_RECORD_CATEGORIES: &[&str] = &[
     "餐饮",
@@ -221,6 +249,7 @@ pub struct ParsedRecordPayload {
     pub merchant: Option<String>,
     pub transaction_at: Option<DateTime<Utc>>,
     pub note: Option<String>,
+    pub subscription_cycle: Option<SubscriptionCycle>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -277,4 +306,143 @@ pub struct SyncState {
     pub last_synced_at: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Subscription {
+    pub id: Uuid,
+    pub profile_id: String,
+    pub direction: RecordDirection,
+    pub amount: f64,
+    pub currency: String,
+    pub category: String,
+    pub merchant: Option<String>,
+    pub note: Option<String>,
+    pub cycle: SubscriptionCycle,
+    pub anchor_day: i32,
+    pub anchor_month: Option<i32>,
+    pub next_due_at: NaiveDate,
+    pub last_charged_at: Option<NaiveDate>,
+    pub is_active: bool,
+    pub deleted_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubscriptionCreate {
+    pub direction: RecordDirection,
+    pub amount: f64,
+    pub currency: String,
+    pub category: String,
+    pub merchant: Option<String>,
+    pub note: Option<String>,
+    pub cycle: SubscriptionCycle,
+    pub anchor_day: i32,
+    pub anchor_month: Option<i32>,
+    pub next_due_at: NaiveDate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SubscriptionUpdate {
+    pub direction: Option<RecordDirection>,
+    pub amount: Option<f64>,
+    pub currency: Option<String>,
+    pub category: Option<String>,
+    pub merchant: Option<String>,
+    pub note: Option<String>,
+    pub cycle: Option<SubscriptionCycle>,
+    pub anchor_day: Option<i32>,
+    pub anchor_month: Option<i32>,
+}
+
+/// Calculate the next due date after a given reference date.
+pub fn advance_next_due(
+    cycle: &SubscriptionCycle,
+    anchor_day: i32,
+    anchor_month: Option<i32>,
+    from: NaiveDate,
+) -> NaiveDate {
+    match cycle {
+        SubscriptionCycle::Monthly => {
+            let mut year = from.year();
+            let mut month = from.month() as i32 + 1;
+            if month > 12 {
+                month = 1;
+                year += 1;
+            }
+            let day = clamp_day(year, month as u32, anchor_day as u32);
+            NaiveDate::from_ymd_opt(year, month as u32, day).unwrap()
+        }
+        SubscriptionCycle::Yearly => {
+            let target_month = anchor_month.unwrap_or(from.month() as i32) as u32;
+            let next_year = from.year() + 1;
+            let day = clamp_day(next_year, target_month, anchor_day as u32);
+            NaiveDate::from_ymd_opt(next_year, target_month, day).unwrap()
+        }
+    }
+}
+
+fn clamp_day(year: i32, month: u32, day: u32) -> u32 {
+    let max_day = last_day_of_month(year, month);
+    day.min(max_day)
+}
+
+fn last_day_of_month(year: i32, month: u32) -> u32 {
+    if month == 12 {
+        31
+    } else {
+        NaiveDate::from_ymd_opt(year, month + 1, 1)
+            .unwrap()
+            .pred_opt()
+            .unwrap()
+            .day()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn advance_next_due_monthly_normal() {
+        let current = NaiveDate::from_ymd_opt(2026, 3, 15).unwrap();
+        let next = advance_next_due(&SubscriptionCycle::Monthly, 15, None, current);
+        assert_eq!(next, NaiveDate::from_ymd_opt(2026, 4, 15).unwrap());
+    }
+
+    #[test]
+    fn advance_next_due_monthly_clamps_to_month_end() {
+        let current = NaiveDate::from_ymd_opt(2026, 1, 31).unwrap();
+        let next = advance_next_due(&SubscriptionCycle::Monthly, 31, None, current);
+        assert_eq!(next, NaiveDate::from_ymd_opt(2026, 2, 28).unwrap());
+    }
+
+    #[test]
+    fn advance_next_due_monthly_leap_year_feb() {
+        let current = NaiveDate::from_ymd_opt(2028, 1, 31).unwrap();
+        let next = advance_next_due(&SubscriptionCycle::Monthly, 31, None, current);
+        assert_eq!(next, NaiveDate::from_ymd_opt(2028, 2, 29).unwrap());
+    }
+
+    #[test]
+    fn advance_next_due_monthly_december_to_january() {
+        let current = NaiveDate::from_ymd_opt(2026, 12, 10).unwrap();
+        let next = advance_next_due(&SubscriptionCycle::Monthly, 10, None, current);
+        assert_eq!(next, NaiveDate::from_ymd_opt(2027, 1, 10).unwrap());
+    }
+
+    #[test]
+    fn advance_next_due_yearly_normal() {
+        let current = NaiveDate::from_ymd_opt(2026, 6, 15).unwrap();
+        let next = advance_next_due(&SubscriptionCycle::Yearly, 15, Some(6), current);
+        assert_eq!(next, NaiveDate::from_ymd_opt(2027, 6, 15).unwrap());
+    }
+
+    #[test]
+    fn advance_next_due_yearly_feb29_non_leap() {
+        let current = NaiveDate::from_ymd_opt(2028, 2, 29).unwrap();
+        let next = advance_next_due(&SubscriptionCycle::Yearly, 29, Some(2), current);
+        assert_eq!(next, NaiveDate::from_ymd_opt(2029, 2, 28).unwrap());
+    }
 }

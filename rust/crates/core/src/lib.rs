@@ -4,11 +4,12 @@ mod logger;
 pub mod stt;
 
 use anyhow::{Result, anyhow};
-use billlens_apple_db::{
+pub use billlens_apple_db::{
     ALL_RECORD_CATEGORIES, BillRepository, CategoryStatsItem, ConversationMessage,
     ConversationRole, DirectionStatsItem, EXPENSE_CATEGORIES, INCOME_CATEGORIES,
     ParsedRecordPayload, Record, RecordCreate, RecordDirection, RecordDraft, RecordDraftStatus,
-    RecordDraftUpdate, RecordsStatsRange, RecordsStatsResponse, RecordsSummary,
+    RecordDraftUpdate, RecordsStatsRange, RecordsStatsResponse, RecordsSummary, Subscription,
+    SubscriptionCreate, SubscriptionCycle, SubscriptionUpdate, advance_next_due,
     is_valid_record_category, is_valid_record_category_for_direction,
 };
 use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, TimeZone, Utc};
@@ -47,6 +48,7 @@ pub struct SubmitTextResult {
     pub home: HomeSnapshot,
     pub auto_confirmed: bool,
     pub parsed: Vec<ParsedRecordPayload>,
+    pub subscription_created: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,7 +129,21 @@ impl AppService {
     }
 
     pub async fn bootstrap(&self, profile_id: &str) -> Result<()> {
-        self.repo.ensure_sync_state(profile_id).await
+        self.repo.ensure_sync_state(profile_id).await?;
+        // Process any overdue subscription charges
+        match self.process_due_subscriptions(profile_id).await {
+            Ok(summaries) if !summaries.is_empty() => {
+                logger::info(
+                    "bootstrap",
+                    format!("auto-charged {} subscription records", summaries.len()),
+                );
+            }
+            Err(e) => {
+                logger::error("bootstrap.subscriptions", e.to_string());
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     pub async fn home(&self, profile_id: &str) -> Result<HomeSnapshot> {
@@ -201,6 +217,62 @@ impl AppService {
             ),
         );
         let summary = format_multi_parsed_summary(&payloads);
+
+        // Create subscriptions for any payload with subscription_cycle detected
+        let mut subscription_created = false;
+        for payload in &payloads {
+            if let Some(ref cycle) = payload.subscription_cycle {
+                if let (Some(direction), Some(amount), Some(currency)) =
+                    (&payload.direction, payload.amount, &payload.currency)
+                {
+                    let now = Utc::now().with_timezone(&shanghai_offset());
+                    let today = now.date_naive();
+                    let anchor_day = payload
+                        .transaction_at
+                        .map(|t| t.with_timezone(&shanghai_offset()).day() as i32)
+                        .unwrap_or(today.day() as i32);
+                    let anchor_month = match cycle {
+                        SubscriptionCycle::Yearly => Some(
+                            payload
+                                .transaction_at
+                                .map(|t| t.with_timezone(&shanghai_offset()).month() as i32)
+                                .unwrap_or(today.month() as i32),
+                        ),
+                        SubscriptionCycle::Monthly => None,
+                    };
+                    let next_due = advance_next_due(cycle, anchor_day, anchor_month, today);
+                    let sub_create = SubscriptionCreate {
+                        direction: direction.clone(),
+                        amount,
+                        currency: currency.clone(),
+                        category: payload
+                            .category
+                            .clone()
+                            .unwrap_or_else(|| "订阅".to_string()),
+                        merchant: payload.merchant.clone(),
+                        note: payload.note.clone(),
+                        cycle: cycle.clone(),
+                        anchor_day,
+                        anchor_month,
+                        next_due_at: next_due,
+                    };
+                    if let Err(e) = self
+                        .repo
+                        .create_subscription(Uuid::new_v4(), profile_id, sub_create)
+                        .await
+                    {
+                        logger::error("submit_text.subscription", e.to_string());
+                    } else {
+                        subscription_created = true;
+                        logger::info(
+                            "submit_text.subscription",
+                            format!("created subscription cycle={}", cycle.as_str()),
+                        );
+                    }
+                }
+            }
+        }
+
         if auto_confirm {
             // Validate all payloads before touching the DB so a bad payload never
             // leaves earlier records committed while the rest fail.
@@ -233,6 +305,7 @@ impl AppService {
                 home,
                 auto_confirmed: true,
                 parsed: payloads,
+                subscription_created,
             });
         }
 
@@ -260,6 +333,7 @@ impl AppService {
             home,
             auto_confirmed: false,
             parsed: payloads,
+            subscription_created,
         })
     }
 
@@ -361,10 +435,7 @@ impl AppService {
         self.home(profile_id).await.map_err(map_internal)
     }
 
-    pub async fn confirm_all_drafts(
-        &self,
-        profile_id: &str,
-    ) -> Result<SaveDraftResult, CoreError> {
+    pub async fn confirm_all_drafts(&self, profile_id: &str) -> Result<SaveDraftResult, CoreError> {
         let drafts = self
             .repo
             .list_active_record_drafts(profile_id)
@@ -409,6 +480,181 @@ impl AppService {
             .await
             .map_err(map_internal)?;
         Ok(())
+    }
+
+    // ── Subscription management ─────────────────────────────────────
+
+    pub async fn list_subscriptions(
+        &self,
+        profile_id: &str,
+    ) -> Result<Vec<Subscription>, CoreError> {
+        self.repo
+            .list_subscriptions(profile_id)
+            .await
+            .map_err(map_internal)
+    }
+
+    pub async fn update_subscription(
+        &self,
+        profile_id: &str,
+        subscription_id: Uuid,
+        update: SubscriptionUpdate,
+    ) -> Result<Subscription, CoreError> {
+        // Validate category if provided
+        if let Some(ref category) = update.category {
+            let direction = update.direction.as_ref();
+            validate_category_for_direction(category, direction)?;
+        }
+        if let Some(amount) = update.amount {
+            if amount <= 0.0 {
+                return Err(CoreError::bad_request("amount must be greater than 0"));
+            }
+        }
+        self.repo
+            .update_subscription(subscription_id, profile_id, update)
+            .await
+            .map_err(map_internal)
+    }
+
+    pub async fn pause_subscription(
+        &self,
+        profile_id: &str,
+        subscription_id: Uuid,
+    ) -> Result<Subscription, CoreError> {
+        self.repo
+            .pause_subscription(subscription_id, profile_id)
+            .await
+            .map_err(map_internal)
+    }
+
+    pub async fn resume_subscription(
+        &self,
+        profile_id: &str,
+        subscription_id: Uuid,
+    ) -> Result<Subscription, CoreError> {
+        self.repo
+            .resume_subscription(subscription_id, profile_id)
+            .await
+            .map_err(map_internal)
+    }
+
+    pub async fn delete_subscription(
+        &self,
+        profile_id: &str,
+        subscription_id: Uuid,
+    ) -> Result<(), CoreError> {
+        self.repo
+            .soft_delete_subscription(subscription_id, profile_id)
+            .await
+            .map_err(map_internal)
+    }
+
+    /// Process all due subscriptions: create records for each past-due cycle.
+    /// Returns the number of records created.
+    pub async fn process_due_subscriptions(
+        &self,
+        profile_id: &str,
+    ) -> Result<Vec<(String, f64, String)>, CoreError> {
+        let now = Utc::now().with_timezone(&shanghai_offset());
+        let today = now.date_naive();
+        let today_str = today.to_string();
+
+        let due_subs = self
+            .repo
+            .list_active_due_subscriptions(profile_id, &today_str)
+            .await
+            .map_err(map_internal)?;
+
+        let mut created_summaries: Vec<(String, f64, String)> = Vec::new();
+
+        for sub in due_subs {
+            let mut current_due = sub.next_due_at;
+
+            // Generate records for each missed cycle up to today
+            while current_due <= today {
+                let transaction_at = shanghai_offset()
+                    .with_ymd_and_hms(
+                        current_due.year(),
+                        current_due.month(),
+                        current_due.day(),
+                        9,
+                        0,
+                        0,
+                    )
+                    .single()
+                    .unwrap_or_else(|| Utc::now().with_timezone(&shanghai_offset()))
+                    .with_timezone(&Utc);
+
+                let record_create = RecordCreate {
+                    direction: sub.direction.clone(),
+                    amount: sub.amount,
+                    currency: sub.currency.clone(),
+                    category: sub.category.clone(),
+                    merchant: sub.merchant.clone(),
+                    transaction_at,
+                    note: sub.note.clone(),
+                };
+
+                if let Err(e) = self
+                    .repo
+                    .create_record(Uuid::new_v4(), profile_id, &self.device_id, record_create)
+                    .await
+                {
+                    logger::error(
+                        "subscription.charge",
+                        format!("failed to create record for subscription {}: {e}", sub.id),
+                    );
+                    break;
+                }
+
+                created_summaries.push((
+                    sub.merchant.clone().unwrap_or_else(|| sub.category.clone()),
+                    sub.amount,
+                    sub.currency.clone(),
+                ));
+
+                let next =
+                    advance_next_due(&sub.cycle, sub.anchor_day, sub.anchor_month, current_due);
+
+                self.repo
+                    .update_subscription_charged(sub.id, current_due, next)
+                    .await
+                    .map_err(map_internal)?;
+
+                current_due = next;
+            }
+        }
+
+        if !created_summaries.is_empty() {
+            let details: Vec<String> = created_summaries
+                .iter()
+                .map(|(name, amount, currency)| {
+                    format!(
+                        "{} {}",
+                        name,
+                        format_amount_with_currency(*amount, Some(currency))
+                    )
+                })
+                .collect();
+            let message = format!(
+                "📋 已自动记录 {} 笔订阅账单：{}",
+                created_summaries.len(),
+                details.join("、")
+            );
+            self.repo
+                .create_conversation_message(
+                    Uuid::new_v4(),
+                    profile_id,
+                    ConversationRole::Assistant,
+                    &message,
+                    None,
+                    None,
+                )
+                .await
+                .map_err(map_internal)?;
+        }
+
+        Ok(created_summaries)
     }
 
     pub async fn ledger(

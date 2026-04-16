@@ -2,7 +2,9 @@ use anyhow::{Context, Result, anyhow};
 use billlens_apple_core::stt::{
     self, SttBackend, SttCancelFn, SttFreeStringFn, SttStartFn, SttStopFn,
 };
-use billlens_apple_core::{AppService, DraftInput, EngineBootstrap, EntrySource, LlmConfig};
+use billlens_apple_core::{
+    AppService, DraftInput, EngineBootstrap, EntrySource, LlmConfig, SubscriptionUpdate,
+};
 use billlens_apple_db::BillRepository;
 use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
@@ -75,6 +77,26 @@ enum EngineRequest {
     DeleteRecord {
         profile_id: String,
         record_id: String,
+    },
+    ListSubscriptions {
+        profile_id: String,
+    },
+    UpdateSubscription {
+        profile_id: String,
+        subscription_id: String,
+        update: SubscriptionUpdate,
+    },
+    PauseSubscription {
+        profile_id: String,
+        subscription_id: String,
+    },
+    ResumeSubscription {
+        profile_id: String,
+        subscription_id: String,
+    },
+    DeleteSubscription {
+        profile_id: String,
+        subscription_id: String,
     },
 }
 
@@ -248,6 +270,52 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
             let record_id = Uuid::parse_str(&record_id).context("invalid record_id")?;
             with_app(|app| {
                 runtime().block_on(app.delete_record(&profile_id, record_id))?;
+                Ok(encode_ok(serde_json::json!({})))
+            })
+        }
+        EngineRequest::ListSubscriptions { profile_id } => with_app(|app| {
+            let subs = runtime().block_on(app.list_subscriptions(&profile_id))?;
+            Ok(encode_ok(serde_json::json!({ "subscriptions": subs })))
+        }),
+        EngineRequest::UpdateSubscription {
+            profile_id,
+            subscription_id,
+            update,
+        } => {
+            let sub_id = Uuid::parse_str(&subscription_id).context("invalid subscription_id")?;
+            with_app(|app| {
+                let sub =
+                    runtime().block_on(app.update_subscription(&profile_id, sub_id, update))?;
+                Ok(encode_ok(sub))
+            })
+        }
+        EngineRequest::PauseSubscription {
+            profile_id,
+            subscription_id,
+        } => {
+            let sub_id = Uuid::parse_str(&subscription_id).context("invalid subscription_id")?;
+            with_app(|app| {
+                let sub = runtime().block_on(app.pause_subscription(&profile_id, sub_id))?;
+                Ok(encode_ok(sub))
+            })
+        }
+        EngineRequest::ResumeSubscription {
+            profile_id,
+            subscription_id,
+        } => {
+            let sub_id = Uuid::parse_str(&subscription_id).context("invalid subscription_id")?;
+            with_app(|app| {
+                let sub = runtime().block_on(app.resume_subscription(&profile_id, sub_id))?;
+                Ok(encode_ok(sub))
+            })
+        }
+        EngineRequest::DeleteSubscription {
+            profile_id,
+            subscription_id,
+        } => {
+            let sub_id = Uuid::parse_str(&subscription_id).context("invalid subscription_id")?;
+            with_app(|app| {
+                runtime().block_on(app.delete_subscription(&profile_id, sub_id))?;
                 Ok(encode_ok(serde_json::json!({})))
             })
         }

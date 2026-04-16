@@ -3,7 +3,7 @@ use std::{env, fmt};
 use anyhow::{Context, Result, anyhow};
 use billlens_apple_db::{
     EXPENSE_CATEGORIES, INCOME_CATEGORIES, ParsedRecordPayload, RecordDirection, RecordDraft,
-    is_valid_record_category, is_valid_record_category_for_direction,
+    SubscriptionCycle, is_valid_record_category, is_valid_record_category_for_direction,
 };
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, Offset, TimeZone, Utc};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
@@ -27,6 +27,11 @@ amount 必须始终返回正数，不要返回负数；收支方向只放在 dir
 只有当原始输入中明确出现时间线索时，才填写 transaction_at；如果原始输入没有体现任何时间信息，transaction_at 必须直接使用当前完整时间，精确到秒，不要只返回日期，不要返回当天 0 点，不要猜测、不要编造。
 如果时间缺少时区，不要臆造 Z 或 UTC；优先返回原始本地时间字符串。
 note 只保留与交易本身直接相关的简短备注；忽略积分、贴纸、奖励、营销文案、活动提示；如果没有合适备注，返回 null。
+如果用户描述的是订阅/会员/周期性付费服务，额外返回 "subscription_cycle" 字段：
+- "monthly" 表示每月付费
+- "yearly" 表示每年付费
+如果不是订阅类消费，subscription_cycle 返回 null。
+判断依据：出现"订阅""会员""月费""年费""续费""每月""每年""包月""包年""月付""年付"等关键词时应识别为订阅。
 JSON 格式如下：
 [
   {
@@ -36,7 +41,8 @@ JSON 格式如下：
     "category": string | null,
     "merchant": string | null,
     "transaction_at": "RFC3339 datetime" | null,
-    "note": string | null
+    "note": string | null,
+    "subscription_cycle": "monthly" | "yearly" | null
   }
 ]
 如果原文明确出现币种，请返回对应 ISO 4217 代码：
@@ -178,10 +184,7 @@ impl LlmClient {
             .await
     }
 
-    pub async fn parse_record_text_multi(
-        &self,
-        text: String,
-    ) -> Result<Vec<ParsedRecordPayload>> {
+    pub async fn parse_record_text_multi(&self, text: String) -> Result<Vec<ParsedRecordPayload>> {
         self.parse_records_multi(text, NoteFallbackMode::PreserveInputText)
             .await
     }
@@ -213,8 +216,7 @@ impl LlmClient {
         }
         logger::info(
             "llm.response.parsed_multi",
-            serde_json::to_string(&payloads)
-                .unwrap_or_else(|_| "<serialize failed>".to_string()),
+            serde_json::to_string(&payloads).unwrap_or_else(|_| "<serialize failed>".to_string()),
         );
         Ok(payloads)
     }
@@ -589,6 +591,11 @@ fn parse_record_payload_value(value: Value) -> Result<ParsedRecordPayload> {
         category => category,
     };
 
+    let subscription_cycle = object
+        .get("subscription_cycle")
+        .and_then(Value::as_str)
+        .and_then(|v| SubscriptionCycle::try_from(v).ok());
+
     Ok(ParsedRecordPayload {
         direction,
         amount,
@@ -597,6 +604,7 @@ fn parse_record_payload_value(value: Value) -> Result<ParsedRecordPayload> {
         merchant,
         transaction_at,
         note,
+        subscription_cycle,
     })
 }
 
@@ -1080,6 +1088,7 @@ mod tests {
             merchant: None,
             transaction_at: None,
             note: None,
+            subscription_cycle: None,
         };
 
         finalize_record_payload(

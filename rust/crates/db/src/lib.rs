@@ -662,6 +662,222 @@ impl BillRepository {
             .context("failed to aggregate category stats")
     }
 
+    // ── Subscription operations ─────────────────────────────────────────
+
+    pub async fn create_subscription(
+        &self,
+        id: Uuid,
+        profile_id: &str,
+        input: SubscriptionCreate,
+    ) -> Result<Subscription> {
+        let row = sqlx::query_as::<_, SubscriptionRow>(
+            r#"
+            INSERT INTO subscriptions (
+                id, profile_id, direction, amount, currency, category, merchant, note,
+                cycle, anchor_day, anchor_month, next_due_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            RETURNING *
+            "#,
+        )
+        .bind(id.to_string())
+        .bind(profile_id)
+        .bind(input.direction.as_str())
+        .bind(input.amount)
+        .bind(&input.currency)
+        .bind(&input.category)
+        .bind(&input.merchant)
+        .bind(&input.note)
+        .bind(input.cycle.as_str())
+        .bind(input.anchor_day)
+        .bind(input.anchor_month)
+        .bind(input.next_due_at.to_string())
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to insert subscription")?;
+
+        row.try_into()
+    }
+
+    pub async fn update_subscription(
+        &self,
+        id: Uuid,
+        profile_id: &str,
+        update: SubscriptionUpdate,
+    ) -> Result<Subscription> {
+        let existing = self.get_subscription(id, profile_id).await?;
+
+        let direction = update.direction.unwrap_or(existing.direction);
+        let amount = update.amount.unwrap_or(existing.amount);
+        let currency = update.currency.unwrap_or(existing.currency);
+        let category = update.category.unwrap_or(existing.category);
+        let merchant = update.merchant.or(existing.merchant);
+        let note = update.note.or(existing.note);
+        let cycle = update.cycle.unwrap_or(existing.cycle);
+        let anchor_day = update.anchor_day.unwrap_or(existing.anchor_day);
+        let anchor_month = update.anchor_month.or(existing.anchor_month);
+
+        let row = sqlx::query_as::<_, SubscriptionRow>(
+            r#"
+            UPDATE subscriptions
+            SET direction = ?3, amount = ?4, currency = ?5, category = ?6,
+                merchant = ?7, note = ?8, cycle = ?9, anchor_day = ?10,
+                anchor_month = ?11, updated_at = datetime('now')
+            WHERE id = ?1 AND profile_id = ?2 AND deleted_at IS NULL
+            RETURNING *
+            "#,
+        )
+        .bind(id.to_string())
+        .bind(profile_id)
+        .bind(direction.as_str())
+        .bind(amount)
+        .bind(&currency)
+        .bind(&category)
+        .bind(&merchant)
+        .bind(&note)
+        .bind(cycle.as_str())
+        .bind(anchor_day)
+        .bind(anchor_month)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to update subscription")?
+        .ok_or_else(|| anyhow!("subscription not found"))?;
+
+        row.try_into()
+    }
+
+    pub async fn get_subscription(&self, id: Uuid, profile_id: &str) -> Result<Subscription> {
+        let row = sqlx::query_as::<_, SubscriptionRow>(
+            "SELECT * FROM subscriptions WHERE id = ?1 AND profile_id = ?2 AND deleted_at IS NULL",
+        )
+        .bind(id.to_string())
+        .bind(profile_id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load subscription")?
+        .ok_or_else(|| anyhow!("subscription not found"))?;
+
+        row.try_into()
+    }
+
+    pub async fn list_subscriptions(&self, profile_id: &str) -> Result<Vec<Subscription>> {
+        let rows = sqlx::query_as::<_, SubscriptionRow>(
+            r#"
+            SELECT * FROM subscriptions
+            WHERE profile_id = ?1 AND deleted_at IS NULL
+            ORDER BY is_active DESC, created_at DESC
+            "#,
+        )
+        .bind(profile_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list subscriptions")?;
+
+        rows.into_iter().map(TryInto::try_into).collect()
+    }
+
+    pub async fn list_active_due_subscriptions(
+        &self,
+        profile_id: &str,
+        today: &str,
+    ) -> Result<Vec<Subscription>> {
+        let rows = sqlx::query_as::<_, SubscriptionRow>(
+            r#"
+            SELECT * FROM subscriptions
+            WHERE profile_id = ?1 AND is_active = 1 AND deleted_at IS NULL
+              AND next_due_at <= ?2
+            ORDER BY next_due_at ASC
+            "#,
+        )
+        .bind(profile_id)
+        .bind(today)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list active due subscriptions")?;
+
+        rows.into_iter().map(TryInto::try_into).collect()
+    }
+
+    pub async fn update_subscription_charged(
+        &self,
+        id: Uuid,
+        last_charged_at: NaiveDate,
+        next_due_at: NaiveDate,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE subscriptions
+            SET last_charged_at = ?2, next_due_at = ?3, updated_at = datetime('now')
+            WHERE id = ?1
+            "#,
+        )
+        .bind(id.to_string())
+        .bind(last_charged_at.to_string())
+        .bind(next_due_at.to_string())
+        .execute(&self.pool)
+        .await
+        .context("failed to update subscription charged")?;
+        Ok(())
+    }
+
+    pub async fn pause_subscription(&self, id: Uuid, profile_id: &str) -> Result<Subscription> {
+        let row = sqlx::query_as::<_, SubscriptionRow>(
+            r#"
+            UPDATE subscriptions
+            SET is_active = 0, updated_at = datetime('now')
+            WHERE id = ?1 AND profile_id = ?2 AND deleted_at IS NULL
+            RETURNING *
+            "#,
+        )
+        .bind(id.to_string())
+        .bind(profile_id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to pause subscription")?
+        .ok_or_else(|| anyhow!("subscription not found"))?;
+
+        row.try_into()
+    }
+
+    pub async fn resume_subscription(&self, id: Uuid, profile_id: &str) -> Result<Subscription> {
+        let row = sqlx::query_as::<_, SubscriptionRow>(
+            r#"
+            UPDATE subscriptions
+            SET is_active = 1, updated_at = datetime('now')
+            WHERE id = ?1 AND profile_id = ?2 AND deleted_at IS NULL
+            RETURNING *
+            "#,
+        )
+        .bind(id.to_string())
+        .bind(profile_id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to resume subscription")?
+        .ok_or_else(|| anyhow!("subscription not found"))?;
+
+        row.try_into()
+    }
+
+    pub async fn soft_delete_subscription(&self, id: Uuid, profile_id: &str) -> Result<()> {
+        let result = sqlx::query(
+            r#"
+            UPDATE subscriptions
+            SET deleted_at = datetime('now'), is_active = 0, updated_at = datetime('now')
+            WHERE id = ?1 AND profile_id = ?2 AND deleted_at IS NULL
+            "#,
+        )
+        .bind(id.to_string())
+        .bind(profile_id)
+        .execute(&self.pool)
+        .await
+        .context("failed to delete subscription")?;
+
+        if result.rows_affected() == 0 {
+            return Err(anyhow!("subscription not found"));
+        }
+        Ok(())
+    }
+
     async fn enqueue_sync_event(
         &self,
         profile_id: &str,
@@ -949,6 +1165,60 @@ impl TryFrom<CategoryStatsRow> for CategoryStatsItem {
     }
 }
 
+#[derive(Debug, FromRow)]
+struct SubscriptionRow {
+    id: String,
+    profile_id: String,
+    direction: String,
+    amount: f64,
+    currency: String,
+    category: String,
+    merchant: Option<String>,
+    note: Option<String>,
+    cycle: String,
+    anchor_day: i32,
+    anchor_month: Option<i32>,
+    next_due_at: String,
+    last_charged_at: Option<String>,
+    is_active: i64,
+    deleted_at: Option<DateTime<Utc>>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+impl TryFrom<SubscriptionRow> for Subscription {
+    type Error = anyhow::Error;
+
+    fn try_from(row: SubscriptionRow) -> Result<Self> {
+        Ok(Self {
+            id: Uuid::parse_str(&row.id).context("invalid subscription id")?,
+            profile_id: row.profile_id,
+            direction: RecordDirection::try_from(row.direction.as_str())
+                .map_err(anyhow::Error::msg)?,
+            amount: row.amount,
+            currency: row.currency,
+            category: row.category,
+            merchant: row.merchant,
+            note: row.note,
+            cycle: SubscriptionCycle::try_from(row.cycle.as_str()).map_err(anyhow::Error::msg)?,
+            anchor_day: row.anchor_day,
+            anchor_month: row.anchor_month,
+            next_due_at: NaiveDate::parse_from_str(&row.next_due_at, "%Y-%m-%d")
+                .context("invalid subscription next_due_at")?,
+            last_charged_at: row
+                .last_charged_at
+                .map(|v| {
+                    NaiveDate::parse_from_str(&v, "%Y-%m-%d").context("invalid last_charged_at")
+                })
+                .transpose()?,
+            is_active: row.is_active != 0,
+            deleted_at: row.deleted_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1010,5 +1280,126 @@ mod tests {
         assert_eq!(cached.quote_currency, "CNY");
         assert_eq!(cached.rate, 6.83);
         assert_eq!(cached.rate_date, rate_date);
+    }
+
+    #[tokio::test]
+    async fn subscription_crud_lifecycle() {
+        let db_path =
+            std::env::temp_dir().join(format!("billlens-apple-db-{}.sqlite", Uuid::new_v4()));
+        let repo = BillRepository::connect(&db_path).await.unwrap();
+        let profile = "test-profile";
+        let sub_id = Uuid::new_v4();
+
+        // Create
+        let sub = repo
+            .create_subscription(
+                sub_id,
+                profile,
+                SubscriptionCreate {
+                    direction: RecordDirection::Expense,
+                    amount: 10.0,
+                    currency: "USD".to_string(),
+                    category: "订阅".to_string(),
+                    merchant: Some("GitHub Copilot".to_string()),
+                    note: None,
+                    cycle: SubscriptionCycle::Monthly,
+                    anchor_day: 16,
+                    anchor_month: None,
+                    next_due_at: NaiveDate::from_ymd_opt(2026, 5, 16).unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(sub.amount, 10.0);
+        assert!(sub.is_active);
+        assert_eq!(sub.cycle, SubscriptionCycle::Monthly);
+
+        // List
+        let subs = repo.list_subscriptions(profile).await.unwrap();
+        assert_eq!(subs.len(), 1);
+
+        // Pause
+        let paused = repo.pause_subscription(sub_id, profile).await.unwrap();
+        assert!(!paused.is_active);
+
+        // Resume
+        let resumed = repo.resume_subscription(sub_id, profile).await.unwrap();
+        assert!(resumed.is_active);
+
+        // Update
+        let updated = repo
+            .update_subscription(
+                sub_id,
+                profile,
+                SubscriptionUpdate {
+                    amount: Some(15.0),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(updated.amount, 15.0);
+
+        // Soft delete
+        repo.soft_delete_subscription(sub_id, profile)
+            .await
+            .unwrap();
+        let subs_after = repo.list_subscriptions(profile).await.unwrap();
+        assert!(subs_after.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_active_due_subscriptions_filters_correctly() {
+        let db_path =
+            std::env::temp_dir().join(format!("billlens-apple-db-{}.sqlite", Uuid::new_v4()));
+        let repo = BillRepository::connect(&db_path).await.unwrap();
+        let profile = "test-profile";
+
+        // Create a due subscription (next_due_at in the past)
+        repo.create_subscription(
+            Uuid::new_v4(),
+            profile,
+            SubscriptionCreate {
+                direction: RecordDirection::Expense,
+                amount: 10.0,
+                currency: "USD".to_string(),
+                category: "订阅".to_string(),
+                merchant: Some("Netflix".to_string()),
+                note: None,
+                cycle: SubscriptionCycle::Monthly,
+                anchor_day: 1,
+                anchor_month: None,
+                next_due_at: NaiveDate::from_ymd_opt(2026, 4, 1).unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+
+        // Create a future subscription (not due yet)
+        repo.create_subscription(
+            Uuid::new_v4(),
+            profile,
+            SubscriptionCreate {
+                direction: RecordDirection::Expense,
+                amount: 20.0,
+                currency: "CNY".to_string(),
+                category: "订阅".to_string(),
+                merchant: Some("iCloud".to_string()),
+                note: None,
+                cycle: SubscriptionCycle::Monthly,
+                anchor_day: 1,
+                anchor_month: None,
+                next_due_at: NaiveDate::from_ymd_opt(2099, 1, 1).unwrap(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let due = repo
+            .list_active_due_subscriptions(profile, "2026-04-16")
+            .await
+            .unwrap();
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].merchant.as_deref(), Some("Netflix"));
     }
 }

@@ -154,11 +154,13 @@ public struct SubmitTextResult: Codable {
     public let home: HomeSnapshot
     public let autoConfirmed: Bool
     public let parsed: [ParsedRecordPayload]
+    public let subscriptionCreated: Bool
 
     enum CodingKeys: String, CodingKey {
         case home
         case autoConfirmed = "auto_confirmed"
         case parsed
+        case subscriptionCreated = "subscription_created"
     }
 }
 
@@ -247,5 +249,85 @@ public enum LedgerPreset: String, CaseIterable, Identifiable {
         case .year: "按年"
         case .custom: "自定义"
         }
+    }
+}
+
+public struct SubscriptionItem: Codable, Identifiable, Sendable {
+    public let id: String
+    public let profileId: String
+    public let direction: String
+    public let amount: Double
+    public let currency: String
+    public let category: String
+    public let merchant: String?
+    public let note: String?
+    public let cycle: String
+    public let anchorDay: Int
+    public let anchorMonth: Int?
+    public let nextDueAt: String
+    public let lastChargedAt: String?
+    public let isActive: Bool
+    public let deletedAt: String?
+    public let createdAt: String
+    public let updatedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case profileId = "profile_id"
+        case direction
+        case amount
+        case currency
+        case category
+        case merchant
+        case note
+        case cycle
+        case anchorDay = "anchor_day"
+        case anchorMonth = "anchor_month"
+        case nextDueAt = "next_due_at"
+        case lastChargedAt = "last_charged_at"
+        case isActive = "is_active"
+        case deletedAt = "deleted_at"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+
+    public var cycleDisplayText: String {
+        switch cycle {
+        case "monthly": "每月"
+        case "yearly": "每年"
+        default: cycle
+        }
+    }
+
+    public var statusDisplayText: String {
+        isActive ? "活跃" : "已暂停"
+    }
+}
+
+public struct SubscriptionListResponse: Codable, Sendable {
+    public let subscriptions: [SubscriptionItem]
+}
+
+public struct SubscriptionUpdateInput: Codable {
+    public var direction: String?
+    public var amount: Double?
+    public var currency: String?
+    public var category: String?
+    public var merchant: String?
+    public var note: String?
+    public var cycle: String?
+    public var anchorDay: Int?
+    public var anchorMonth: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case direction
+        case amount
+        case currency
+        case category
+        case merchant
+        case note
+        case cycle
+        case anchorDay = "anchor_day"
+        case anchorMonth = "anchor_month"
     }
 }

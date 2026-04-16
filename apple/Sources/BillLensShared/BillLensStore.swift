@@ -36,6 +36,8 @@ public final class BillLensStore: ObservableObject {
     @Published public var customStart = Calendar.current.date(byAdding: .day, value: -30, to: Date.now) ?? Date.now
     @Published public var customEnd = Date.now
     @Published public var draftForm = DraftFormState()
+    @Published public var subscriptions: [SubscriptionItem] = []
+    @Published public var selectedSubscriptionId: String?
 
     public let speechService = SpeechCaptureService.shared
 
@@ -65,6 +67,11 @@ public final class BillLensStore: ObservableObject {
         return drafts[activeDraftIndex]
     }
 
+    public var selectedSubscription: SubscriptionItem? {
+        guard let id = selectedSubscriptionId else { return nil }
+        return subscriptions.first { $0.id == id }
+    }
+
     /// 切换收支方向，并将分类重置为新方向下的第一个合法值
     public func setDraftDirection(_ direction: String) {
         draftForm.direction = direction
@@ -91,6 +98,7 @@ public final class BillLensStore: ObservableObject {
                 AppLogger.log("bootstrap", "engine bootstrapped successfully")
                 try await refreshHome()
                 try await refreshLedger()
+                try await loadSubscriptions()
             } catch {
                 AppLogger.log("bootstrap.error", error.localizedDescription)
                 errorText = error.localizedDescription
@@ -118,7 +126,11 @@ public final class BillLensStore: ObservableObject {
             self.advanceProgress("LLM 已返回，正在更新草稿与账本…")
             self.apply(home: result.home)
             self.statusText = result.autoConfirmed ? "已自动入库" : "已生成待确认草稿"
-            AppLogger.log("entry.text.result", "auto_confirmed=\(result.autoConfirmed) parsed=\(String(describing: result.parsed))")
+            if result.subscriptionCreated {
+                self.statusText += "（已创建订阅）"
+                try await self.loadSubscriptions()
+            }
+            AppLogger.log("entry.text.result", "auto_confirmed=\(result.autoConfirmed) parsed=\(String(describing: result.parsed)) subscription=\(result.subscriptionCreated)")
             try await self.refreshLedger()
             self.finishProgress()
         }
@@ -254,6 +266,76 @@ public final class BillLensStore: ObservableObject {
             try await self.refreshLedger()
             self.statusText = "账单已删除"
             AppLogger.log("record.delete", "record_id=\(recordId)")
+        }
+    }
+
+    // MARK: - Subscription Management
+
+    public func loadSubscriptions() async throws {
+        let response: SubscriptionListResponse = try await bridge.sendAsync([
+            "action": "list_subscriptions",
+            "profile_id": profileID
+        ])
+        subscriptions = response.subscriptions
+        AppLogger.log("subscriptions.load", "count=\(response.subscriptions.count)")
+    }
+
+    public func pauseSubscription(_ subscriptionId: String) {
+        perform("正在暂停订阅") {
+            let _: SubscriptionItem = try await self.bridge.sendAsync([
+                "action": "pause_subscription",
+                "profile_id": self.profileID,
+                "subscription_id": subscriptionId
+            ])
+            try await self.loadSubscriptions()
+            self.statusText = "订阅已暂停"
+            AppLogger.log("subscription.pause", "id=\(subscriptionId)")
+        }
+    }
+
+    public func resumeSubscription(_ subscriptionId: String) {
+        perform("正在恢复订阅") {
+            let _: SubscriptionItem = try await self.bridge.sendAsync([
+                "action": "resume_subscription",
+                "profile_id": self.profileID,
+                "subscription_id": subscriptionId
+            ])
+            try await self.loadSubscriptions()
+            self.statusText = "订阅已恢复"
+            AppLogger.log("subscription.resume", "id=\(subscriptionId)")
+        }
+    }
+
+    public func deleteSubscription(_ subscriptionId: String) {
+        perform("正在删除订阅") {
+            let _: [String: String] = try await self.bridge.sendAsync([
+                "action": "delete_subscription",
+                "profile_id": self.profileID,
+                "subscription_id": subscriptionId
+            ])
+            if self.selectedSubscriptionId == subscriptionId {
+                self.selectedSubscriptionId = nil
+            }
+            try await self.loadSubscriptions()
+            self.statusText = "订阅已删除"
+            AppLogger.log("subscription.delete", "id=\(subscriptionId)")
+        }
+    }
+
+    public func updateSubscription(_ subscriptionId: String, update: SubscriptionUpdateInput) {
+        perform("正在更新订阅") {
+            let updateDict = try JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(update)
+            ) as? [String: Any] ?? [:]
+            let _: SubscriptionItem = try await self.bridge.sendAsync([
+                "action": "update_subscription",
+                "profile_id": self.profileID,
+                "subscription_id": subscriptionId,
+                "update": updateDict
+            ])
+            try await self.loadSubscriptions()
+            self.statusText = "订阅已更新"
+            AppLogger.log("subscription.update", "id=\(subscriptionId)")
         }
     }
 
