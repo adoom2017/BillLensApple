@@ -7,10 +7,11 @@ use billlens_apple_core::{
 };
 use billlens_apple_db::BillRepository;
 use chrono::{DateTime, FixedOffset};
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::ffi::{CStr, CString, c_char};
 use std::path::PathBuf;
-use std::sync::{OnceLock, RwLock};
+use std::sync::OnceLock;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
@@ -98,6 +99,7 @@ enum EngineRequest {
         profile_id: String,
         subscription_id: String,
     },
+    ListCategories,
 }
 
 fn runtime() -> &'static Runtime {
@@ -109,9 +111,7 @@ fn app_slot() -> &'static RwLock<Option<AppService>> {
 }
 
 fn with_app<T>(f: impl FnOnce(&AppService) -> Result<T>) -> Result<T> {
-    let guard = app_slot()
-        .read()
-        .map_err(|_| anyhow!("ffi app rwlock poisoned"))?;
+    let guard = app_slot().read();
     let app = guard
         .as_ref()
         .ok_or_else(|| anyhow!("engine is not bootstrapped"))?;
@@ -148,6 +148,12 @@ pub extern "C" fn billlens_handle_request(request_json: *const c_char) -> *mut c
     response
 }
 
+/// SAFETY: All FFI entry points use `runtime().block_on()` to bridge async→sync.
+/// This is safe because:
+/// 1. The Tokio runtime is created with `rt-multi-thread` (see workspace Cargo.toml).
+/// 2. Swift calls FFI via `Task.detached` on `.userInitiated`, never from inside
+///    another `block_on` call.
+/// Do NOT call `block_on` from within an already-running Tokio task — that will deadlock.
 fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
     if request_json.is_null() {
         return Ok(encode_error("request_json must not be null".to_string()));
@@ -178,9 +184,7 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
                 },
             )?;
             runtime().block_on(app.bootstrap(&profile_id))?;
-            let mut slot = app_slot()
-                .write()
-                .map_err(|_| anyhow!("ffi app rwlock poisoned"))?;
+            let mut slot = app_slot().write();
             *slot = Some(app.clone());
             Ok(encode_ok(serde_json::json!({ "profile_id": profile_id })))
         }
@@ -319,6 +323,10 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
                 Ok(encode_ok(serde_json::json!({})))
             })
         }
+        EngineRequest::ListCategories => Ok(encode_ok(serde_json::json!({
+            "expense": billlens_apple_core::EXPENSE_CATEGORIES.to_vec(),
+            "income": billlens_apple_core::INCOME_CATEGORIES.to_vec(),
+        }))),
     }
 }
 

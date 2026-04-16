@@ -130,6 +130,15 @@ impl AppService {
 
     pub async fn bootstrap(&self, profile_id: &str) -> Result<()> {
         self.repo.ensure_sync_state(profile_id).await?;
+        // Clean up stale sync_outbox entries (no cloud sync yet)
+        if let Ok(cleaned) = self.repo.cleanup_old_sync_events(profile_id, 30).await {
+            if cleaned > 0 {
+                logger::info(
+                    "bootstrap",
+                    format!("cleaned {cleaned} stale sync_outbox entries"),
+                );
+            }
+        }
         // Process any overdue subscription charges
         match self.process_due_subscriptions(profile_id).await {
             Ok(summaries) if !summaries.is_empty() => {
@@ -168,9 +177,18 @@ impl AppService {
         source: EntrySource,
     ) -> Result<SubmitTextResult, CoreError> {
         let content = trim_required(content, "content is required")?;
+        let sanitized_content = if content.len() > 80 {
+            format!(
+                "{}…({}字符)",
+                &content[..content.floor_char_boundary(80)],
+                content.chars().count()
+            )
+        } else {
+            content.clone()
+        };
         logger::info(
             "submit_text",
-            format!("source={source:?} auto_confirm={auto_confirm} content={content}"),
+            format!("source={source:?} auto_confirm={auto_confirm} content={sanitized_content}"),
         );
         let user_visible_content = match source {
             EntrySource::Text => content.clone(),
@@ -585,6 +603,7 @@ impl AppService {
                     .unwrap_or_else(|| Utc::now().with_timezone(&shanghai_offset()))
                     .with_timezone(&Utc);
 
+                let record_id = Uuid::new_v4();
                 let record_create = RecordCreate {
                     direction: sub.direction.clone(),
                     amount: sub.amount,
@@ -595,14 +614,25 @@ impl AppService {
                     note: sub.note.clone(),
                 };
 
+                let next =
+                    advance_next_due(&sub.cycle, sub.anchor_day, sub.anchor_month, current_due);
+
                 if let Err(e) = self
                     .repo
-                    .create_record(Uuid::new_v4(), profile_id, &self.device_id, record_create)
+                    .create_record_and_advance_subscription(
+                        record_id,
+                        profile_id,
+                        &self.device_id,
+                        record_create,
+                        sub.id,
+                        current_due,
+                        next,
+                    )
                     .await
                 {
                     logger::error(
                         "subscription.charge",
-                        format!("failed to create record for subscription {}: {e}", sub.id),
+                        format!("failed to charge subscription {}: {e}", sub.id),
                     );
                     break;
                 }
@@ -612,14 +642,6 @@ impl AppService {
                     sub.amount,
                     sub.currency.clone(),
                 ));
-
-                let next =
-                    advance_next_due(&sub.cycle, sub.anchor_day, sub.anchor_month, current_due);
-
-                self.repo
-                    .update_subscription_charged(sub.id, current_due, next)
-                    .await
-                    .map_err(map_internal)?;
 
                 current_due = next;
             }

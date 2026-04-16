@@ -331,3 +331,8 @@ public struct SubscriptionUpdateInput: Codable {
         case anchorMonth = "anchor_month"
     }
 }
+
+public struct CategoriesResponse: Decodable, Sendable {
+    public let expense: [String]
+    public let income: [String]
+}

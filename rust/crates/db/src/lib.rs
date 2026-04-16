@@ -543,6 +543,10 @@ impl BillRepository {
         rows.into_iter().map(TryInto::try_into).collect()
     }
 
+    /// NOTE: This method sums amounts directly without currency conversion.
+    /// Results are inaccurate for multi-currency data. Prefer using
+    /// `ledger()` which performs proper FX conversion via `aggregate_converted_stats`.
+    #[deprecated(note = "does not handle multi-currency; use ledger() for accurate stats")]
     pub async fn record_stats(
         &self,
         profile_id: &str,
@@ -820,6 +824,71 @@ impl BillRepository {
         Ok(())
     }
 
+    /// Atomically create a record and update the subscription's charged state.
+    /// Prevents duplicate records if the app crashes mid-cycle.
+    pub async fn create_record_and_advance_subscription(
+        &self,
+        record_id: Uuid,
+        profile_id: &str,
+        device_id: &str,
+        input: RecordCreate,
+        subscription_id: Uuid,
+        last_charged_at: NaiveDate,
+        next_due_at: NaiveDate,
+    ) -> Result<Record> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin subscription charge transaction")?;
+
+        let row = sqlx::query_as::<_, RecordRow>(
+            r#"
+            INSERT INTO records (
+                id, profile_id, direction, amount, currency, category, merchant, transaction_at, note, device_id
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            RETURNING *
+            "#,
+        )
+        .bind(record_id.to_string())
+        .bind(profile_id)
+        .bind(input.direction.as_str())
+        .bind(input.amount)
+        .bind(&input.currency)
+        .bind(&input.category)
+        .bind(&input.merchant)
+        .bind(input.transaction_at)
+        .bind(&input.note)
+        .bind(device_id)
+        .fetch_one(&mut *tx)
+        .await
+        .context("failed to insert record in subscription charge")?;
+
+        sqlx::query(
+            r#"
+            UPDATE subscriptions
+            SET last_charged_at = ?2, next_due_at = ?3, updated_at = datetime('now')
+            WHERE id = ?1
+            "#,
+        )
+        .bind(subscription_id.to_string())
+        .bind(last_charged_at.to_string())
+        .bind(next_due_at.to_string())
+        .execute(&mut *tx)
+        .await
+        .context("failed to advance subscription in charge")?;
+
+        tx.commit()
+            .await
+            .context("failed to commit subscription charge transaction")?;
+
+        let record: Record = row.try_into()?;
+        self.enqueue_sync_event(profile_id, &record, "create")
+            .await?;
+        Ok(record)
+    }
+
     pub async fn pause_subscription(&self, id: Uuid, profile_id: &str) -> Result<Subscription> {
         let row = sqlx::query_as::<_, SubscriptionRow>(
             r#"
@@ -918,6 +987,29 @@ impl BillRepository {
             .await
             .context("failed to ensure sync state")?;
         Ok(())
+    }
+
+    /// Remove sync_outbox entries older than the given number of days.
+    /// Called during bootstrap to prevent unbounded growth while cloud sync
+    /// is not yet implemented.
+    pub async fn cleanup_old_sync_events(
+        &self,
+        profile_id: &str,
+        max_age_days: i64,
+    ) -> Result<u64> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM sync_outbox
+            WHERE profile_id = ?1
+              AND created_at < datetime('now', ?2)
+            "#,
+        )
+        .bind(profile_id)
+        .bind(format!("-{max_age_days} days"))
+        .execute(&self.pool)
+        .await
+        .context("failed to cleanup old sync events")?;
+        Ok(result.rows_affected())
     }
 
     pub async fn upsert_fx_rate(

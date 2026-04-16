@@ -12,6 +12,7 @@ anyhow.workspace = true
 billlens-apple-core = { path = "../core" }
 billlens-apple-db = { path = "../db" }
 chrono.workspace = true
+parking_lot.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

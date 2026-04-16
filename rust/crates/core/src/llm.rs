@@ -335,15 +335,7 @@ fn build_openai_request_body(model: &str, system_prompt: String, text: String) -
 }
 
 fn build_llamacpp_request_body(model: &str, system_prompt: String, text: String) -> Value {
-    json!({
-        "model": model,
-        "stream": false,
-        "max_tokens": 2048,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": text}
-        ]
-    })
+    build_openai_request_body(model, system_prompt, text)
 }
 
 fn build_anthropic_request_body(model: &str, system_prompt: String, text: String) -> Value {
@@ -677,8 +669,11 @@ fn apply_record_inference_hints(payload: &mut ParsedRecordPayload, raw_text: &st
     ]
     .iter()
     .any(|keyword| normalized.contains(keyword));
-    let has_negative_amount_marker =
-        normalized.contains("-") || normalized.contains("￥-") || normalized.contains("¥-");
+    let has_negative_amount_marker = {
+        let amount_neg =
+            regex::Regex::new(r"[¥￥$€£]\s*-\s*\d|^-\s*[¥￥$€£]?\s*\d|-\d+(\.\d+)?\s*元").unwrap();
+        amount_neg.is_match(&normalized)
+    };
 
     if explicit_refund_like && !expense_like {
         payload.direction = Some(RecordDirection::Income);
@@ -757,6 +752,25 @@ fn sanitize_note(note: &str) -> Option<String> {
     Some(normalized.to_string())
 }
 
+/// Shared currency keyword → ISO code mapping used by both
+/// `normalize_currency_code` and `infer_currency_from_text`.
+const CURRENCY_KEYWORDS: &[(&[&str], &str)] = &[
+    (&["港币", "港元", "HKD", "HK$"], "HKD"),
+    (&["美元", "美金", "USD", "US$"], "USD"),
+    (&["欧元", "EUR", "€"], "EUR"),
+    (&["日元", "JPY"], "JPY"),
+    (&["英镑", "GBP", "£"], "GBP"),
+    (&["新加坡元", "新币", "SGD", "S$"], "SGD"),
+    (&["澳元", "澳币", "AUD", "A$"], "AUD"),
+    (&["加元", "CAD", "C$"], "CAD"),
+    (&["韩元", "韩币", "KRW", "₩"], "KRW"),
+    (&["新台币", "台币", "TWD", "NT$"], "TWD"),
+    (&["澳门元", "葡币", "MOP", "MOP$"], "MOP"),
+    (&["泰铢", "THB", "฿"], "THB"),
+    (&["马币", "林吉特", "MYR", "RM"], "MYR"),
+    (&["人民币", "RMB", "CNY", "CNH", "￥", "¥"], "CNY"),
+];
+
 pub(crate) fn normalize_currency_code(value: &str) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -769,24 +783,7 @@ pub(crate) fn normalize_currency_code(value: &str) -> Option<String> {
         .collect();
     let upper = compact.to_ascii_uppercase();
 
-    let from_keywords: &[(&[&str], &str)] = &[
-        (&["港币", "港元", "HKD", "HK$"], "HKD"),
-        (&["美元", "美金", "USD", "US$"], "USD"),
-        (&["欧元", "EUR", "€"], "EUR"),
-        (&["日元", "JPY"], "JPY"),
-        (&["英镑", "GBP", "£"], "GBP"),
-        (&["新加坡元", "新币", "SGD", "S$"], "SGD"),
-        (&["澳元", "澳币", "AUD", "A$"], "AUD"),
-        (&["加元", "CAD", "C$"], "CAD"),
-        (&["韩元", "韩币", "KRW", "₩"], "KRW"),
-        (&["新台币", "台币", "TWD", "NT$"], "TWD"),
-        (&["澳门元", "葡币", "MOP", "MOP$"], "MOP"),
-        (&["泰铢", "THB", "฿"], "THB"),
-        (&["马币", "林吉特", "MYR", "RM"], "MYR"),
-        (&["人民币", "RMB", "CNY", "CNH", "￥", "¥"], "CNY"),
-    ];
-
-    for (keywords, code) in from_keywords {
+    for (keywords, code) in CURRENCY_KEYWORDS {
         if keywords
             .iter()
             .any(|keyword| trimmed.contains(keyword) || upper.contains(keyword))
@@ -814,23 +811,7 @@ fn infer_currency_from_text(raw_text: &str) -> Option<String> {
     let compact: String = raw_text.chars().filter(|ch| !ch.is_whitespace()).collect();
     let upper = compact.to_ascii_uppercase();
 
-    let explicit_markers: &[(&[&str], &str)] = &[
-        (&["港币", "港元", "HKD", "HK$"], "HKD"),
-        (&["美元", "美金", "USD", "US$"], "USD"),
-        (&["欧元", "EUR", "€"], "EUR"),
-        (&["日元", "JPY"], "JPY"),
-        (&["英镑", "GBP", "£"], "GBP"),
-        (&["新加坡元", "新币", "SGD", "S$"], "SGD"),
-        (&["澳元", "澳币", "AUD", "A$"], "AUD"),
-        (&["加元", "CAD", "C$"], "CAD"),
-        (&["韩元", "韩币", "KRW", "₩"], "KRW"),
-        (&["新台币", "台币", "TWD", "NT$"], "TWD"),
-        (&["澳门元", "葡币", "MOP", "MOP$"], "MOP"),
-        (&["泰铢", "THB", "฿"], "THB"),
-        (&["马币", "林吉特", "MYR"], "MYR"),
-    ];
-
-    for (keywords, code) in explicit_markers {
+    for (keywords, code) in CURRENCY_KEYWORDS {
         if keywords
             .iter()
             .any(|keyword| compact.contains(keyword) || upper.contains(keyword))
@@ -843,14 +824,7 @@ fn infer_currency_from_text(raw_text: &str) -> Option<String> {
         return Some("USD".to_string());
     }
 
-    if compact.contains("人民币")
-        || compact.contains("RMB")
-        || compact.contains("CNY")
-        || compact.contains("￥")
-        || compact.contains('¥')
-        || compact.contains('元')
-        || compact.contains('块')
-    {
+    if compact.contains('元') || compact.contains('块') {
         return Some("CNY".to_string());
     }
 
@@ -966,14 +940,30 @@ fn looks_like_merchant(value: &str) -> bool {
         "管理自动扣款",
         "淘宝小额免密支付",
         "立即领取5积分",
+        "年账单",
+        "月账单",
+        "日账单",
+        "账单",
+        "收据",
+        "明细",
+        "汇总",
+        "总计",
+        "合计",
     ];
-    !blocked.iter().any(|item| value.contains(item))
-        && (value.contains('店')
-            || value.contains("馆")
-            || value.contains("超市")
-            || value.contains("学园")
-            || value.contains("商行")
-            || value.chars().count() <= 12)
+    if blocked.iter().any(|item| value.contains(item)) {
+        return false;
+    }
+    // Reject date-like strings (e.g. "2024年4月")
+    let date_like = regex::Regex::new(r"^\d{2,4}年\d{1,2}月").unwrap();
+    if date_like.is_match(value) {
+        return false;
+    }
+    value.contains('店')
+        || value.contains("馆")
+        || value.contains("超市")
+        || value.contains("学园")
+        || value.contains("商行")
+        || value.chars().count() <= 12
 }
 
 fn current_service_time() -> DateTime<Utc> {

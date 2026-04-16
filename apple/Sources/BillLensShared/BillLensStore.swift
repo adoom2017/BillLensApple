@@ -44,15 +44,23 @@ public final class BillLensStore: ObservableObject {
     private let bridge = RustBridge()
     private let ocrService: ReceiptTextRecognizing
     private let profileID = "local-default"
-    private let deviceID = Host.current().localizedName ?? UUID().uuidString
+    private let deviceID: String = {
+        let key = "BillLens_DeviceID"
+        if let saved = UserDefaults.standard.string(forKey: key) {
+            return saved
+        }
+        let id = Host.current().localizedName ?? UUID().uuidString
+        UserDefaults.standard.set(id, forKey: key)
+        return id
+    }()
 
     public init(ocrService: ReceiptTextRecognizing = ReceiptOCRService()) {
         self.ocrService = ocrService
         bootstrap()
     }
 
-    static let incomeCategories = ["工资收入", "投资收益", "报销", "退款", "其他"]
-    static let expenseCategories = ["餐饮", "交通", "日用", "购物", "住房", "医疗", "娱乐", "教育", "通讯", "人情", "订阅", "其他"]
+    static var incomeCategories: [String] = ["工资收入", "投资收益", "报销", "退款", "其他"]
+    static var expenseCategories: [String] = ["餐饮", "交通", "日用", "购物", "住房", "医疗", "娱乐", "教育", "通讯", "人情", "订阅", "其他"]
 
     public static func categories(for direction: String) -> [String] {
         direction == "income" ? incomeCategories : expenseCategories
@@ -96,6 +104,7 @@ public final class BillLensStore: ObservableObject {
                 ])
                 statusText = "已连接本地账本"
                 AppLogger.log("bootstrap", "engine bootstrapped successfully")
+                await Self.loadCategoriesFromRust(bridge: bridge)
                 try await refreshHome()
                 try await refreshLedger()
                 try await loadSubscriptions()
@@ -278,6 +287,18 @@ public final class BillLensStore: ObservableObject {
         ])
         subscriptions = response.subscriptions
         AppLogger.log("subscriptions.load", "count=\(response.subscriptions.count)")
+    }
+
+    private static func loadCategoriesFromRust(bridge: RustBridge) async {
+        do {
+            let response: CategoriesResponse = try await bridge.sendAsync([
+                "action": "list_categories"
+            ])
+            Self.expenseCategories = response.expense
+            Self.incomeCategories = response.income
+        } catch {
+            AppLogger.log("categories.load.error", error.localizedDescription)
+        }
     }
 
     public func pauseSubscription(_ subscriptionId: String) {
