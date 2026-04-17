@@ -5,11 +5,12 @@ pub mod stt;
 
 use anyhow::{Result, anyhow};
 pub use billlens_apple_db::{
-    ALL_RECORD_CATEGORIES, BillRepository, CategoryStatsItem, ConversationMessage,
-    ConversationRole, DirectionStatsItem, EXPENSE_CATEGORIES, INCOME_CATEGORIES,
-    ParsedRecordPayload, Record, RecordCreate, RecordDirection, RecordDraft, RecordDraftStatus,
-    RecordDraftUpdate, RecordsStatsRange, RecordsStatsResponse, RecordsSummary, Subscription,
-    SubscriptionCreate, SubscriptionCycle, SubscriptionUpdate, advance_next_due,
+    ALL_RECORD_CATEGORIES, ASSET_CATEGORIES, Asset, AssetAck, AssetSnapshot, AssetUpdateInput,
+    AssetWithSnapshots, BillRepository, CategoryStatsItem, ConversationMessage, ConversationRole,
+    DirectionStatsItem, EXPENSE_CATEGORIES, INCOME_CATEGORIES, ParsedAssetInfo, ParsedRecordPayload,
+    Record, RecordCreate, RecordDirection, RecordDraft, RecordDraftStatus, RecordDraftUpdate,
+    RecordsStatsRange, RecordsStatsResponse, RecordsSummary, Subscription, SubscriptionCreate,
+    SubscriptionCycle, SubscriptionUpdate, advance_next_due, is_valid_asset_category,
     is_valid_record_category, is_valid_record_category_for_direction,
 };
 use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, TimeZone, Utc};
@@ -49,6 +50,7 @@ pub struct SubmitTextResult {
     pub auto_confirmed: bool,
     pub parsed: Vec<ParsedRecordPayload>,
     pub subscription_created: bool,
+    pub asset_acks: Vec<AssetAck>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -234,11 +236,72 @@ impl AppService {
                     .unwrap_or_else(|_| "<serialize failed>".to_string())
             ),
         );
-        let summary = format_multi_parsed_summary(&payloads);
+
+        // Process asset payloads first; they do not become bills or subscriptions.
+        let mut asset_acks: Vec<AssetAck> = Vec::new();
+        let mut bill_payloads: Vec<ParsedRecordPayload> = Vec::with_capacity(payloads.len());
+        for payload in payloads.iter() {
+            if let Some(ref asset_info) = payload.asset_info {
+                match self
+                    .upsert_asset_from_payload(profile_id, asset_info)
+                    .await
+                {
+                    Ok(ack) => {
+                        logger::info(
+                            "submit_text.asset",
+                            format!(
+                                "{} asset={} amount={} recorded_on={}",
+                                if ack.created { "created" } else { "updated" },
+                                ack.name,
+                                ack.amount,
+                                ack.recorded_on
+                            ),
+                        );
+                        asset_acks.push(ack);
+                    }
+                    Err(e) => {
+                        logger::error("submit_text.asset", e.to_string());
+                    }
+                }
+            } else {
+                bill_payloads.push(payload.clone());
+            }
+        }
+
+        // If only asset records were parsed, respond early without touching bill/draft path.
+        if bill_payloads.is_empty() {
+            let ack_summary = format_asset_acks_summary(&asset_acks);
+            self.repo
+                .create_conversation_message(
+                    Uuid::new_v4(),
+                    profile_id,
+                    ConversationRole::Assistant,
+                    &ack_summary,
+                    None,
+                    None,
+                )
+                .await
+                .map_err(map_internal)?;
+            let home = self.home(profile_id).await.map_err(map_internal)?;
+            return Ok(SubmitTextResult {
+                home,
+                auto_confirmed: false,
+                parsed: payloads,
+                subscription_created: false,
+                asset_acks,
+            });
+        }
+
+        let summary = format_multi_parsed_summary(&bill_payloads);
+        let asset_tail = if asset_acks.is_empty() {
+            String::new()
+        } else {
+            format!("\n{}", format_asset_acks_summary(&asset_acks))
+        };
 
         // Create subscriptions for any payload with subscription_cycle detected
         let mut subscription_created = false;
-        for payload in &payloads {
+        for payload in &bill_payloads {
             if let Some(ref cycle) = payload.subscription_cycle {
                 if let (Some(direction), Some(amount), Some(currency)) =
                     (&payload.direction, payload.amount, &payload.currency)
@@ -294,7 +357,7 @@ impl AppService {
         if auto_confirm {
             // Validate all payloads before touching the DB so a bad payload never
             // leaves earlier records committed while the rest fail.
-            let creates: Vec<RecordCreate> = payloads
+            let creates: Vec<RecordCreate> = bill_payloads
                 .iter()
                 .map(record_create_from_parsed)
                 .collect::<Result<_, _>>()?;
@@ -312,7 +375,10 @@ impl AppService {
                     Uuid::new_v4(),
                     profile_id,
                     ConversationRole::Assistant,
-                    &format!("已自动保存 {} 笔账单。{summary}", payloads.len()),
+                    &format!(
+                        "已自动保存 {} 笔账单。{summary}{asset_tail}",
+                        bill_payloads.len()
+                    ),
                     None,
                     last_record_id,
                 )
@@ -324,13 +390,14 @@ impl AppService {
                 auto_confirmed: true,
                 parsed: payloads,
                 subscription_created,
+                asset_acks,
             });
         }
 
         // Draft path — insert all rows atomically via the batch method.
         let drafts = self
             .repo
-            .create_record_drafts_batch(profile_id, &content, &payloads)
+            .create_record_drafts_batch(profile_id, &content, &bill_payloads)
             .await
             .map_err(map_internal)?;
         let first_draft_id = drafts.first().map(|d| d.id);
@@ -339,7 +406,10 @@ impl AppService {
                 Uuid::new_v4(),
                 profile_id,
                 ConversationRole::Assistant,
-                &format!("已生成 {} 笔待确认账单。{summary}", payloads.len()),
+                &format!(
+                    "已生成 {} 笔待确认账单。{summary}{asset_tail}",
+                    bill_payloads.len()
+                ),
                 first_draft_id,
                 None,
             )
@@ -352,6 +422,60 @@ impl AppService {
             auto_confirmed: false,
             parsed: payloads,
             subscription_created,
+            asset_acks,
+        })
+    }
+
+    async fn upsert_asset_from_payload(
+        &self,
+        profile_id: &str,
+        info: &ParsedAssetInfo,
+    ) -> Result<AssetAck, CoreError> {
+        let name = info.name.trim();
+        if name.is_empty() {
+            return Err(CoreError::bad_request("asset name is required"));
+        }
+        if info.amount <= 0.0 {
+            return Err(CoreError::bad_request("asset amount must be greater than 0"));
+        }
+        let category = info
+            .category
+            .clone()
+            .filter(|c| is_valid_asset_category(c))
+            .unwrap_or_else(|| "存款".to_string());
+        let currency = info.currency.clone().unwrap_or_else(|| "CNY".to_string());
+        let recorded_on = match info.recorded_on.as_deref() {
+            Some(day) if NaiveDate::parse_from_str(day, "%Y-%m-%d").is_ok() => day.to_string(),
+            _ => Utc::now()
+                .with_timezone(&shanghai_offset())
+                .date_naive()
+                .format("%Y-%m-%d")
+                .to_string(),
+        };
+        let asset = self
+            .repo
+            .find_or_create_asset(profile_id, name, &category, &currency)
+            .await
+            .map_err(map_internal)?;
+        let (_snapshot, created) = self
+            .repo
+            .upsert_asset_snapshot(
+                asset.id,
+                profile_id,
+                &recorded_on,
+                info.amount,
+                info.note.as_deref(),
+            )
+            .await
+            .map_err(map_internal)?;
+        Ok(AssetAck {
+            asset_id: asset.id,
+            name: asset.name,
+            category: asset.category,
+            amount: info.amount,
+            currency: asset.currency,
+            recorded_on,
+            created,
         })
     }
 
@@ -563,6 +687,57 @@ impl AppService {
     ) -> Result<(), CoreError> {
         self.repo
             .soft_delete_subscription(subscription_id, profile_id)
+            .await
+            .map_err(map_internal)
+    }
+
+    // ── Asset management ────────────────────────────────────────────────
+
+    pub async fn list_assets(
+        &self,
+        profile_id: &str,
+    ) -> Result<Vec<AssetWithSnapshots>, CoreError> {
+        self.repo
+            .list_assets_with_snapshots(profile_id)
+            .await
+            .map_err(map_internal)
+    }
+
+    pub async fn update_asset(
+        &self,
+        profile_id: &str,
+        asset_id: Uuid,
+        update: AssetUpdateInput,
+    ) -> Result<AssetWithSnapshots, CoreError> {
+        self.repo
+            .update_asset(asset_id, profile_id, update)
+            .await
+            .map_err(map_internal)?;
+        let assets = self
+            .repo
+            .list_assets_with_snapshots(profile_id)
+            .await
+            .map_err(map_internal)?;
+        assets
+            .into_iter()
+            .find(|a| a.id == asset_id)
+            .ok_or_else(|| CoreError::Internal("updated asset not found".to_string()))
+    }
+
+    pub async fn delete_asset(&self, profile_id: &str, asset_id: Uuid) -> Result<(), CoreError> {
+        self.repo
+            .soft_delete_asset(asset_id, profile_id)
+            .await
+            .map_err(map_internal)
+    }
+
+    pub async fn delete_asset_snapshot(
+        &self,
+        profile_id: &str,
+        snapshot_id: Uuid,
+    ) -> Result<(), CoreError> {
+        self.repo
+            .delete_asset_snapshot(snapshot_id, profile_id)
             .await
             .map_err(map_internal)
     }
@@ -1083,6 +1258,42 @@ fn format_multi_parsed_summary(payloads: &[ParsedRecordPayload]) -> String {
         .map(|(i, p)| format!("{}. {}", i + 1, format_parsed_summary(p)))
         .collect();
     lines.join("\n")
+}
+
+fn format_asset_amount(amount: f64, currency: &str) -> String {
+    let symbol = match currency {
+        "CNY" => "¥",
+        "USD" => "$",
+        "HKD" => "HK$",
+        "EUR" => "€",
+        "JPY" => "¥",
+        _ => return format!("{} {:.2}", currency, amount),
+    };
+    if currency == "JPY" {
+        format!("{}{}", symbol, amount as i64)
+    } else {
+        format!("{}{:.2}", symbol, amount)
+    }
+}
+
+fn format_asset_acks_summary(acks: &[AssetAck]) -> String {
+    if acks.is_empty() {
+        return String::new();
+    }
+    let parts: Vec<String> = acks
+        .iter()
+        .map(|ack| {
+            let verb = if ack.created { "已记录" } else { "已更新" };
+            format!(
+                "{verb} {} {} {}（{}）",
+                ack.name,
+                ack.category,
+                format_asset_amount(ack.amount, &ack.currency),
+                ack.recorded_on
+            )
+        })
+        .collect();
+    parts.join("；")
 }
 
 fn map_internal(error: anyhow::Error) -> CoreError {

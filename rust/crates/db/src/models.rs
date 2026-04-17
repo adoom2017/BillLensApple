@@ -8,6 +8,20 @@ pub const EXPENSE_CATEGORIES: &[&str] = &[
 
 pub const INCOME_CATEGORIES: &[&str] = &["工资收入", "投资收益", "报销", "退款", "其他"];
 
+pub const ASSET_CATEGORIES: &[&str] = &[
+    "存款",
+    "现金",
+    "股票",
+    "基金",
+    "加密货币",
+    "房产",
+    "其他",
+];
+
+pub fn is_valid_asset_category(category: &str) -> bool {
+    ASSET_CATEGORIES.contains(&category.trim())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SubscriptionCycle {
@@ -250,6 +264,17 @@ pub struct ParsedRecordPayload {
     pub transaction_at: Option<DateTime<Utc>>,
     pub note: Option<String>,
     pub subscription_cycle: Option<SubscriptionCycle>,
+    pub asset_info: Option<ParsedAssetInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParsedAssetInfo {
+    pub name: String,
+    pub category: Option<String>,
+    pub amount: f64,
+    pub currency: Option<String>,
+    pub recorded_on: Option<String>,
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -354,6 +379,65 @@ pub struct SubscriptionUpdate {
     pub cycle: Option<SubscriptionCycle>,
     pub anchor_day: Option<i32>,
     pub anchor_month: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Asset {
+    pub id: Uuid,
+    pub profile_id: String,
+    pub name: String,
+    pub category: String,
+    pub currency: String,
+    pub note: Option<String>,
+    pub deleted_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssetSnapshot {
+    pub id: Uuid,
+    pub asset_id: Uuid,
+    pub profile_id: String,
+    pub amount: f64,
+    pub recorded_on: String,
+    pub note: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssetWithSnapshots {
+    pub id: Uuid,
+    pub profile_id: String,
+    pub name: String,
+    pub category: String,
+    pub currency: String,
+    pub note: Option<String>,
+    pub snapshots: Vec<AssetSnapshot>,
+    pub latest_amount: Option<f64>,
+    pub latest_recorded_on: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AssetUpdateInput {
+    pub name: Option<String>,
+    pub category: Option<String>,
+    pub currency: Option<String>,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssetAck {
+    pub asset_id: Uuid,
+    pub name: String,
+    pub category: String,
+    pub amount: f64,
+    pub currency: String,
+    pub recorded_on: String,
+    pub created: bool,
 }
 
 /// Calculate the next due date after a given reference date.

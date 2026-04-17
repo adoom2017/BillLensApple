@@ -75,3 +75,4 @@ Cargo.lock
 .github/
 re.md
 /prd
+start.sh

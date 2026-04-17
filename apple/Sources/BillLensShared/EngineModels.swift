@@ -155,12 +155,14 @@ public struct SubmitTextResult: Codable {
     public let autoConfirmed: Bool
     public let parsed: [ParsedRecordPayload]
     public let subscriptionCreated: Bool
+    public let assetAcks: [AssetAck]?
 
     enum CodingKeys: String, CodingKey {
         case home
         case autoConfirmed = "auto_confirmed"
         case parsed
         case subscriptionCreated = "subscription_created"
+        case assetAcks = "asset_acks"
     }
 }
 
@@ -335,4 +337,85 @@ public struct SubscriptionUpdateInput: Codable {
 public struct CategoriesResponse: Decodable, Sendable {
     public let expense: [String]
     public let income: [String]
+}
+
+// MARK: - Asset models
+
+public struct AssetItem: Codable, Identifiable, Sendable {
+    public let id: String
+    public let profileId: String
+    public let name: String
+    public let category: String
+    public let currency: String
+    public let note: String?
+    public let snapshots: [AssetSnapshotItem]
+    public let latestAmount: Double?
+    public let latestRecordedOn: String?
+    public let createdAt: String
+    public let updatedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case profileId = "profile_id"
+        case name
+        case category
+        case currency
+        case note
+        case snapshots
+        case latestAmount = "latest_amount"
+        case latestRecordedOn = "latest_recorded_on"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+public struct AssetSnapshotItem: Codable, Identifiable, Sendable {
+    public let id: String
+    public let assetId: String
+    public let amount: Double
+    public let recordedOn: String
+    public let note: String?
+    public let createdAt: String
+    public let updatedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case assetId = "asset_id"
+        case amount
+        case recordedOn = "recorded_on"
+        case note
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+public struct AssetListResponse: Codable, Sendable {
+    public let assets: [AssetItem]
+}
+
+public struct AssetUpdateInput: Codable, Sendable {
+    public var name: String?
+    public var category: String?
+    public var currency: String?
+    public var note: String?
+}
+
+public struct AssetAck: Codable, Sendable {
+    public let assetId: String
+    public let name: String
+    public let category: String
+    public let amount: Double
+    public let currency: String
+    public let recordedOn: String
+    public let created: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case assetId = "asset_id"
+        case name
+        case category
+        case amount
+        case currency
+        case recordedOn = "recorded_on"
+        case created
+    }
 }

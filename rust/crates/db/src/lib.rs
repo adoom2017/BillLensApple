@@ -947,6 +947,243 @@ impl BillRepository {
         Ok(())
     }
 
+    // ── Asset operations ────────────────────────────────────────────────
+
+    pub async fn find_or_create_asset(
+        &self,
+        profile_id: &str,
+        name: &str,
+        category: &str,
+        currency: &str,
+    ) -> Result<Asset> {
+        let id = Uuid::new_v4();
+        // Atomic upsert: on conflict with the partial unique index
+        // (profile_id, name) WHERE deleted_at IS NULL, touch updated_at so
+        // RETURNING always gives us the live row regardless of which branch ran.
+        let row = sqlx::query_as::<_, AssetRow>(
+            r#"
+            INSERT INTO assets (id, profile_id, name, category, currency)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT (profile_id, name) WHERE deleted_at IS NULL
+            DO UPDATE SET updated_at = updated_at
+            RETURNING *
+            "#,
+        )
+        .bind(id.to_string())
+        .bind(profile_id)
+        .bind(name)
+        .bind(category)
+        .bind(currency)
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to upsert asset")?;
+        row.try_into()
+    }
+
+    /// Returns (snapshot, was_created). Same-day re-record overwrites amount and note.
+    pub async fn upsert_asset_snapshot(
+        &self,
+        asset_id: Uuid,
+        profile_id: &str,
+        recorded_on: &str,
+        amount: f64,
+        note: Option<&str>,
+    ) -> Result<(AssetSnapshot, bool)> {
+        let existing = sqlx::query_as::<_, AssetSnapshotRow>(
+            r#"
+            SELECT * FROM asset_snapshots
+            WHERE asset_id = ?1 AND recorded_on = ?2
+            "#,
+        )
+        .bind(asset_id.to_string())
+        .bind(recorded_on)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to lookup asset snapshot")?;
+
+        let created = existing.is_none();
+        let row = if let Some(prev) = existing {
+            sqlx::query_as::<_, AssetSnapshotRow>(
+                r#"
+                UPDATE asset_snapshots
+                SET amount = ?2, note = ?3, updated_at = datetime('now')
+                WHERE id = ?1
+                RETURNING *
+                "#,
+            )
+            .bind(prev.id)
+            .bind(amount)
+            .bind(note)
+            .fetch_one(&self.pool)
+            .await
+            .context("failed to update asset snapshot")?
+        } else {
+            let id = Uuid::new_v4();
+            sqlx::query_as::<_, AssetSnapshotRow>(
+                r#"
+                INSERT INTO asset_snapshots (id, asset_id, profile_id, amount, recorded_on, note)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                RETURNING *
+                "#,
+            )
+            .bind(id.to_string())
+            .bind(asset_id.to_string())
+            .bind(profile_id)
+            .bind(amount)
+            .bind(recorded_on)
+            .bind(note)
+            .fetch_one(&self.pool)
+            .await
+            .context("failed to insert asset snapshot")?
+        };
+
+        sqlx::query("UPDATE assets SET updated_at = datetime('now') WHERE id = ?1")
+            .bind(asset_id.to_string())
+            .execute(&self.pool)
+            .await
+            .context("failed to touch asset updated_at")?;
+
+        Ok((row.try_into()?, created))
+    }
+
+    pub async fn list_assets_with_snapshots(
+        &self,
+        profile_id: &str,
+    ) -> Result<Vec<AssetWithSnapshots>> {
+        let asset_rows = sqlx::query_as::<_, AssetRow>(
+            r#"
+            SELECT * FROM assets
+            WHERE profile_id = ?1 AND deleted_at IS NULL
+            ORDER BY updated_at DESC
+            "#,
+        )
+        .bind(profile_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list assets")?;
+
+        let mut results = Vec::with_capacity(asset_rows.len());
+        for row in asset_rows {
+            let asset: Asset = row.try_into()?;
+            let snap_rows = sqlx::query_as::<_, AssetSnapshotRow>(
+                r#"
+                SELECT * FROM asset_snapshots
+                WHERE asset_id = ?1
+                ORDER BY recorded_on ASC
+                "#,
+            )
+            .bind(asset.id.to_string())
+            .fetch_all(&self.pool)
+            .await
+            .context("failed to list asset snapshots")?;
+
+            let snapshots: Vec<AssetSnapshot> = snap_rows
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_>>()?;
+
+            let latest = snapshots.last();
+            let latest_amount = latest.map(|s| s.amount);
+            let latest_recorded_on = latest.map(|s| s.recorded_on.clone());
+
+            results.push(AssetWithSnapshots {
+                id: asset.id,
+                profile_id: asset.profile_id,
+                name: asset.name,
+                category: asset.category,
+                currency: asset.currency,
+                note: asset.note,
+                snapshots,
+                latest_amount,
+                latest_recorded_on,
+                created_at: asset.created_at,
+                updated_at: asset.updated_at,
+            });
+        }
+
+        results.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        Ok(results)
+    }
+
+    pub async fn update_asset(
+        &self,
+        id: Uuid,
+        profile_id: &str,
+        update: AssetUpdateInput,
+    ) -> Result<Asset> {
+        let existing = sqlx::query_as::<_, AssetRow>(
+            "SELECT * FROM assets WHERE id = ?1 AND profile_id = ?2 AND deleted_at IS NULL",
+        )
+        .bind(id.to_string())
+        .bind(profile_id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load asset")?
+        .ok_or_else(|| anyhow!("asset not found"))?;
+
+        let name = update.name.unwrap_or(existing.name);
+        let category = update.category.unwrap_or(existing.category);
+        let currency = update.currency.unwrap_or(existing.currency);
+        let note = update.note.or(existing.note);
+
+        let row = sqlx::query_as::<_, AssetRow>(
+            r#"
+            UPDATE assets
+            SET name = ?3, category = ?4, currency = ?5, note = ?6, updated_at = datetime('now')
+            WHERE id = ?1 AND profile_id = ?2 AND deleted_at IS NULL
+            RETURNING *
+            "#,
+        )
+        .bind(id.to_string())
+        .bind(profile_id)
+        .bind(&name)
+        .bind(&category)
+        .bind(&currency)
+        .bind(&note)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to update asset")?
+        .ok_or_else(|| anyhow!("asset not found"))?;
+
+        row.try_into()
+    }
+
+    pub async fn soft_delete_asset(&self, id: Uuid, profile_id: &str) -> Result<()> {
+        let result = sqlx::query(
+            r#"
+            UPDATE assets
+            SET deleted_at = datetime('now'), updated_at = datetime('now')
+            WHERE id = ?1 AND profile_id = ?2 AND deleted_at IS NULL
+            "#,
+        )
+        .bind(id.to_string())
+        .bind(profile_id)
+        .execute(&self.pool)
+        .await
+        .context("failed to delete asset")?;
+
+        if result.rows_affected() == 0 {
+            return Err(anyhow!("asset not found"));
+        }
+        Ok(())
+    }
+
+    pub async fn delete_asset_snapshot(&self, snapshot_id: Uuid, profile_id: &str) -> Result<()> {
+        let result = sqlx::query(
+            "DELETE FROM asset_snapshots WHERE id = ?1 AND profile_id = ?2",
+        )
+        .bind(snapshot_id.to_string())
+        .bind(profile_id)
+        .execute(&self.pool)
+        .await
+        .context("failed to delete asset snapshot")?;
+
+        if result.rows_affected() == 0 {
+            return Err(anyhow!("asset snapshot not found"));
+        }
+        Ok(())
+    }
+
     async fn enqueue_sync_event(
         &self,
         profile_id: &str,
@@ -1305,6 +1542,66 @@ impl TryFrom<SubscriptionRow> for Subscription {
                 .transpose()?,
             is_active: row.is_active != 0,
             deleted_at: row.deleted_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
+    }
+}
+
+#[derive(Debug, FromRow)]
+struct AssetRow {
+    id: String,
+    profile_id: String,
+    name: String,
+    category: String,
+    currency: String,
+    note: Option<String>,
+    deleted_at: Option<DateTime<Utc>>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+impl TryFrom<AssetRow> for Asset {
+    type Error = anyhow::Error;
+
+    fn try_from(row: AssetRow) -> Result<Self> {
+        Ok(Self {
+            id: Uuid::parse_str(&row.id).context("invalid asset id")?,
+            profile_id: row.profile_id,
+            name: row.name,
+            category: row.category,
+            currency: row.currency,
+            note: row.note,
+            deleted_at: row.deleted_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        })
+    }
+}
+
+#[derive(Debug, FromRow)]
+struct AssetSnapshotRow {
+    id: String,
+    asset_id: String,
+    profile_id: String,
+    amount: f64,
+    recorded_on: String,
+    note: Option<String>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+impl TryFrom<AssetSnapshotRow> for AssetSnapshot {
+    type Error = anyhow::Error;
+
+    fn try_from(row: AssetSnapshotRow) -> Result<Self> {
+        Ok(Self {
+            id: Uuid::parse_str(&row.id).context("invalid asset snapshot id")?,
+            asset_id: Uuid::parse_str(&row.asset_id).context("invalid asset snapshot asset_id")?,
+            profile_id: row.profile_id,
+            amount: row.amount,
+            recorded_on: row.recorded_on,
+            note: row.note,
             created_at: row.created_at,
             updated_at: row.updated_at,
         })

@@ -4,12 +4,14 @@ enum AppPage: String {
     case entry
     case ledger
     case subscriptions
+    case assets
 
     var title: String {
         switch self {
         case .entry: "账单录入"
         case .ledger: "账单一览"
         case .subscriptions: "订阅管理"
+        case .assets: "资产管理"
         }
     }
 }

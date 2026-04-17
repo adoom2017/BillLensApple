@@ -38,6 +38,8 @@ public final class BillLensStore: ObservableObject {
     @Published public var draftForm = DraftFormState()
     @Published public var subscriptions: [SubscriptionItem] = []
     @Published public var selectedSubscriptionId: String?
+    @Published public var assets: [AssetItem] = []
+    @Published public var selectedAssetId: String?
 
     public let speechService = SpeechCaptureService.shared
 
@@ -80,6 +82,11 @@ public final class BillLensStore: ObservableObject {
         return subscriptions.first { $0.id == id }
     }
 
+    public var selectedAsset: AssetItem? {
+        guard let id = selectedAssetId else { return nil }
+        return assets.first { $0.id == id }
+    }
+
     /// 切换收支方向，并将分类重置为新方向下的第一个合法值
     public func setDraftDirection(_ direction: String) {
         draftForm.direction = direction
@@ -108,6 +115,7 @@ public final class BillLensStore: ObservableObject {
                 try await refreshHome()
                 try await refreshLedger()
                 try await loadSubscriptions()
+                try await loadAssets()
             } catch {
                 AppLogger.log("bootstrap.error", error.localizedDescription)
                 errorText = error.localizedDescription
@@ -139,7 +147,10 @@ public final class BillLensStore: ObservableObject {
                 self.statusText += "（已创建订阅）"
                 try await self.loadSubscriptions()
             }
-            AppLogger.log("entry.text.result", "auto_confirmed=\(result.autoConfirmed) parsed=\(String(describing: result.parsed)) subscription=\(result.subscriptionCreated)")
+            if let acks = result.assetAcks, !acks.isEmpty {
+                try await self.loadAssets()
+            }
+            AppLogger.log("entry.text.result", "auto_confirmed=\(result.autoConfirmed) parsed=\(String(describing: result.parsed)) subscription=\(result.subscriptionCreated) asset_acks=\(result.assetAcks?.count ?? 0)")
             try await self.refreshLedger()
             self.finishProgress()
         }
@@ -357,6 +368,63 @@ public final class BillLensStore: ObservableObject {
             try await self.loadSubscriptions()
             self.statusText = "订阅已更新"
             AppLogger.log("subscription.update", "id=\(subscriptionId)")
+        }
+    }
+
+    // MARK: - Asset Management
+
+    public func loadAssets() async throws {
+        let response: AssetListResponse = try await bridge.sendAsync([
+            "action": "list_assets",
+            "profile_id": profileID
+        ])
+        assets = response.assets
+        AppLogger.log("assets.load", "count=\(response.assets.count)")
+    }
+
+    public func updateAsset(_ assetId: String, update: AssetUpdateInput) {
+        perform("正在更新资产") {
+            let updateDict = try JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(update)
+            ) as? [String: Any] ?? [:]
+            let _: AssetItem = try await self.bridge.sendAsync([
+                "action": "update_asset",
+                "profile_id": self.profileID,
+                "asset_id": assetId,
+                "update": updateDict
+            ])
+            try await self.loadAssets()
+            self.statusText = "资产已更新"
+            AppLogger.log("asset.update", "id=\(assetId)")
+        }
+    }
+
+    public func deleteAsset(_ assetId: String) {
+        perform("正在删除资产") {
+            let _: [String: String] = try await self.bridge.sendAsync([
+                "action": "delete_asset",
+                "profile_id": self.profileID,
+                "asset_id": assetId
+            ])
+            if self.selectedAssetId == assetId {
+                self.selectedAssetId = nil
+            }
+            try await self.loadAssets()
+            self.statusText = "资产已删除"
+            AppLogger.log("asset.delete", "id=\(assetId)")
+        }
+    }
+
+    public func deleteAssetSnapshot(_ snapshotId: String) {
+        perform("正在删除快照") {
+            let _: [String: String] = try await self.bridge.sendAsync([
+                "action": "delete_asset_snapshot",
+                "profile_id": self.profileID,
+                "snapshot_id": snapshotId
+            ])
+            try await self.loadAssets()
+            self.statusText = "快照已删除"
+            AppLogger.log("asset_snapshot.delete", "id=\(snapshotId)")
         }
     }
 

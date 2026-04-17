@@ -3,7 +3,8 @@ use billlens_apple_core::stt::{
     self, SttBackend, SttCancelFn, SttFreeStringFn, SttStartFn, SttStopFn,
 };
 use billlens_apple_core::{
-    AppService, DraftInput, EngineBootstrap, EntrySource, LlmConfig, SubscriptionUpdate,
+    AppService, AssetUpdateInput, DraftInput, EngineBootstrap, EntrySource, LlmConfig,
+    SubscriptionUpdate,
 };
 use billlens_apple_db::BillRepository;
 use chrono::{DateTime, FixedOffset};
@@ -100,6 +101,22 @@ enum EngineRequest {
         subscription_id: String,
     },
     ListCategories,
+    ListAssets {
+        profile_id: String,
+    },
+    UpdateAsset {
+        profile_id: String,
+        asset_id: String,
+        update: AssetUpdateInput,
+    },
+    DeleteAsset {
+        profile_id: String,
+        asset_id: String,
+    },
+    DeleteAssetSnapshot {
+        profile_id: String,
+        snapshot_id: String,
+    },
 }
 
 fn runtime() -> &'static Runtime {
@@ -327,6 +344,41 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
             "expense": billlens_apple_core::EXPENSE_CATEGORIES.to_vec(),
             "income": billlens_apple_core::INCOME_CATEGORIES.to_vec(),
         }))),
+        EngineRequest::ListAssets { profile_id } => with_app(|app| {
+            let assets = runtime().block_on(app.list_assets(&profile_id))?;
+            Ok(encode_ok(serde_json::json!({ "assets": assets })))
+        }),
+        EngineRequest::UpdateAsset {
+            profile_id,
+            asset_id,
+            update,
+        } => {
+            let asset_id = Uuid::parse_str(&asset_id).context("invalid asset_id")?;
+            with_app(|app| {
+                let asset = runtime().block_on(app.update_asset(&profile_id, asset_id, update))?;
+                Ok(encode_ok(asset))
+            })
+        }
+        EngineRequest::DeleteAsset {
+            profile_id,
+            asset_id,
+        } => {
+            let asset_id = Uuid::parse_str(&asset_id).context("invalid asset_id")?;
+            with_app(|app| {
+                runtime().block_on(app.delete_asset(&profile_id, asset_id))?;
+                Ok(encode_ok(serde_json::json!({})))
+            })
+        }
+        EngineRequest::DeleteAssetSnapshot {
+            profile_id,
+            snapshot_id,
+        } => {
+            let snapshot_id = Uuid::parse_str(&snapshot_id).context("invalid snapshot_id")?;
+            with_app(|app| {
+                runtime().block_on(app.delete_asset_snapshot(&profile_id, snapshot_id))?;
+                Ok(encode_ok(serde_json::json!({})))
+            })
+        }
     }
 }
 

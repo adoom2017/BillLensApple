@@ -2,8 +2,9 @@ use std::{env, fmt};
 
 use anyhow::{Context, Result, anyhow};
 use billlens_apple_db::{
-    EXPENSE_CATEGORIES, INCOME_CATEGORIES, ParsedRecordPayload, RecordDirection, RecordDraft,
-    SubscriptionCycle, is_valid_record_category, is_valid_record_category_for_direction,
+    ASSET_CATEGORIES, EXPENSE_CATEGORIES, INCOME_CATEGORIES, ParsedAssetInfo, ParsedRecordPayload,
+    RecordDirection, RecordDraft, SubscriptionCycle, is_valid_asset_category,
+    is_valid_record_category, is_valid_record_category_for_direction,
 };
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, Offset, TimeZone, Utc};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
@@ -32,6 +33,18 @@ note 只保留与交易本身直接相关的简短备注；忽略积分、贴纸
 - "yearly" 表示每年付费
 如果不是订阅类消费，subscription_cycle 返回 null。
 判断依据：出现"订阅""会员""月费""年费""续费""每月""每年""包月""包年""月付""年付"等关键词时应识别为订阅。
+如果用户描述的是资产余额/账户存款/投资持仓（如"招商银行存款还有 54000 元""支付宝余额 3000 块""股票账户 12 万""持有加密货币市值 5 万"等），额外返回 "asset_info" 字段：
+{
+  "name": 机构或账户名（字符串）,
+  "category": "{asset_categories_pipe}" 之一,
+  "amount": 数字（正数）,
+  "currency": ISO 4217 代码,
+  "recorded_on": "YYYY-MM-DD" | null,
+  "note": string | null
+}
+判断依据：出现"资产""余额""存款""还有 XX 元""账户里 XX""持仓""市值"等关键词，且主体是账户/机构而非消费动作。
+资产记录时，direction/amount/category/merchant/transaction_at/subscription_cycle 一律返回 null，让 asset_info 独立表达。
+如果不是资产描述，asset_info 返回 null。
 JSON 格式如下：
 [
   {
@@ -42,7 +55,8 @@ JSON 格式如下：
     "merchant": string | null,
     "transaction_at": "RFC3339 datetime" | null,
     "note": string | null,
-    "subscription_cycle": "monthly" | "yearly" | null
+    "subscription_cycle": "monthly" | "yearly" | null,
+    "asset_info": { "name": string, "category": string, "amount": number, "currency": string, "recorded_on": string | null, "note": string | null } | null
   }
 ]
 如果原文明确出现币种，请返回对应 ISO 4217 代码：
@@ -298,6 +312,7 @@ fn build_record_prompt() -> String {
         )
         .replace("{expense_categories}", &EXPENSE_CATEGORIES.join("、"))
         .replace("{income_categories}", &INCOME_CATEGORIES.join("、"))
+        .replace("{asset_categories_pipe}", &ASSET_CATEGORIES.join("|"))
 }
 
 #[allow(dead_code)]
@@ -588,6 +603,8 @@ fn parse_record_payload_value(value: Value) -> Result<ParsedRecordPayload> {
         .and_then(Value::as_str)
         .and_then(|v| SubscriptionCycle::try_from(v).ok());
 
+    let asset_info = object.get("asset_info").and_then(parse_asset_info_value);
+
     Ok(ParsedRecordPayload {
         direction,
         amount,
@@ -597,6 +614,63 @@ fn parse_record_payload_value(value: Value) -> Result<ParsedRecordPayload> {
         transaction_at,
         note,
         subscription_cycle,
+        asset_info,
+    })
+}
+
+fn parse_asset_info_value(value: &Value) -> Option<ParsedAssetInfo> {
+    let object = value.as_object()?;
+
+    let name = object
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())?
+        .to_string();
+
+    let amount = object
+        .get("amount")
+        .and_then(|v| match v {
+            Value::Number(n) => n.as_f64(),
+            Value::String(s) => s.parse::<f64>().ok(),
+            _ => None,
+        })
+        .map(f64::abs)?;
+
+    let category = object
+        .get("category")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .filter(|v| is_valid_asset_category(v))
+        .map(ToString::to_string);
+
+    let currency = object
+        .get("currency")
+        .and_then(Value::as_str)
+        .and_then(normalize_currency_code);
+
+    let recorded_on = object
+        .get("recorded_on")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .filter(|v| NaiveDate::parse_from_str(v, "%Y-%m-%d").is_ok())
+        .map(ToString::to_string);
+
+    let note = object
+        .get("note")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .and_then(|v| sanitize_note(&v));
+
+    Some(ParsedAssetInfo {
+        name,
+        category,
+        amount,
+        currency,
+        recorded_on,
+        note,
     })
 }
 
@@ -1079,6 +1153,7 @@ mod tests {
             transaction_at: None,
             note: None,
             subscription_cycle: None,
+            asset_info: None,
         };
 
         finalize_record_payload(

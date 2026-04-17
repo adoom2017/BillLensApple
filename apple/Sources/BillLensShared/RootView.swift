@@ -27,6 +27,8 @@ public struct RootView: View {
                         LedgerShell(availableHeight: max(proxy.size.height - 82, 640))
                     case .subscriptions:
                         SubscriptionShell()
+                    case .assets:
+                        AssetShell()
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -144,6 +146,7 @@ public struct RootView: View {
                 headerTab(.entry)
                 headerTab(.ledger)
                 headerTab(.subscriptions)
+                headerTab(.assets)
             }
             .padding(5)
             .background(.white.opacity(0.82))
