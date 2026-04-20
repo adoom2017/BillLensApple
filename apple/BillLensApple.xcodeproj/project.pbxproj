@@ -1,0 +1,456 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		2C5A41B597C546280F2582F9 /* BillLensIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 968DF4D9C5C6410DB7CF0700 /* BillLensIOSApp.swift */; };
+		5C8073FCFA8A3DE41DC3DDCF /* BillLensShared in Frameworks */ = {isa = PBXBuildFile; productRef = D6E37C17C3A4A3256FE6A83B /* BillLensShared */; };
+		5FAAABA1B6FAE90C0D5522E7 /* BillLensAppleServices in Frameworks */ = {isa = PBXBuildFile; productRef = 9119C4F24AF97D7C891E6B46 /* BillLensAppleServices */; };
+		CAB9E0C11D9D4F688A78F662 /* BillLensAppleServices in Frameworks */ = {isa = PBXBuildFile; productRef = 3AF36A7261AB854C4EABAA1F /* BillLensAppleServices */; };
+		EF836DB681DCFC150E145A9D /* BillLensShared in Frameworks */ = {isa = PBXBuildFile; productRef = 7458D7AC63DB652E864D9498 /* BillLensShared */; };
+		F087F3430891856AC66F1697 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FF3181BDBF6416114DCA583 /* main.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		30C9F5D7068F7F964F10475D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		3E86FB5C63FA63F9EE21FBEC /* apple */ = {isa = PBXFileReference; lastKnownFileType = folder; name = apple; path = .; sourceTree = SOURCE_ROOT; };
+		5FF3181BDBF6416114DCA583 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		6F653F9DED3ABDD79B39CC0F /* BillLensIOSApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BillLensIOSApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		968DF4D9C5C6410DB7CF0700 /* BillLensIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillLensIOSApp.swift; sourceTree = "<group>"; };
+		97B3DA48E7488EB0FE84B575 /* BillLensMacApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BillLensMacApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		6A3B41DA4E473B0ABAC47092 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5C8073FCFA8A3DE41DC3DDCF /* BillLensShared in Frameworks */,
+				5FAAABA1B6FAE90C0D5522E7 /* BillLensAppleServices in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D719820099568E41D4923E36 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EF836DB681DCFC150E145A9D /* BillLensShared in Frameworks */,
+				CAB9E0C11D9D4F688A78F662 /* BillLensAppleServices in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		0B2B26E3025DBCEB5A202978 /* BillLensIOSApp */ = {
+			isa = PBXGroup;
+			children = (
+				968DF4D9C5C6410DB7CF0700 /* BillLensIOSApp.swift */,
+				30C9F5D7068F7F964F10475D /* Info.plist */,
+			);
+			path = BillLensIOSApp;
+			sourceTree = "<group>";
+		};
+		1987D185DA6BFB124B749FF7 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				3E86FB5C63FA63F9EE21FBEC /* apple */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		59D1CDCFECEAC504D4569AA6 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				0B2B26E3025DBCEB5A202978 /* BillLensIOSApp */,
+				6F92965C9BD3B1FCEBB0917D /* BillLensMacApp */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		6F92965C9BD3B1FCEBB0917D /* BillLensMacApp */ = {
+			isa = PBXGroup;
+			children = (
+				5FF3181BDBF6416114DCA583 /* main.swift */,
+			);
+			path = BillLensMacApp;
+			sourceTree = "<group>";
+		};
+		BCED6A9F565725FFB88C8CAA = {
+			isa = PBXGroup;
+			children = (
+				1987D185DA6BFB124B749FF7 /* Packages */,
+				59D1CDCFECEAC504D4569AA6 /* Sources */,
+				DD06FBF04EB96486913171E1 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		DD06FBF04EB96486913171E1 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				6F653F9DED3ABDD79B39CC0F /* BillLensIOSApp.app */,
+				97B3DA48E7488EB0FE84B575 /* BillLensMacApp.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		706DE52D7776039BEEC21A30 /* BillLensMacApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8A2EF9CD1A17B0F7E9E241AC /* Build configuration list for PBXNativeTarget "BillLensMacApp" */;
+			buildPhases = (
+				FF527EAFD3A91F6F044D897A /* Sources */,
+				D719820099568E41D4923E36 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BillLensMacApp;
+			packageProductDependencies = (
+				7458D7AC63DB652E864D9498 /* BillLensShared */,
+				3AF36A7261AB854C4EABAA1F /* BillLensAppleServices */,
+			);
+			productName = BillLensMacApp;
+			productReference = 97B3DA48E7488EB0FE84B575 /* BillLensMacApp.app */;
+			productType = "com.apple.product-type.application";
+		};
+		AD46254B4CA6B364EE9523EA /* BillLensIOSApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1E83886FECD73B35B87384EB /* Build configuration list for PBXNativeTarget "BillLensIOSApp" */;
+			buildPhases = (
+				E33E37474A904056A7AF0438 /* Sources */,
+				6A3B41DA4E473B0ABAC47092 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BillLensIOSApp;
+			packageProductDependencies = (
+				D6E37C17C3A4A3256FE6A83B /* BillLensShared */,
+				9119C4F24AF97D7C891E6B46 /* BillLensAppleServices */,
+			);
+			productName = BillLensIOSApp;
+			productReference = 6F653F9DED3ABDD79B39CC0F /* BillLensIOSApp.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		D22B7D7B2A9CC6296C228239 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = 87CC7196512B9E02BE392DF3 /* Build configuration list for PBXProject "BillLensApple" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = BCED6A9F565725FFB88C8CAA;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				317FABC174D5FC526A0528D3 /* XCLocalSwiftPackageReference "." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = DD06FBF04EB96486913171E1 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				AD46254B4CA6B364EE9523EA /* BillLensIOSApp */,
+				706DE52D7776039BEEC21A30 /* BillLensMacApp */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		E33E37474A904056A7AF0438 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2C5A41B597C546280F2582F9 /* BillLensIOSApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FF527EAFD3A91F6F044D897A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F087F3430891856AC66F1697 /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		05FEC086EF2A8CB2005025BE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "BillLens 需要麦克风权限以支持语音输入账单。";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "BillLens 需要语音识别权限以将语音转换为文字。";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				OTHER_LDFLAGS = "$(inherited) -L$(SRCROOT)/../rust/target/release -lbilllens_ffi";
+				PRODUCT_BUNDLE_IDENTIFIER = com.shendongchun.BillLensAppleMac;
+				SDKROOT = macosx;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		549B61E0B73747CEC25E2645 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "BillLens 需要麦克风权限以支持语音输入账单。";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "BillLens 需要语音识别权限以将语音转换为文字。";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				OTHER_LDFLAGS = "$(inherited) -L$(SRCROOT)/../rust/target/debug -lbilllens_ffi";
+				PRODUCT_BUNDLE_IDENTIFIER = com.shendongchun.BillLensAppleMac;
+				SDKROOT = macosx;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		5C7B60877BF085BF83FBF19C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = Sources/BillLensIOSApp/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				OTHER_LDFLAGS = "$(inherited) -L$(SRCROOT)/../rust/target/aarch64-apple-ios-sim/debug -lbilllens_ffi";
+				PRODUCT_BUNDLE_IDENTIFIER = com.shendongchun.BillLensApple;
+				SDKROOT = iphoneos;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		7F65AEA516FBC6924D5754C2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		F677391DC7B0EC47514BD04C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = Sources/BillLensIOSApp/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				OTHER_LDFLAGS = "$(inherited) -L$(SRCROOT)/../rust/target/aarch64-apple-ios/release -lbilllens_ffi";
+				PRODUCT_BUNDLE_IDENTIFIER = com.shendongchun.BillLensApple;
+				SDKROOT = iphoneos;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		FBBBDF7294FFC732FAA22A39 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1E83886FECD73B35B87384EB /* Build configuration list for PBXNativeTarget "BillLensIOSApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5C7B60877BF085BF83FBF19C /* Debug */,
+				F677391DC7B0EC47514BD04C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		87CC7196512B9E02BE392DF3 /* Build configuration list for PBXProject "BillLensApple" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FBBBDF7294FFC732FAA22A39 /* Debug */,
+				7F65AEA516FBC6924D5754C2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		8A2EF9CD1A17B0F7E9E241AC /* Build configuration list for PBXNativeTarget "BillLensMacApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				549B61E0B73747CEC25E2645 /* Debug */,
+				05FEC086EF2A8CB2005025BE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		317FABC174D5FC526A0528D3 /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = .;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		3AF36A7261AB854C4EABAA1F /* BillLensAppleServices */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = BillLensAppleServices;
+		};
+		7458D7AC63DB652E864D9498 /* BillLensShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = BillLensShared;
+		};
+		9119C4F24AF97D7C891E6B46 /* BillLensAppleServices */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = BillLensAppleServices;
+		};
+		D6E37C17C3A4A3256FE6A83B /* BillLensShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = BillLensShared;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = D22B7D7B2A9CC6296C228239 /* Project object */;
+}

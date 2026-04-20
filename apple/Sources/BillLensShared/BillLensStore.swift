@@ -52,7 +52,7 @@ public final class BillLensStore: ObservableObject {
         if let saved = UserDefaults.standard.string(forKey: key) {
             return saved
         }
-        let id = Host.current().localizedName ?? UUID().uuidString
+        let id = deviceName()
         UserDefaults.standard.set(id, forKey: key)
         return id
     }()

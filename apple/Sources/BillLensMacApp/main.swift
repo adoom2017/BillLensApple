@@ -1,3 +1,4 @@
+#if os(macOS)
 import SwiftUI
 import AppKit
 import BillLensShared
@@ -7,7 +8,6 @@ final class BillLensAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
-        // Register Swift STT functions with the Rust core, then ask for permissions.
         RustBridge.registerSttBackend()
         Task { @MainActor in
             await SpeechCaptureService.shared.bootstrapPermissions()
@@ -31,3 +31,4 @@ struct BillLensMacApp: App {
         }
     }
 }
+#endif

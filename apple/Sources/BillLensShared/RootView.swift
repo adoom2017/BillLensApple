@@ -1,4 +1,6 @@
+#if os(macOS)
 import AppKit
+#endif
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -12,20 +14,20 @@ public struct RootView: View {
     public init() {}
 
     public var body: some View {
-        GeometryReader { proxy in
-            VStack(spacing: LayoutMetrics.headerSpacing) {
-                appHeader
+        VStack(spacing: LayoutMetrics.headerSpacing) {
+            appHeader
 
+            GeometryReader { proxy in
                 Group {
                     switch selectedPage {
                     case .entry:
                         EntryShell(
                             isImportingImage: $isImportingImage,
-                            availableWidth: proxy.size.width - LayoutMetrics.pagePadding * 2,
-                            availableHeight: max(proxy.size.height - 82, 640)
+                            availableWidth: proxy.size.width,
+                            availableHeight: max(proxy.size.height, 640)
                         )
                     case .ledger:
-                        LedgerShell(availableHeight: max(proxy.size.height - 82, 640))
+                        LedgerShell(availableHeight: max(proxy.size.height, 640))
                     case .subscriptions:
                         SubscriptionShell()
                     case .assets:
@@ -34,12 +36,15 @@ public struct RootView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding(.horizontal, LayoutMetrics.pagePadding)
-            .padding(.top, LayoutMetrics.pageTopPadding)
-            .padding(.bottom, LayoutMetrics.pagePadding)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .padding(.horizontal, LayoutMetrics.pagePadding)
+        .padding(.top, LayoutMetrics.pageTopPadding)
+        .padding(.bottom, LayoutMetrics.pagePadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        #if os(macOS)
         .frame(minWidth: 1120, minHeight: 720)
+        #endif
         .background(
             ZStack {
                 LinearGradient(
@@ -182,22 +187,30 @@ public struct RootView: View {
         Button {
             selectedPage = page
         } label: {
+            #if os(iOS)
+            Image(systemName: page.icon)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(
+                    selectedPage == page ? IMColors.accent : IMColors.textMuted
+                )
+                .frame(width: 38, height: 38)
+                .background(
+                    Circle().fill(selectedPage == page ? IMColors.accentBgActive : .clear)
+                )
+                .contentShape(Circle())
+            #else
             Text(page.title)
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(
-                    selectedPage == page
-                        ? IMColors.accent
-                        : IMColors.textMuted
+                    selectedPage == page ? IMColors.accent : IMColors.textMuted
                 )
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .background(
-                    Capsule()
-                        .fill(
-                            selectedPage == page
-                                ? IMColors.accentBgActive : .clear)
+                    Capsule().fill(selectedPage == page ? IMColors.accentBgActive : .clear)
                 )
                 .contentShape(Capsule())
+            #endif
         }
         .buttonStyle(.plain)
     }

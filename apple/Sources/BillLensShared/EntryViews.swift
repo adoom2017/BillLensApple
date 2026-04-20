@@ -1,4 +1,6 @@
+#if os(macOS)
 import AppKit
+#endif
 import SwiftUI
 
 struct EntryShell: View {
@@ -7,12 +9,33 @@ struct EntryShell: View {
     let availableWidth: CGFloat
     let availableHeight: CGFloat
 
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var selectedTab: EntryTab = .chat
+
+    private enum EntryTab {
+        case chat, review
+    }
+    #endif
+
     private var reviewWidth: CGFloat {
         let w = availableWidth * 0.38
         return min(max(360, w), 440)
     }
 
     var body: some View {
+        #if os(macOS)
+        desktopLayout
+        #else
+        if sizeClass == .regular {
+            desktopLayout
+        } else {
+            compactLayout
+        }
+        #endif
+    }
+
+    private var desktopLayout: some View {
         HStack(spacing: 0) {
             chatSide
             groovedDivider
@@ -21,6 +44,34 @@ struct EntryShell: View {
         .frame(width: availableWidth, height: availableHeight, alignment: .topLeading)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
+
+    #if os(iOS)
+    private var compactLayout: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $selectedTab) {
+                Text("记账").tag(EntryTab.chat)
+                Text("审核").tag(EntryTab.review)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            Group {
+                switch selectedTab {
+                case .chat:
+                    ChatPanel(isImportingImage: $isImportingImage)
+                        .background(IMColors.chatBg)
+                case .review:
+                    ReviewPanel()
+                        .background(Color.white)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+    #endif
 
     private var chatWidth: CGFloat {
         availableWidth - reviewWidth - 1
@@ -84,6 +135,9 @@ struct ChatScrollView: View {
                         .padding(.trailing, 10)
                 }
                 .scrollIndicators(.hidden)
+                #if os(iOS)
+                .scrollDismissesKeyboard(.interactively)
+                #endif
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .onAppear {
                     reader.scrollTo("chatBottom")

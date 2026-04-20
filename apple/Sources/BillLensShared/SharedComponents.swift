@@ -1,4 +1,6 @@
+#if os(macOS)
 import AppKit
+#endif
 import SwiftUI
 
 struct WelcomeBubble: View {
@@ -302,6 +304,7 @@ struct ComposerPanel: View {
     }
 }
 
+#if os(macOS)
 struct ComposerInputField: NSViewRepresentable {
     @Binding var text: String
     let placeholder: String
@@ -363,6 +366,31 @@ struct ComposerInputField: NSViewRepresentable {
         }
     }
 }
+#else
+struct ComposerInputField: View {
+    @Binding var text: String
+    let placeholder: String
+    let focusToken: UUID
+    let onSubmit: () -> Void
+    @FocusState private var isFocused: Bool
+    @State private var lastFocusToken: UUID?
+
+    var body: some View {
+        TextField(placeholder, text: $text)
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(IMColors.textPrimary)
+            .textFieldStyle(.plain)
+            .focused($isFocused)
+            .onSubmit { onSubmit() }
+            .onChange(of: focusToken) { _, newToken in
+                if lastFocusToken != newToken {
+                    lastFocusToken = newToken
+                    isFocused = true
+                }
+            }
+    }
+}
+#endif
 
 struct ComposerIconButton: View {
     let systemImage: String

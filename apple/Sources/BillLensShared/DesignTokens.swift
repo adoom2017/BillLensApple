@@ -14,6 +14,15 @@ enum AppPage: String {
         case .assets: "资产管理"
         }
     }
+
+    var icon: String {
+        switch self {
+        case .entry: "square.and.pencil"
+        case .ledger: "list.bullet.rectangle"
+        case .subscriptions: "repeat.circle"
+        case .assets: "chart.pie"
+        }
+    }
 }
 
 enum LayoutMetrics {

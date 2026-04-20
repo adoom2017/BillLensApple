@@ -1,0 +1,77 @@
+name: BillLensApple
+options:
+  bundleIdPrefix: com.shendongchun
+  createIntermediateGroups: true
+  defaultConfig: Debug
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "14.0"
+
+packages:
+  BillLensApple:
+    path: .
+
+targets:
+
+  BillLensIOSApp:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - Sources/BillLensIOSApp
+    info:
+      path: Sources/BillLensIOSApp/Info.plist
+      properties:
+        CFBundleName: 账单助手
+        CFBundleDisplayName: 账单助手
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        "UISupportedInterfaceOrientations~ipad":
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSMicrophoneUsageDescription: 账单助手需要麦克风权限来录制语音并识别账单信息。
+        NSSpeechRecognitionUsageDescription: 账单助手需要语音识别权限来将您的语音转换为文字录入账单。
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shendongchun.BillLensApple
+        SWIFT_VERSION: 6.0
+        SWIFT_STRICT_CONCURRENCY: complete
+      configs:
+        Debug:
+          OTHER_LDFLAGS: "$(inherited) -L$(SRCROOT)/../rust/target/aarch64-apple-ios-sim/debug -lbilllens_ffi"
+        Release:
+          OTHER_LDFLAGS: "$(inherited) -L$(SRCROOT)/../rust/target/aarch64-apple-ios/release -lbilllens_ffi"
+    dependencies:
+      - package: BillLensApple
+        product: BillLensShared
+      - package: BillLensApple
+        product: BillLensAppleServices
+
+  BillLensMacApp:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - Sources/BillLensMacApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shendongchun.BillLensAppleMac
+        SWIFT_VERSION: 6.0
+        SWIFT_STRICT_CONCURRENCY: complete
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "BillLens 需要麦克风权限以支持语音输入账单。"
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "BillLens 需要语音识别权限以将语音转换为文字。"
+      configs:
+        Debug:
+          OTHER_LDFLAGS: "$(inherited) -L$(SRCROOT)/../rust/target/debug -lbilllens_ffi"
+        Release:
+          OTHER_LDFLAGS: "$(inherited) -L$(SRCROOT)/../rust/target/release -lbilllens_ffi"
+    dependencies:
+      - package: BillLensApple
+        product: BillLensShared
+      - package: BillLensApple
+        product: BillLensAppleServices

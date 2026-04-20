@@ -1,6 +1,10 @@
 import Foundation
 @preconcurrency import Vision
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 
 public protocol ReceiptTextRecognizing: Sendable {
     func recognizeText(from imageURL: URL) async throws -> String
@@ -23,14 +27,21 @@ public enum OCRServiceError: LocalizedError {
 public final class ReceiptOCRService: ReceiptTextRecognizing, @unchecked Sendable {
     public init() {}
 
+    private func loadCGImage(from url: URL) -> CGImage? {
+        #if os(macOS)
+        guard let image = NSImage(contentsOf: url),
+              let data = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: data) else { return nil }
+        return bitmap.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        #else
+        guard let image = UIImage(contentsOfFile: url.path) else { return nil }
+        return image.cgImage
+        #endif
+    }
+
     public func recognizeText(from imageURL: URL) async throws -> String {
         AppLogger.log("ocr.start", "image_url=\(imageURL.path)")
-        guard
-            let image = NSImage(contentsOf: imageURL),
-            let data = image.tiffRepresentation,
-            let bitmap = NSBitmapImageRep(data: data),
-            let cgImage = bitmap.cgImage
-        else {
+        guard let cgImage = loadCGImage(from: imageURL) else {
             AppLogger.log("ocr.error", "failed to load image at \(imageURL.path)")
             throw OCRServiceError.failedToLoadImage
         }

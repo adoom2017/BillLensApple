@@ -131,7 +131,7 @@ pub enum LlmProvider {
 impl LlmProvider {
     pub fn parse(value: &str) -> Result<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "openai" => Ok(Self::OpenAi),
+            "openai" | "llamacpp" => Ok(Self::OpenAi),
             "anthropic" => Ok(Self::Anthropic),
             _ => Err(anyhow!("unsupported llm provider")),
         }
@@ -1099,7 +1099,7 @@ mod tests {
         ));
         assert!(matches!(
             LlmProvider::parse("llamacpp").unwrap(),
-            LlmProvider::LlamaCpp
+            LlmProvider::OpenAi
         ));
         assert!(matches!(
             LlmProvider::parse("anthropic").unwrap(),

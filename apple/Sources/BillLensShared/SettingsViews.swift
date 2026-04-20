@@ -14,6 +14,10 @@ struct SettingsShell: View {
     @State private var isSaving = false
     @State private var saveSuccess = false
     @State private var saveError: String?
+    #if os(iOS)
+    @FocusState private var focusedField: Field?
+    private enum Field { case baseUrl, apiKey, model }
+    #endif
 
     private let providers = ["openai", "anthropic"]
 
@@ -48,6 +52,9 @@ struct SettingsShell: View {
                                 .textFieldStyle(.plain)
                                 .font(.system(size: 13))
                                 .foregroundStyle(IMColors.textPrimary)
+                                #if os(iOS)
+                                .focused($focusedField, equals: .baseUrl)
+                                #endif
                         }
 
                         Divider().opacity(0.25)
@@ -59,11 +66,17 @@ struct SettingsShell: View {
                                         .textFieldStyle(.plain)
                                         .font(.system(size: 13))
                                         .foregroundStyle(IMColors.textPrimary)
+                                        #if os(iOS)
+                                        .focused($focusedField, equals: .apiKey)
+                                        #endif
                                 } else {
                                     SecureField("留空则不鉴权", text: $apiKey)
                                         .textFieldStyle(.plain)
                                         .font(.system(size: 13))
                                         .foregroundStyle(IMColors.textPrimary)
+                                        #if os(iOS)
+                                        .focused($focusedField, equals: .apiKey)
+                                        #endif
                                 }
                                 Button {
                                     showApiKey.toggle()
@@ -83,6 +96,9 @@ struct SettingsShell: View {
                                 .textFieldStyle(.plain)
                                 .font(.system(size: 13))
                                 .foregroundStyle(IMColors.textPrimary)
+                                #if os(iOS)
+                                .focused($focusedField, equals: .model)
+                                #endif
                         }
 
                         Divider().opacity(0.25)
@@ -171,7 +187,12 @@ struct SettingsShell: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
         }
+        #if os(macOS)
         .frame(width: 460)
+        #else
+        .presentationDetents(focusedField == nil ? [.height(420)] : [.large])
+        .presentationDragIndicator(.visible)
+        #endif
         .background(
             LinearGradient(
                 colors: [IMColors.pageBgTop, IMColors.pageBgMid],
