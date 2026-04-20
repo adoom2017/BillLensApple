@@ -742,6 +742,26 @@ impl AppService {
             .map_err(map_internal)
     }
 
+    // ── LLM config management ────────────────────────────────────────────
+
+    pub async fn get_llm_config(&self) -> Result<LlmConfig, CoreError> {
+        if let Some(json) = self.repo.get_setting("llm_config").await.map_err(map_internal)? {
+            if let Ok(cfg) = serde_json::from_str::<LlmConfig>(&json) {
+                return Ok(cfg);
+            }
+        }
+        Ok(LlmConfig::from_env_optional().map_err(map_internal)?.unwrap())
+    }
+
+    pub async fn update_llm_config(&mut self, cfg: LlmConfig) -> Result<(), CoreError> {
+        let new_client = LlmClient::from_config(cfg.clone()).map_err(map_internal)?;
+        let json = serde_json::to_string(&cfg)
+            .map_err(|e| CoreError::Internal(e.to_string()))?;
+        self.repo.set_setting("llm_config", &json).await.map_err(map_internal)?;
+        self.llm = Some(new_client);
+        Ok(())
+    }
+
     /// Process all due subscriptions: create records for each past-due cycle.
     /// Returns the number of records created.
     pub async fn process_due_subscriptions(

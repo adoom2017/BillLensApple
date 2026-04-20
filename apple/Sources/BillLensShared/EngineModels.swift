@@ -1,5 +1,19 @@
 import Foundation
 
+public struct LlmConfigItem: Codable, Sendable {
+    public var baseUrl: String
+    public var apiKey: String
+    public var model: String
+    public var provider: String
+
+    enum CodingKeys: String, CodingKey {
+        case baseUrl = "base_url"
+        case apiKey = "api_key"
+        case model
+        case provider
+    }
+}
+
 public struct EngineEnvelope<T: Decodable>: Decodable {
     public let ok: Bool
     public let data: T?

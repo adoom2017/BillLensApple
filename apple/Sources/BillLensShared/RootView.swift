@@ -7,6 +7,7 @@ public struct RootView: View {
     @EnvironmentObject private var store: BillLensStore
     @State private var selectedPage: AppPage = .entry
     @State private var isImportingImage = false
+    @State private var showSettings = false
 
     public init() {}
 
@@ -157,6 +158,23 @@ public struct RootView: View {
             .clipShape(Capsule())
             .shadow(
                 color: IMColors.headerShadow.opacity(0.08), radius: 12, y: 4)
+
+            Button {
+                showSettings = true
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(IMColors.textMuted)
+                    .frame(width: 32, height: 32)
+                    .background(.white.opacity(0.82))
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(IMColors.headerTabBorder, lineWidth: 1))
+                    .shadow(color: IMColors.headerShadow.opacity(0.08), radius: 8, y: 2)
+            }
+            .buttonStyle(.plain)
+            .sheet(isPresented: $showSettings) {
+                SettingsShell().environmentObject(store)
+            }
         }
     }
 

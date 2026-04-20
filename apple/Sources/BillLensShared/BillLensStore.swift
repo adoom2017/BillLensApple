@@ -40,6 +40,7 @@ public final class BillLensStore: ObservableObject {
     @Published public var selectedSubscriptionId: String?
     @Published public var assets: [AssetItem] = []
     @Published public var selectedAssetId: String?
+    @Published public var llmConfig: LlmConfigItem?
 
     public let speechService = SpeechCaptureService.shared
 
@@ -426,6 +427,25 @@ public final class BillLensStore: ObservableObject {
             self.statusText = "快照已删除"
             AppLogger.log("asset_snapshot.delete", "id=\(snapshotId)")
         }
+    }
+
+    // ── LLM config ──────────────────────────────────────────────────────
+
+    public func loadLlmConfig() async throws {
+        let cfg: LlmConfigItem = try await bridge.sendAsync(["action": "get_llm_config"])
+        llmConfig = cfg
+    }
+
+    public func updateLlmConfig(_ cfg: LlmConfigItem) async throws {
+        let _: [String: String] = try await bridge.sendAsync([
+            "action": "update_llm_config",
+            "base_url": cfg.baseUrl,
+            "api_key": cfg.apiKey,
+            "model": cfg.model,
+            "provider": cfg.provider
+        ])
+        llmConfig = cfg
+        AppLogger.log("llm_config.update", "model=\(cfg.model) provider=\(cfg.provider)")
     }
 
     public func refreshLedger() async throws {

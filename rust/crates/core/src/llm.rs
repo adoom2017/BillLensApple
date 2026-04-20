@@ -112,7 +112,7 @@ impl LlmConfig {
             env::var("LLM_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:8080/v1".to_string());
         let api_key = env::var("LLM_API_KEY").unwrap_or_default();
         let model = env::var("LLM_MODEL").unwrap_or_else(|_| "qwen-local".to_string());
-        let provider = env::var("LLM_PROVIDER").unwrap_or_else(|_| "llamacpp".to_string());
+        let provider = env::var("LLM_PROVIDER").unwrap_or_else(|_| "openai".to_string());
         Ok(Some(Self {
             base_url,
             api_key,
@@ -126,7 +126,6 @@ impl LlmConfig {
 pub enum LlmProvider {
     OpenAi,
     Anthropic,
-    LlamaCpp,
 }
 
 impl LlmProvider {
@@ -134,7 +133,6 @@ impl LlmProvider {
         match value.trim().to_ascii_lowercase().as_str() {
             "openai" => Ok(Self::OpenAi),
             "anthropic" => Ok(Self::Anthropic),
-            "llamacpp" => Ok(Self::LlamaCpp),
             _ => Err(anyhow!("unsupported llm provider")),
         }
     }
@@ -145,7 +143,6 @@ impl fmt::Display for LlmProvider {
         let value = match self {
             Self::OpenAi => "openai",
             Self::Anthropic => "anthropic",
-            Self::LlamaCpp => "llamacpp",
         };
         f.write_str(value)
     }
@@ -263,10 +260,6 @@ impl LlmClient {
                 "/chat/completions",
                 build_openai_request_body(&self.model, system_prompt, text),
             ),
-            LlmProvider::LlamaCpp => (
-                "/chat/completions",
-                build_llamacpp_request_body(&self.model, system_prompt, text),
-            ),
             LlmProvider::Anthropic => (
                 "/messages",
                 build_anthropic_request_body(&self.model, system_prompt, text),
@@ -281,7 +274,7 @@ impl LlmClient {
         logger::info("llm.http", format!("url={url}"));
         let request = self.http.post(url).header(CONTENT_TYPE, "application/json");
         let request = match self.provider {
-            LlmProvider::OpenAi | LlmProvider::LlamaCpp => {
+            LlmProvider::OpenAi => {
                 if self.api_key.trim().is_empty() {
                     request
                 } else {
@@ -349,10 +342,6 @@ fn build_openai_request_body(model: &str, system_prompt: String, text: String) -
     })
 }
 
-fn build_llamacpp_request_body(model: &str, system_prompt: String, text: String) -> Value {
-    build_openai_request_body(model, system_prompt, text)
-}
-
 fn build_anthropic_request_body(model: &str, system_prompt: String, text: String) -> Value {
     json!({
         "model": model,
@@ -372,7 +361,7 @@ fn build_anthropic_request_body(model: &str, system_prompt: String, text: String
 
 fn extract_message_content(provider: &LlmProvider, raw_response: &Value) -> Result<String> {
     match provider {
-        LlmProvider::OpenAi | LlmProvider::LlamaCpp => extract_openai_message_content(raw_response),
+        LlmProvider::OpenAi => extract_openai_message_content(raw_response),
         LlmProvider::Anthropic => extract_anthropic_message_content(raw_response),
     }
 }

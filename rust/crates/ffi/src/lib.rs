@@ -117,6 +117,13 @@ enum EngineRequest {
         profile_id: String,
         snapshot_id: String,
     },
+    GetLlmConfig,
+    UpdateLlmConfig {
+        base_url: String,
+        api_key: String,
+        model: String,
+        provider: String,
+    },
 }
 
 fn runtime() -> &'static Runtime {
@@ -192,11 +199,25 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
         } => {
             let db_path = PathBuf::from(database_path);
             let repo = runtime().block_on(BillRepository::connect(&db_path))?;
+            // DB config takes priority over env-provided config; seed DB with env config on first launch
+            let db_llm_json = runtime().block_on(repo.get_setting("llm_config"))?;
+            let db_llm: Option<LlmConfig> =
+                db_llm_json.as_deref().and_then(|s| serde_json::from_str(s).ok());
+            let resolved_llm = if let Some(db_cfg) = db_llm {
+                Some(db_cfg)
+            } else if let Some(env_cfg) = llm {
+                let json =
+                    serde_json::to_string(&env_cfg).context("failed to serialize env llm config")?;
+                runtime().block_on(repo.set_setting("llm_config", &json))?;
+                Some(env_cfg)
+            } else {
+                None
+            };
             let app = AppService::new(
                 repo,
                 EngineBootstrap {
                     device_id,
-                    llm,
+                    llm: resolved_llm,
                     log_file_path,
                 },
             )?;
@@ -378,6 +399,29 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
                 runtime().block_on(app.delete_asset_snapshot(&profile_id, snapshot_id))?;
                 Ok(encode_ok(serde_json::json!({})))
             })
+        }
+        EngineRequest::GetLlmConfig => with_app(|app| {
+            let cfg = runtime().block_on(app.get_llm_config())?;
+            Ok(encode_ok(cfg))
+        }),
+        EngineRequest::UpdateLlmConfig {
+            base_url,
+            api_key,
+            model,
+            provider,
+        } => {
+            let cfg = LlmConfig {
+                base_url,
+                api_key,
+                model,
+                provider,
+            };
+            let mut guard = app_slot().write();
+            let app = guard
+                .as_mut()
+                .ok_or_else(|| anyhow!("engine is not bootstrapped"))?;
+            runtime().block_on(app.update_llm_config(cfg))?;
+            Ok(encode_ok(serde_json::json!({})))
         }
     }
 }

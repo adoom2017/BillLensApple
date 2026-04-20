@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 工作原则
+
+1. **第一性原理**：从原始需求出发，动机不对立刻停，路径非优直接纠正。
+2. **极简沟通**：简单直白语言一次输出。拒绝角色扮演，拒绝分段分口吻，已解决的问题后续不再提。不使用 P0/P1/P2 等术语。
+3. **Let it crash**：发现问题尽早暴露。禁止使用任何降级、兜底、启发式补丁或非严谨通用算法的后处理补救。
+4. **禁止擅自开分支**：严禁私自创建新 worktree。可以给建议，但必须征得用户明确同意后方可操作。
+5. **自检与精简**：每次改动后执行"Review查Bug→第一性原理分析"流程，思考是否有更简单、更稳健的实现。
+6. **结论先行+表格化**：直接给结论和修补方案，多项对比用 Markdown 表格。严禁复读背景，严禁陈述式汇报。
+
 ## Build & Run
 
 Set required environment variables before building:

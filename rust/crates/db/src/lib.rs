@@ -1184,6 +1184,33 @@ impl BillRepository {
         Ok(())
     }
 
+    // ── App settings (generic KV) ───────────────────────────────────────
+
+    pub async fn get_setting(&self, key: &str) -> Result<Option<String>> {
+        let row = sqlx::query("SELECT value FROM app_settings WHERE key = ?1")
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await
+            .context("failed to load setting")?;
+        Ok(row.map(|r| r.get::<String, _>("value")))
+    }
+
+    pub async fn set_setting(&self, key: &str, value: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO app_settings (key, value, updated_at)
+            VALUES (?1, ?2, datetime('now'))
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(key)
+        .bind(value)
+        .execute(&self.pool)
+        .await
+        .context("failed to save setting")?;
+        Ok(())
+    }
+
     async fn enqueue_sync_event(
         &self,
         profile_id: &str,
