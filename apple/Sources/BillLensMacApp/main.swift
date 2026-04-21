@@ -9,9 +9,14 @@ final class BillLensAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
         RustBridge.registerSttBackend()
+        NSApp.registerForRemoteNotifications()
         Task { @MainActor in
             await SpeechCaptureService.shared.bootstrapPermissions()
         }
+    }
+
+    func application(_ application: NSApplication, didReceiveRemoteNotification userInfo: [String: Any]) {
+        CloudKitSyncService.shared.handleRemoteNotification()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

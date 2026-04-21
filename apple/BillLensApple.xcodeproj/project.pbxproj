@@ -20,8 +20,10 @@
 		3E86FB5C63FA63F9EE21FBEC /* apple */ = {isa = PBXFileReference; lastKnownFileType = folder; name = apple; path = .; sourceTree = SOURCE_ROOT; };
 		5FF3181BDBF6416114DCA583 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		6F653F9DED3ABDD79B39CC0F /* BillLensIOSApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BillLensIOSApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		87EBA2BB967BFCF4CF588E43 /* BillLensIOSApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BillLensIOSApp.entitlements; sourceTree = "<group>"; };
 		968DF4D9C5C6410DB7CF0700 /* BillLensIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillLensIOSApp.swift; sourceTree = "<group>"; };
 		97B3DA48E7488EB0FE84B575 /* BillLensMacApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BillLensMacApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EC4026DC417A2924A359DAC3 /* BillLensMacApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BillLensMacApp.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -49,6 +51,7 @@
 		0B2B26E3025DBCEB5A202978 /* BillLensIOSApp */ = {
 			isa = PBXGroup;
 			children = (
+				87EBA2BB967BFCF4CF588E43 /* BillLensIOSApp.entitlements */,
 				968DF4D9C5C6410DB7CF0700 /* BillLensIOSApp.swift */,
 				30C9F5D7068F7F964F10475D /* Info.plist */,
 			);
@@ -75,6 +78,7 @@
 		6F92965C9BD3B1FCEBB0917D /* BillLensMacApp */ = {
 			isa = PBXGroup;
 			children = (
+				EC4026DC417A2924A359DAC3 /* BillLensMacApp.entitlements */,
 				5FF3181BDBF6416114DCA583 /* main.swift */,
 			);
 			path = BillLensMacApp;
@@ -199,6 +203,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Sources/BillLensMacApp/BillLensMacApp.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "BillLens 需要麦克风权限以支持语音输入账单。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "BillLens 需要语音识别权限以将语音转换为文字。";
@@ -219,6 +224,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Sources/BillLensMacApp/BillLensMacApp.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "BillLens 需要麦克风权限以支持语音输入账单。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "BillLens 需要语音识别权限以将语音转换为文字。";
@@ -239,7 +245,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Sources/BillLensIOSApp/BillLensIOSApp.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 				INFOPLIST_FILE = Sources/BillLensIOSApp/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -315,7 +323,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Sources/BillLensIOSApp/BillLensIOSApp.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 				INFOPLIST_FILE = Sources/BillLensIOSApp/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (

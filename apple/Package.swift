@@ -3,9 +3,12 @@ import PackageDescription
 import Foundation
 
 let rustBuildMode = ProcessInfo.processInfo.environment["RUST_BUILD_MODE"] ?? "debug"
+let includeIOSApp = ProcessInfo.processInfo.environment["BILLLENS_INCLUDE_IOS_SPM"] == "1"
 
+// SwiftPM 默认只构建宿主 macOS app，避免 macOS swift build 链接 iOS Rust 库。
+// 需要直接用 SwiftPM 构建 iOS target 时，设置 BILLLENS_INCLUDE_IOS_SPM=1。
 // RUST_TARGET 仅影响 BillLensIOSApp 的链接路径，BillLensMacApp 始终链接 macOS 库。
-//   未设置 / "macos"  → (BillLensIOSApp 默认 ios-sim)
+//   未设置          → BillLensIOSApp 默认 ios-sim
 //   "ios-sim"         → aarch64-apple-ios-sim
 //   "ios"             → aarch64-apple-ios
 let rustTarget = ProcessInfo.processInfo.environment["RUST_TARGET"] ?? "ios-sim"
@@ -17,52 +20,63 @@ let iosLibPath: String = {
     }
 }()
 
-let package = Package(
-    name: "BillLensApple",
-    platforms: [.macOS(.v14), .iOS(.v17)],
-    products: [
-        .executable(name: "BillLensMacApp", targets: ["BillLensMacApp"]),
-        .executable(name: "BillLensIOSApp", targets: ["BillLensIOSApp"]),
-        .library(name: "BillLensShared", targets: ["BillLensShared"]),
-        .library(name: "BillLensAppleServices", targets: ["BillLensAppleServices"]),
-    ],
-    targets: [
-        .target(
-            name: "CBillLensRustBridge",
-            publicHeadersPath: "include"
-        ),
-        .target(
-            name: "BillLensAppleServices",
-            dependencies: []
-        ),
-        // BillLensShared 只声明框架依赖，Rust 静态库由各自的 executable 链接
-        .target(
-            name: "BillLensShared",
-            dependencies: ["CBillLensRustBridge", "BillLensAppleServices"],
-            linkerSettings: [
-                .linkedFramework("Speech"),
-                .linkedFramework("AVFoundation"),
-                .linkedFramework("Vision"),
-                .linkedFramework("AppKit", .when(platforms: [.macOS])),
-                .linkedFramework("UIKit", .when(platforms: [.iOS])),
-            ]
-        ),
-        // macOS 可执行文件：始终链接 macOS Rust 静态库
-        .executableTarget(
-            name: "BillLensMacApp",
-            dependencies: ["BillLensShared", "BillLensAppleServices"],
-            linkerSettings: [
-                .unsafeFlags(["-L", macosLibPath, "-lbilllens_ffi"]),
-            ]
-        ),
-        // iOS 可执行文件：链接 iOS Rust 静态库（由 RUST_TARGET 控制 sim / device）
+var products: [Product] = [
+    .executable(name: "BillLensMacApp", targets: ["BillLensMacApp"]),
+    .library(name: "BillLensShared", targets: ["BillLensShared"]),
+    .library(name: "BillLensAppleServices", targets: ["BillLensAppleServices"]),
+]
+
+var targets: [Target] = [
+    .target(
+        name: "CBillLensRustBridge",
+        publicHeadersPath: "include"
+    ),
+    .target(
+        name: "BillLensAppleServices",
+        dependencies: []
+    ),
+    // BillLensShared 只声明框架依赖，Rust 静态库由各自的 executable 链接
+    .target(
+        name: "BillLensShared",
+        dependencies: ["CBillLensRustBridge", "BillLensAppleServices"],
+        linkerSettings: [
+            .linkedFramework("Speech"),
+            .linkedFramework("AVFoundation"),
+            .linkedFramework("Vision"),
+            .linkedFramework("CloudKit"),
+            .linkedFramework("AppKit", .when(platforms: [.macOS])),
+            .linkedFramework("UIKit", .when(platforms: [.iOS])),
+        ]
+    ),
+    // macOS 可执行文件：始终链接 macOS Rust 静态库
+    .executableTarget(
+        name: "BillLensMacApp",
+        dependencies: ["BillLensShared", "BillLensAppleServices"],
+        exclude: ["BillLensMacApp.entitlements"],
+        linkerSettings: [
+            .unsafeFlags(["-L", macosLibPath, "-lbilllens_ffi"]),
+        ]
+    ),
+]
+
+if includeIOSApp {
+    products.append(.executable(name: "BillLensIOSApp", targets: ["BillLensIOSApp"]))
+    // iOS 可执行文件：链接 iOS Rust 静态库（由 RUST_TARGET 控制 sim / device）
+    targets.append(
         .executableTarget(
             name: "BillLensIOSApp",
             dependencies: ["BillLensShared", "BillLensAppleServices"],
+            exclude: ["BillLensIOSApp.entitlements", "Info.plist"],
             linkerSettings: [
                 .unsafeFlags(["-L", iosLibPath, "-lbilllens_ffi"]),
             ]
-        ),
-    ]
-)
+        )
+    )
+}
 
+let package = Package(
+    name: "BillLensApple",
+    platforms: [.macOS(.v14), .iOS(.v17)],
+    products: products,
+    targets: targets
+)

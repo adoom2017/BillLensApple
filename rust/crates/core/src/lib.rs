@@ -5,13 +5,13 @@ pub mod stt;
 
 use anyhow::{Result, anyhow};
 pub use billlens_apple_db::{
-    ALL_RECORD_CATEGORIES, ASSET_CATEGORIES, Asset, AssetAck, AssetSnapshot, AssetUpdateInput,
-    AssetWithSnapshots, BillRepository, CategoryStatsItem, ConversationMessage, ConversationRole,
-    DirectionStatsItem, EXPENSE_CATEGORIES, INCOME_CATEGORIES, ParsedAssetInfo, ParsedRecordPayload,
-    Record, RecordCreate, RecordDirection, RecordDraft, RecordDraftStatus, RecordDraftUpdate,
-    RecordsStatsRange, RecordsStatsResponse, RecordsSummary, Subscription, SubscriptionCreate,
-    SubscriptionCycle, SubscriptionUpdate, advance_next_due, is_valid_asset_category,
-    is_valid_record_category, is_valid_record_category_for_direction,
+    ALL_RECORD_CATEGORIES, ASSET_CATEGORIES, AppSetting, Asset, AssetAck, AssetSnapshot,
+    AssetUpdateInput, AssetWithSnapshots, BillRepository, CategoryStatsItem, ConversationMessage,
+    ConversationRole, DirectionStatsItem, EXPENSE_CATEGORIES, EntityKind, INCOME_CATEGORIES,
+    ParsedAssetInfo, ParsedRecordPayload, Record, RecordCreate, RecordDirection, RecordDraft,
+    RecordDraftStatus, RecordDraftUpdate, RecordsStatsRange, RecordsStatsResponse, RecordsSummary,
+    Subscription, SubscriptionCreate, SubscriptionCycle, SubscriptionUpdate, advance_next_due,
+    is_valid_asset_category, is_valid_record_category, is_valid_record_category_for_direction,
 };
 use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, TimeZone, Utc};
 use fx::{FxClient, resolve_fx_rate};
@@ -110,6 +110,88 @@ pub struct EngineBootstrap {
     pub log_file_path: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncDirtyItem {
+    pub entity_type: EntityKind,
+    pub id: String,
+    pub payload: String,
+    pub sync_version: i64,
+}
+
+impl SyncDirtyItem {
+    fn from_record(r: Record) -> anyhow::Result<Self> {
+        Self::new(EntityKind::Record, r.id.to_string(), r.sync_version, &r)
+    }
+    fn from_subscription(s: Subscription) -> anyhow::Result<Self> {
+        Self::new(
+            EntityKind::Subscription,
+            s.id.to_string(),
+            s.sync_version,
+            &s,
+        )
+    }
+    fn from_asset(a: Asset) -> anyhow::Result<Self> {
+        Self::new(EntityKind::Asset, a.id.to_string(), a.sync_version, &a)
+    }
+    fn from_asset_snapshot(s: AssetSnapshot) -> anyhow::Result<Self> {
+        Self::new(
+            EntityKind::AssetSnapshot,
+            s.id.to_string(),
+            s.sync_version,
+            &s,
+        )
+    }
+    fn from_app_setting(s: AppSetting) -> anyhow::Result<Self> {
+        Self::new(EntityKind::AppSetting, s.key.clone(), s.sync_version, &s)
+    }
+    fn new(
+        entity_type: EntityKind,
+        id: String,
+        sync_version: i64,
+        payload: &impl Serialize,
+    ) -> anyhow::Result<Self> {
+        Ok(Self {
+            entity_type,
+            id,
+            payload: serde_json::to_string(payload)?,
+            sync_version,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SyncDirtyBatch {
+    pub records: Vec<SyncDirtyItem>,
+    pub subscriptions: Vec<SyncDirtyItem>,
+    pub assets: Vec<SyncDirtyItem>,
+    pub asset_snapshots: Vec<SyncDirtyItem>,
+    pub app_settings: Vec<SyncDirtyItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncMarkSyncedEntry {
+    pub entity_type: EntityKind,
+    pub id: String,
+    pub synced_version: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncRemoteEntry {
+    pub entity_type: EntityKind,
+    pub payload: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncApplyResult {
+    pub applied: u32,
+    pub skipped: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncStatus {
+    pub pending_count: i64,
+}
+
 #[derive(Clone)]
 pub struct AppService {
     repo: BillRepository,
@@ -132,28 +214,6 @@ impl AppService {
 
     pub async fn bootstrap(&self, profile_id: &str) -> Result<()> {
         self.repo.ensure_sync_state(profile_id).await?;
-        // Clean up stale sync_outbox entries (no cloud sync yet)
-        if let Ok(cleaned) = self.repo.cleanup_old_sync_events(profile_id, 30).await {
-            if cleaned > 0 {
-                logger::info(
-                    "bootstrap",
-                    format!("cleaned {cleaned} stale sync_outbox entries"),
-                );
-            }
-        }
-        // Process any overdue subscription charges
-        match self.process_due_subscriptions(profile_id).await {
-            Ok(summaries) if !summaries.is_empty() => {
-                logger::info(
-                    "bootstrap",
-                    format!("auto-charged {} subscription records", summaries.len()),
-                );
-            }
-            Err(e) => {
-                logger::error("bootstrap.subscriptions", e.to_string());
-            }
-            _ => {}
-        }
         Ok(())
     }
 
@@ -242,10 +302,7 @@ impl AppService {
         let mut bill_payloads: Vec<ParsedRecordPayload> = Vec::with_capacity(payloads.len());
         for payload in payloads.iter() {
             if let Some(ref asset_info) = payload.asset_info {
-                match self
-                    .upsert_asset_from_payload(profile_id, asset_info)
-                    .await
-                {
+                match self.upsert_asset_from_payload(profile_id, asset_info).await {
                     Ok(ack) => {
                         logger::info(
                             "submit_text.asset",
@@ -339,7 +396,12 @@ impl AppService {
                     };
                     if let Err(e) = self
                         .repo
-                        .create_subscription(Uuid::new_v4(), profile_id, sub_create)
+                        .create_subscription(
+                            Uuid::new_v4(),
+                            profile_id,
+                            &self.device_id,
+                            sub_create,
+                        )
                         .await
                     {
                         logger::error("submit_text.subscription", e.to_string());
@@ -436,7 +498,9 @@ impl AppService {
             return Err(CoreError::bad_request("asset name is required"));
         }
         if info.amount <= 0.0 {
-            return Err(CoreError::bad_request("asset amount must be greater than 0"));
+            return Err(CoreError::bad_request(
+                "asset amount must be greater than 0",
+            ));
         }
         let category = info
             .category
@@ -454,7 +518,7 @@ impl AppService {
         };
         let asset = self
             .repo
-            .find_or_create_asset(profile_id, name, &category, &currency)
+            .find_or_create_asset(profile_id, &self.device_id, name, &category, &currency)
             .await
             .map_err(map_internal)?;
         let (_snapshot, created) = self
@@ -462,6 +526,7 @@ impl AppService {
             .upsert_asset_snapshot(
                 asset.id,
                 profile_id,
+                &self.device_id,
                 &recorded_on,
                 info.amount,
                 info.note.as_deref(),
@@ -745,19 +810,28 @@ impl AppService {
     // ── LLM config management ────────────────────────────────────────────
 
     pub async fn get_llm_config(&self) -> Result<LlmConfig, CoreError> {
-        if let Some(json) = self.repo.get_setting("llm_config").await.map_err(map_internal)? {
+        if let Some(json) = self
+            .repo
+            .get_setting("llm_config")
+            .await
+            .map_err(map_internal)?
+        {
             if let Ok(cfg) = serde_json::from_str::<LlmConfig>(&json) {
                 return Ok(cfg);
             }
         }
-        Ok(LlmConfig::from_env_optional().map_err(map_internal)?.unwrap())
+        Ok(LlmConfig::from_env_optional()
+            .map_err(map_internal)?
+            .unwrap())
     }
 
     pub async fn update_llm_config(&mut self, cfg: LlmConfig) -> Result<(), CoreError> {
         let new_client = LlmClient::from_config(cfg.clone()).map_err(map_internal)?;
-        let json = serde_json::to_string(&cfg)
-            .map_err(|e| CoreError::Internal(e.to_string()))?;
-        self.repo.set_setting("llm_config", &json).await.map_err(map_internal)?;
+        let json = serde_json::to_string(&cfg).map_err(|e| CoreError::Internal(e.to_string()))?;
+        self.repo
+            .set_setting_with_device("llm_config", &json, &self.device_id)
+            .await
+            .map_err(map_internal)?;
         self.llm = Some(new_client);
         Ok(())
     }
@@ -872,6 +946,243 @@ impl AppService {
         }
 
         Ok(created_summaries)
+    }
+
+    // ── Sync API ─────────────────────────────────────────────────────────────
+
+    pub async fn sync_list_dirty(
+        &self,
+        profile_id: &str,
+        entity_types: &[EntityKind],
+        limit: i64,
+    ) -> Result<SyncDirtyBatch, CoreError> {
+        let mut batch = SyncDirtyBatch::default();
+        for et in entity_types {
+            match et {
+                EntityKind::Record => {
+                    let rows = self
+                        .repo
+                        .list_dirty_records(profile_id, limit)
+                        .await
+                        .map_err(map_internal)?;
+                    batch.records = rows
+                        .into_iter()
+                        .map(|r| SyncDirtyItem::from_record(r))
+                        .collect::<Result<Vec<_>>>()
+                        .map_err(map_internal)?;
+                }
+                EntityKind::Subscription => {
+                    let rows = self
+                        .repo
+                        .list_dirty_subscriptions(profile_id, limit)
+                        .await
+                        .map_err(map_internal)?;
+                    batch.subscriptions = rows
+                        .into_iter()
+                        .map(|s| SyncDirtyItem::from_subscription(s))
+                        .collect::<Result<Vec<_>>>()
+                        .map_err(map_internal)?;
+                }
+                EntityKind::Asset => {
+                    let rows = self
+                        .repo
+                        .list_dirty_assets(profile_id, limit)
+                        .await
+                        .map_err(map_internal)?;
+                    batch.assets = rows
+                        .into_iter()
+                        .map(|a| SyncDirtyItem::from_asset(a))
+                        .collect::<Result<Vec<_>>>()
+                        .map_err(map_internal)?;
+                }
+                EntityKind::AssetSnapshot => {
+                    let rows = self
+                        .repo
+                        .list_dirty_asset_snapshots(profile_id, limit)
+                        .await
+                        .map_err(map_internal)?;
+                    batch.asset_snapshots = rows
+                        .into_iter()
+                        .map(|s| SyncDirtyItem::from_asset_snapshot(s))
+                        .collect::<Result<Vec<_>>>()
+                        .map_err(map_internal)?;
+                }
+                EntityKind::AppSetting => {
+                    let rows = self
+                        .repo
+                        .list_dirty_settings(limit)
+                        .await
+                        .map_err(map_internal)?;
+                    batch.app_settings = rows
+                        .into_iter()
+                        .map(|s| SyncDirtyItem::from_app_setting(s))
+                        .collect::<Result<Vec<_>>>()
+                        .map_err(map_internal)?;
+                }
+            }
+        }
+        Ok(batch)
+    }
+
+    pub async fn sync_mark_synced(
+        &self,
+        entries: Vec<SyncMarkSyncedEntry>,
+    ) -> Result<u32, CoreError> {
+        let mut records = Vec::new();
+        let mut subscriptions = Vec::new();
+        let mut assets = Vec::new();
+        let mut asset_snapshots = Vec::new();
+        let mut settings = Vec::new();
+
+        for entry in entries {
+            let id_str = &entry.id;
+            match entry.entity_type {
+                EntityKind::Record => {
+                    let id = Uuid::parse_str(id_str)
+                        .map_err(|e| CoreError::BadRequest(e.to_string()))?;
+                    records.push((id, entry.synced_version));
+                }
+                EntityKind::Subscription => {
+                    let id = Uuid::parse_str(id_str)
+                        .map_err(|e| CoreError::BadRequest(e.to_string()))?;
+                    subscriptions.push((id, entry.synced_version));
+                }
+                EntityKind::Asset => {
+                    let id = Uuid::parse_str(id_str)
+                        .map_err(|e| CoreError::BadRequest(e.to_string()))?;
+                    assets.push((id, entry.synced_version));
+                }
+                EntityKind::AssetSnapshot => {
+                    let id = Uuid::parse_str(id_str)
+                        .map_err(|e| CoreError::BadRequest(e.to_string()))?;
+                    asset_snapshots.push((id, entry.synced_version));
+                }
+                EntityKind::AppSetting => {
+                    settings.push((id_str.to_string(), entry.synced_version));
+                }
+            }
+        }
+
+        let count = self
+            .repo
+            .mark_records_synced(&records)
+            .await
+            .map_err(map_internal)?
+            + self
+                .repo
+                .mark_subscriptions_synced(&subscriptions)
+                .await
+                .map_err(map_internal)?
+            + self
+                .repo
+                .mark_assets_synced(&assets)
+                .await
+                .map_err(map_internal)?
+            + self
+                .repo
+                .mark_asset_snapshots_synced(&asset_snapshots)
+                .await
+                .map_err(map_internal)?
+            + self
+                .repo
+                .mark_settings_synced(&settings)
+                .await
+                .map_err(map_internal)?;
+
+        u32::try_from(count)
+            .map_err(|_| CoreError::Internal("marked sync count overflowed u32".to_string()))
+    }
+
+    pub async fn sync_apply_remote(
+        &self,
+        entries: Vec<SyncRemoteEntry>,
+    ) -> Result<SyncApplyResult, CoreError> {
+        let mut applied = 0u32;
+        let mut skipped = 0u32;
+        for entry in entries {
+            let did_apply = match entry.entity_type {
+                EntityKind::Record => {
+                    let remote: Record = serde_json::from_str(&entry.payload)
+                        .map_err(|e| CoreError::BadRequest(e.to_string()))?;
+                    self.repo
+                        .apply_remote_record(remote)
+                        .await
+                        .map_err(map_internal)?
+                }
+                EntityKind::Subscription => {
+                    let remote: Subscription = serde_json::from_str(&entry.payload)
+                        .map_err(|e| CoreError::BadRequest(e.to_string()))?;
+                    self.repo
+                        .apply_remote_subscription(remote)
+                        .await
+                        .map_err(map_internal)?
+                }
+                EntityKind::Asset => {
+                    let remote: Asset = serde_json::from_str(&entry.payload)
+                        .map_err(|e| CoreError::BadRequest(e.to_string()))?;
+                    self.repo
+                        .apply_remote_asset(remote)
+                        .await
+                        .map_err(map_internal)?
+                }
+                EntityKind::AssetSnapshot => {
+                    let remote: AssetSnapshot = serde_json::from_str(&entry.payload)
+                        .map_err(|e| CoreError::BadRequest(e.to_string()))?;
+                    self.repo
+                        .apply_remote_asset_snapshot(remote)
+                        .await
+                        .map_err(map_internal)?
+                }
+                EntityKind::AppSetting => {
+                    let remote: AppSetting = serde_json::from_str(&entry.payload)
+                        .map_err(|e| CoreError::BadRequest(e.to_string()))?;
+                    self.repo
+                        .apply_remote_setting(remote)
+                        .await
+                        .map_err(map_internal)?
+                }
+            };
+            if did_apply {
+                applied += 1;
+            } else {
+                skipped += 1;
+            }
+        }
+        Ok(SyncApplyResult { applied, skipped })
+    }
+
+    pub async fn sync_get_cursor(
+        &self,
+        profile_id: &str,
+        zone: &str,
+    ) -> Result<Option<String>, CoreError> {
+        self.repo
+            .get_sync_cursor(profile_id, zone)
+            .await
+            .map_err(map_internal)
+    }
+
+    pub async fn sync_set_cursor(
+        &self,
+        profile_id: &str,
+        zone: &str,
+        token: Option<&str>,
+    ) -> Result<(), CoreError> {
+        self.repo
+            .set_sync_cursor(profile_id, zone, token)
+            .await
+            .map_err(map_internal)
+    }
+
+    pub async fn sync_status(&self, profile_id: &str) -> Result<SyncStatus, CoreError> {
+        let pending = self
+            .repo
+            .pending_sync_count(profile_id)
+            .await
+            .map_err(map_internal)?;
+        Ok(SyncStatus {
+            pending_count: pending,
+        })
     }
 
     pub async fn ledger(
@@ -1303,7 +1614,11 @@ fn format_asset_acks_summary(acks: &[AssetAck]) -> String {
     let parts: Vec<String> = acks
         .iter()
         .map(|ack| {
-            let verb = if ack.created { "已记录" } else { "已更新" };
+            let verb = if ack.created {
+                "已记录"
+            } else {
+                "已更新"
+            };
             format!(
                 "{verb} {} {} {}（{}）",
                 ack.name,
@@ -1401,8 +1716,8 @@ mod tests {
                 note: None,
                 device_id: "device-a".to_string(),
                 sync_version: 1,
+                synced_version: 1,
                 deleted_at: None,
-                needs_sync: false,
                 created_at: transaction_at,
                 updated_at: transaction_at,
             },
@@ -1418,8 +1733,8 @@ mod tests {
                 note: None,
                 device_id: "device-a".to_string(),
                 sync_version: 1,
+                synced_version: 1,
                 deleted_at: None,
-                needs_sync: false,
                 created_at: transaction_at,
                 updated_at: transaction_at,
             },

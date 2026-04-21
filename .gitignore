@@ -2,6 +2,7 @@
 .DS_Store
 build/
 DerivedData/
+.xcode-derived-data/
 *.xcworkspace
 *.xcuserstate
 *.xccheckout
@@ -17,6 +18,8 @@ project.xcworkspace/
 .build/
 .swiftpm/
 .swift-home/
+.swift-home-verify/
+.swift-build-home/
 Package.resolved
 
 # CocoaPods

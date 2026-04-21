@@ -24,6 +24,10 @@
 	<string>账单助手需要麦克风权限来录制语音并识别账单信息。</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>账单助手需要语音识别权限来将您的语音转换为文字录入账单。</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

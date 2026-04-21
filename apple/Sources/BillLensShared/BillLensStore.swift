@@ -52,7 +52,7 @@ public final class BillLensStore: ObservableObject {
         if let saved = UserDefaults.standard.string(forKey: key) {
             return saved
         }
-        let id = deviceName()
+        let id = stableDeviceIdentifier()
         UserDefaults.standard.set(id, forKey: key)
         return id
     }()
@@ -113,10 +113,23 @@ public final class BillLensStore: ObservableObject {
                 statusText = "已连接本地账本"
                 AppLogger.log("bootstrap", "engine bootstrapped successfully")
                 await Self.loadCategoriesFromRust(bridge: bridge)
-                try await refreshHome()
-                try await refreshLedger()
-                try await loadSubscriptions()
-                try await loadAssets()
+                async let pullOK = CloudKitSyncService.shared.pullSync(bridge: bridge, profileID: profileID)
+                async let home: Void = refreshHome()
+                async let ledger: Void = refreshLedger()
+                async let subs: Void = loadSubscriptions()
+                async let assetsLoad: Void = loadAssets()
+                _ = try await (home, ledger, subs, assetsLoad)
+
+                // Pull must succeed before charging to avoid double-charges on multi-device setups.
+                if await pullOK {
+                    let _: [String: Int] = (try? await bridge.sendAsync([
+                        "action": "process_due_subscriptions",
+                        "profile_id": profileID
+                    ])) ?? [:]
+                    try await refreshLedger()
+                    try await loadSubscriptions()
+                }
+                CloudKitSyncService.shared.schedulePush()
             } catch {
                 AppLogger.log("bootstrap.error", error.localizedDescription)
                 errorText = error.localizedDescription
@@ -154,6 +167,7 @@ public final class BillLensStore: ObservableObject {
             AppLogger.log("entry.text.result", "auto_confirmed=\(result.autoConfirmed) parsed=\(String(describing: result.parsed)) subscription=\(result.subscriptionCreated) asset_acks=\(result.assetAcks?.count ?? 0)")
             try await self.refreshLedger()
             self.finishProgress()
+            if result.autoConfirmed { CloudKitSyncService.shared.schedulePush() }
         }
     }
 
@@ -240,6 +254,7 @@ public final class BillLensStore: ObservableObject {
             try await self.refreshLedger()
             self.statusText = "账单已入库"
             AppLogger.log("draft.confirm", "draft_id=\(draft.id)")
+            CloudKitSyncService.shared.schedulePush()
         }
     }
 
@@ -254,6 +269,7 @@ public final class BillLensStore: ObservableObject {
             try await self.refreshLedger()
             self.statusText = "已批量入库"
             AppLogger.log("draft.confirm_all", "count=\(self.drafts.count)")
+            CloudKitSyncService.shared.schedulePush()
         }
     }
 
@@ -287,6 +303,7 @@ public final class BillLensStore: ObservableObject {
             try await self.refreshLedger()
             self.statusText = "账单已删除"
             AppLogger.log("record.delete", "record_id=\(recordId)")
+            CloudKitSyncService.shared.schedulePush()
         }
     }
 
@@ -323,6 +340,7 @@ public final class BillLensStore: ObservableObject {
             try await self.loadSubscriptions()
             self.statusText = "订阅已暂停"
             AppLogger.log("subscription.pause", "id=\(subscriptionId)")
+            CloudKitSyncService.shared.schedulePush()
         }
     }
 
@@ -336,6 +354,7 @@ public final class BillLensStore: ObservableObject {
             try await self.loadSubscriptions()
             self.statusText = "订阅已恢复"
             AppLogger.log("subscription.resume", "id=\(subscriptionId)")
+            CloudKitSyncService.shared.schedulePush()
         }
     }
 
@@ -352,6 +371,7 @@ public final class BillLensStore: ObservableObject {
             try await self.loadSubscriptions()
             self.statusText = "订阅已删除"
             AppLogger.log("subscription.delete", "id=\(subscriptionId)")
+            CloudKitSyncService.shared.schedulePush()
         }
     }
 
@@ -369,6 +389,7 @@ public final class BillLensStore: ObservableObject {
             try await self.loadSubscriptions()
             self.statusText = "订阅已更新"
             AppLogger.log("subscription.update", "id=\(subscriptionId)")
+            CloudKitSyncService.shared.schedulePush()
         }
     }
 
@@ -397,6 +418,7 @@ public final class BillLensStore: ObservableObject {
             try await self.loadAssets()
             self.statusText = "资产已更新"
             AppLogger.log("asset.update", "id=\(assetId)")
+            CloudKitSyncService.shared.schedulePush()
         }
     }
 
@@ -413,6 +435,7 @@ public final class BillLensStore: ObservableObject {
             try await self.loadAssets()
             self.statusText = "资产已删除"
             AppLogger.log("asset.delete", "id=\(assetId)")
+            CloudKitSyncService.shared.schedulePush()
         }
     }
 
@@ -426,6 +449,7 @@ public final class BillLensStore: ObservableObject {
             try await self.loadAssets()
             self.statusText = "快照已删除"
             AppLogger.log("asset_snapshot.delete", "id=\(snapshotId)")
+            CloudKitSyncService.shared.schedulePush()
         }
     }
 
@@ -446,6 +470,7 @@ public final class BillLensStore: ObservableObject {
         ])
         llmConfig = cfg
         AppLogger.log("llm_config.update", "model=\(cfg.model) provider=\(cfg.provider)")
+        CloudKitSyncService.shared.schedulePush()
     }
 
     public func refreshLedger() async throws {

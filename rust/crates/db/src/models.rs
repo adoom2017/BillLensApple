@@ -8,15 +8,29 @@ pub const EXPENSE_CATEGORIES: &[&str] = &[
 
 pub const INCOME_CATEGORIES: &[&str] = &["工资收入", "投资收益", "报销", "退款", "其他"];
 
-pub const ASSET_CATEGORIES: &[&str] = &[
-    "存款",
-    "现金",
-    "股票",
-    "基金",
-    "加密货币",
-    "房产",
-    "其他",
-];
+pub const ASSET_CATEGORIES: &[&str] = &["存款", "现金", "股票", "基金", "加密货币", "房产", "其他"];
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum EntityKind {
+    Record,
+    Subscription,
+    Asset,
+    AssetSnapshot,
+    AppSetting,
+}
+
+impl EntityKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Record => "record",
+            Self::Subscription => "subscription",
+            Self::Asset => "asset",
+            Self::AssetSnapshot => "asset_snapshot",
+            Self::AppSetting => "app_setting",
+        }
+    }
+}
 
 pub fn is_valid_asset_category(category: &str) -> bool {
     ASSET_CATEGORIES.contains(&category.trim())
@@ -185,8 +199,8 @@ pub struct Record {
     pub note: Option<String>,
     pub device_id: String,
     pub sync_version: i64,
+    pub synced_version: i64,
     pub deleted_at: Option<DateTime<Utc>>,
-    pub needs_sync: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -350,6 +364,9 @@ pub struct Subscription {
     pub last_charged_at: Option<NaiveDate>,
     pub is_active: bool,
     pub deleted_at: Option<DateTime<Utc>>,
+    pub sync_version: i64,
+    pub synced_version: i64,
+    pub device_id: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -390,6 +407,9 @@ pub struct Asset {
     pub currency: String,
     pub note: Option<String>,
     pub deleted_at: Option<DateTime<Utc>>,
+    pub sync_version: i64,
+    pub synced_version: i64,
+    pub device_id: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -402,7 +422,22 @@ pub struct AssetSnapshot {
     pub amount: f64,
     pub recorded_on: String,
     pub note: Option<String>,
+    pub deleted_at: Option<DateTime<Utc>>,
+    pub sync_version: i64,
+    pub synced_version: i64,
+    pub device_id: String,
     pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppSetting {
+    pub key: String,
+    pub value: String,
+    pub sync_version: i64,
+    pub synced_version: i64,
+    pub deleted_at: Option<DateTime<Utc>>,
+    pub device_id: String,
     pub updated_at: DateTime<Utc>,
 }
 

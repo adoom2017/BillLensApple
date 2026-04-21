@@ -108,8 +108,8 @@ public struct RecordItem: Codable, Identifiable {
     public let note: String?
     public let deviceId: String
     public let syncVersion: Int
+    public let syncedVersion: Int
     public let deletedAt: String?
-    public let needsSync: Bool
     public let createdAt: String
     public let updatedAt: String
 
@@ -125,8 +125,8 @@ public struct RecordItem: Codable, Identifiable {
         case note
         case deviceId = "device_id"
         case syncVersion = "sync_version"
+        case syncedVersion = "synced_version"
         case deletedAt = "deleted_at"
-        case needsSync = "needs_sync"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }

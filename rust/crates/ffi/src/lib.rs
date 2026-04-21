@@ -3,8 +3,8 @@ use billlens_apple_core::stt::{
     self, SttBackend, SttCancelFn, SttFreeStringFn, SttStartFn, SttStopFn,
 };
 use billlens_apple_core::{
-    AppService, AssetUpdateInput, DraftInput, EngineBootstrap, EntrySource, LlmConfig,
-    SubscriptionUpdate,
+    AppService, AssetUpdateInput, DraftInput, EngineBootstrap, EntityKind, EntrySource, LlmConfig,
+    SubscriptionUpdate, SyncMarkSyncedEntry, SyncRemoteEntry,
 };
 use billlens_apple_db::BillRepository;
 use chrono::{DateTime, FixedOffset};
@@ -124,6 +124,32 @@ enum EngineRequest {
         model: String,
         provider: String,
     },
+    SyncListDirty {
+        profile_id: String,
+        entity_types: Vec<EntityKind>,
+        limit: Option<u32>,
+    },
+    SyncMarkSynced {
+        entries: Vec<SyncMarkSyncedEntry>,
+    },
+    SyncApplyRemote {
+        entries: Vec<SyncRemoteEntry>,
+    },
+    SyncGetCursor {
+        profile_id: String,
+        zone: String,
+    },
+    SyncSetCursor {
+        profile_id: String,
+        zone: String,
+        token: Option<String>,
+    },
+    SyncStatus {
+        profile_id: String,
+    },
+    ProcessDueSubscriptions {
+        profile_id: String,
+    },
 }
 
 fn runtime() -> &'static Runtime {
@@ -201,14 +227,19 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
             let repo = runtime().block_on(BillRepository::connect(&db_path))?;
             // DB config takes priority over env-provided config; seed DB with env config on first launch
             let db_llm_json = runtime().block_on(repo.get_setting("llm_config"))?;
-            let db_llm: Option<LlmConfig> =
-                db_llm_json.as_deref().and_then(|s| serde_json::from_str(s).ok());
+            let db_llm: Option<LlmConfig> = db_llm_json
+                .as_deref()
+                .and_then(|s| serde_json::from_str(s).ok());
             let resolved_llm = if let Some(db_cfg) = db_llm {
                 Some(db_cfg)
             } else if let Some(env_cfg) = llm {
-                let json =
-                    serde_json::to_string(&env_cfg).context("failed to serialize env llm config")?;
-                runtime().block_on(repo.set_setting("llm_config", &json))?;
+                let json = serde_json::to_string(&env_cfg)
+                    .context("failed to serialize env llm config")?;
+                runtime().block_on(repo.set_setting_with_device(
+                    "llm_config",
+                    &json,
+                    &device_id,
+                ))?;
                 Some(env_cfg)
             } else {
                 None
@@ -423,6 +454,46 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
             runtime().block_on(app.update_llm_config(cfg))?;
             Ok(encode_ok(serde_json::json!({})))
         }
+        EngineRequest::SyncListDirty {
+            profile_id,
+            entity_types,
+            limit,
+        } => with_app(|app| {
+            let batch = runtime().block_on(app.sync_list_dirty(
+                &profile_id,
+                &entity_types,
+                limit.unwrap_or(200) as i64,
+            ))?;
+            Ok(encode_ok(batch))
+        }),
+        EngineRequest::SyncMarkSynced { entries } => with_app(|app| {
+            let count = runtime().block_on(app.sync_mark_synced(entries))?;
+            Ok(encode_ok(serde_json::json!({ "marked": count })))
+        }),
+        EngineRequest::SyncApplyRemote { entries } => with_app(|app| {
+            let result = runtime().block_on(app.sync_apply_remote(entries))?;
+            Ok(encode_ok(result))
+        }),
+        EngineRequest::SyncGetCursor { profile_id, zone } => with_app(|app| {
+            let token = runtime().block_on(app.sync_get_cursor(&profile_id, &zone))?;
+            Ok(encode_ok(serde_json::json!({ "token": token })))
+        }),
+        EngineRequest::SyncSetCursor {
+            profile_id,
+            zone,
+            token,
+        } => with_app(|app| {
+            runtime().block_on(app.sync_set_cursor(&profile_id, &zone, token.as_deref()))?;
+            Ok(encode_ok(serde_json::json!({})))
+        }),
+        EngineRequest::SyncStatus { profile_id } => with_app(|app| {
+            let status = runtime().block_on(app.sync_status(&profile_id))?;
+            Ok(encode_ok(status))
+        }),
+        EngineRequest::ProcessDueSubscriptions { profile_id } => with_app(|app| {
+            let summaries = runtime().block_on(app.process_due_subscriptions(&profile_id))?;
+            Ok(encode_ok(serde_json::json!({ "charged": summaries.len() })))
+        }),
     }
 }
 

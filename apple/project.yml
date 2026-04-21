@@ -36,11 +36,22 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         NSMicrophoneUsageDescription: 账单助手需要麦克风权限来录制语音并识别账单信息。
         NSSpeechRecognitionUsageDescription: 账单助手需要语音识别权限来将您的语音转换为文字录入账单。
+        UIBackgroundModes:
+          - remote-notification
+    entitlements:
+      path: Sources/BillLensIOSApp/BillLensIOSApp.entitlements
+      properties:
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.com.shendongchun.BillLensApple
+        com.apple.developer.icloud-services:
+          - CloudKit
+        aps-environment: development
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.shendongchun.BillLensApple
         SWIFT_VERSION: 6.0
         SWIFT_STRICT_CONCURRENCY: complete
+        EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
       configs:
         Debug:
           OTHER_LDFLAGS: "$(inherited) -L$(SRCROOT)/../rust/target/aarch64-apple-ios-sim/debug -lbilllens_ffi"
@@ -58,6 +69,14 @@ targets:
     deploymentTarget: "14.0"
     sources:
       - Sources/BillLensMacApp
+    entitlements:
+      path: Sources/BillLensMacApp/BillLensMacApp.entitlements
+      properties:
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.com.shendongchun.BillLensApple
+        com.apple.developer.icloud-services:
+          - CloudKit
+        aps-environment: development
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.shendongchun.BillLensAppleMac
