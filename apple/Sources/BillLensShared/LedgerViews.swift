@@ -2,6 +2,7 @@ import SwiftUI
 
 struct LedgerShell: View {
     @EnvironmentObject private var store: BillLensStore
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var ledgerMode: LedgerViewMode = .calendar
     @State private var selectedLedgerDate: String?
     @State private var cachedCalendarCells: [LedgerCalendarCell] = []
@@ -11,116 +12,18 @@ struct LedgerShell: View {
     let availableHeight: CGFloat
 
     private let masterWidth: CGFloat = 340
+    private var usesCompactLayout: Bool {
+        #if os(iOS)
+        horizontalSizeClass == .compact
+        #else
+        false
+        #endif
+    }
 
     var body: some View {
         Group {
             if let ledger = store.ledger {
-                HStack(spacing: 0) {
-                    // MARK: - Left Master Panel
-                    VStack(alignment: .leading, spacing: 16) {
-                        // Time preset tabs
-                        HStack(spacing: 4) {
-                            ForEach(LedgerPreset.allCases) { preset in
-                                Button {
-                                    store.applyPreset(preset)
-                                } label: {
-                                    Text(preset.title)
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(
-                                            store.selectedPreset == preset
-                                                ? IMColors.textPrimary
-                                                : IMColors.textSecondary
-                                        )
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 5)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                                .fill(
-                                                    store.selectedPreset == preset
-                                                        ? IMColors.controlBg
-                                                        : Color.clear)
-                                        )
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        if store.selectedPreset == .custom {
-                            HStack(spacing: 6) {
-                                DatePicker("", selection: $store.customStart, displayedComponents: .date)
-                                    .labelsHidden()
-                                    .frame(width: 100)
-                                Text("–")
-                                    .foregroundStyle(IMColors.textMuted)
-                                    .font(.system(size: 12))
-                                DatePicker("", selection: $store.customEnd, displayedComponents: .date)
-                                    .labelsHidden()
-                                    .frame(width: 100)
-                                ActionButton(title: "应用", kind: .ghost) {
-                                    store.applyPreset(.custom)
-                                }
-                            }
-                        }
-
-                        // Stat bar with inset shadow
-                        statBar(ledger)
-
-                        // Calendar or monthly aggregation
-                        if store.selectedPreset == .year {
-                            monthlyAggregationGrid(ledger)
-                        } else {
-                            calendarPanel(ledger)
-                        }
-
-                        // Quick category filters
-                        quickCategoryFilters(ledger)
-                    }
-                    .frame(width: masterWidth)
-                    .padding(14)
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .background(IMColors.panelBg)
-
-                    // MARK: - Grooved Divider
-                    ZStack {
-                        IMColors.dividerLegacy
-                            .frame(width: 1)
-                        Color.white.opacity(0.5)
-                            .frame(width: 1)
-                            .offset(x: 1)
-                    }
-                    .frame(width: 2)
-
-                    // MARK: - Right Detail Panel
-                    VStack(alignment: .leading, spacing: 0) {
-                        // Mode tabs at top of detail (hide "按日" in year mode)
-                        if store.selectedPreset != .year {
-                            HStack(spacing: 4) {
-                                ledgerModeButton(.calendar, title: "按日")
-                                ledgerModeButton(.detail, title: "全部明细")
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.top, 12)
-                            .padding(.bottom, 8)
-
-                            Divider().opacity(0.2)
-                        }
-
-                        Group {
-                            if store.selectedPreset == .year {
-                                detailLedgerView(ledger)
-                            } else {
-                                switch ledgerMode {
-                                case .calendar:
-                                    rightPanelCalendarDetail(ledger)
-                                case .detail:
-                                    detailLedgerView(ledger)
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.white)
-                }
+                ledgerContent(ledger)
                 .onAppear {
                     syncCalendarState(for: ledger)
                     rebuildCalendarCellsIfNeeded(for: ledger)
@@ -163,6 +66,157 @@ struct LedgerShell: View {
             if let record = recordToDelete {
                 Text("确定要删除「\(record.merchant ?? record.category) \(BillLensFormatters.currencyString(record.amount, currencyCode: record.currency))」吗？")
             }
+        }
+    }
+
+    @ViewBuilder
+    private func ledgerContent(_ ledger: LedgerSnapshot) -> some View {
+        if usesCompactLayout {
+            compactLedgerContent(ledger)
+        } else {
+            regularLedgerContent(ledger)
+        }
+    }
+
+    private func regularLedgerContent(_ ledger: LedgerSnapshot) -> some View {
+        HStack(spacing: 0) {
+            masterPanel(ledger)
+                .frame(width: masterWidth)
+                .padding(14)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .background(IMColors.panelBg)
+
+            groovedDivider
+
+            detailPanel(ledger)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.white)
+        }
+    }
+
+    private func compactLedgerContent(_ ledger: LedgerSnapshot) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                masterPanel(ledger)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .background(IMColors.panelBg)
+
+                Divider().opacity(0.2)
+
+                detailPanel(ledger)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .background(Color.white)
+            }
+        }
+        .scrollIndicators(.automatic)
+        .background(Color.white)
+    }
+
+    private func masterPanel(_ ledger: LedgerSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 4) {
+                ForEach(LedgerPreset.allCases) { preset in
+                    Button {
+                        store.applyPreset(preset)
+                    } label: {
+                        Text(preset.title)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(
+                                store.selectedPreset == preset
+                                    ? IMColors.textPrimary
+                                    : IMColors.textSecondary
+                            )
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .fill(
+                                        store.selectedPreset == preset
+                                            ? IMColors.controlBg
+                                            : Color.clear)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if store.selectedPreset == .custom {
+                HStack(spacing: 6) {
+                    DatePicker("", selection: $store.customStart, displayedComponents: .date)
+                        .labelsHidden()
+                        .frame(width: 100)
+                    Text("–")
+                        .foregroundStyle(IMColors.textMuted)
+                        .font(.system(size: 12))
+                    DatePicker("", selection: $store.customEnd, displayedComponents: .date)
+                        .labelsHidden()
+                        .frame(width: 100)
+                    ActionButton(title: "应用", kind: .ghost) {
+                        store.applyPreset(.custom)
+                    }
+                }
+            }
+
+            statBar(ledger)
+
+            if store.selectedPreset == .year {
+                monthlyAggregationGrid(ledger)
+            } else {
+                calendarPanel(ledger)
+            }
+
+            quickCategoryFilters(ledger)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var groovedDivider: some View {
+        ZStack {
+            IMColors.dividerLegacy
+                .frame(width: 1)
+            Color.white.opacity(0.5)
+                .frame(width: 1)
+                .offset(x: 1)
+        }
+        .frame(width: 2)
+    }
+
+    private func detailPanel(_ ledger: LedgerSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if store.selectedPreset != .year {
+                HStack(spacing: 4) {
+                    ledgerModeButton(.calendar, title: "按日")
+                    ledgerModeButton(.detail, title: "全部明细")
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+
+                Divider().opacity(0.2)
+            }
+
+            Group {
+                if store.selectedPreset == .year {
+                    if usesCompactLayout {
+                        detailLedgerContent(ledger)
+                    } else {
+                        detailLedgerView(ledger)
+                    }
+                } else {
+                    switch ledgerMode {
+                    case .calendar:
+                        rightPanelCalendarDetail(ledger)
+                    case .detail:
+                        if usesCompactLayout {
+                            detailLedgerContent(ledger)
+                        } else {
+                            detailLedgerView(ledger)
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: usesCompactLayout ? nil : .infinity)
         }
     }
 
@@ -251,10 +305,14 @@ struct LedgerShell: View {
     private func rightPanelCalendarDetail(_ ledger: LedgerSnapshot) -> some View {
         Group {
             if let selectedGroup = selectedLedgerGroup(in: ledger) {
-                ScrollView {
+                if usesCompactLayout {
                     ledgerDayDetail(selectedGroup, statsCurrency: ledger.statsCurrency)
+                } else {
+                    ScrollView {
+                        ledgerDayDetail(selectedGroup, statsCurrency: ledger.statsCurrency)
+                    }
+                    .scrollIndicators(.automatic)
                 }
-                .scrollIndicators(.automatic)
             } else {
                 VStack(spacing: 10) {
                     Spacer()
@@ -507,38 +565,42 @@ struct LedgerShell: View {
 
     private func detailLedgerView(_ ledger: LedgerSnapshot) -> some View {
         ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(ledger.byDay) { day in
-                    let records = filteredRecords(day.records)
-                    if !records.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(BillLensFormatters.displayDay(day.day))
-                                    .font(.system(size: 15, weight: .bold))
-                                    .foregroundStyle(IMColors.textPrimary)
-                                Spacer()
-                                Text(
-                                    "净额 \(BillLensFormatters.currencyString(day.netAmount, currencyCode: ledger.statsCurrency))"
-                                )
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(
-                                        day.netAmount >= 0
-                                            ? IMColors.income
-                                            : IMColors.accentDark)
-                            }
-                            ForEach(records) { record in
-                                RecordRowView(record: record) { recordToDelete = record }
-                                    .padding(.vertical, 6)
-                            }
+            detailLedgerContent(ledger)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private func detailLedgerContent(_ ledger: LedgerSnapshot) -> some View {
+        LazyVStack(spacing: 0) {
+            ForEach(ledger.byDay) { day in
+                let records = filteredRecords(day.records)
+                if !records.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(BillLensFormatters.displayDay(day.day))
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(IMColors.textPrimary)
+                            Spacer()
+                            Text(
+                                "净额 \(BillLensFormatters.currencyString(day.netAmount, currencyCode: ledger.statsCurrency))"
+                            )
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(
+                                    day.netAmount >= 0
+                                        ? IMColors.income
+                                        : IMColors.accentDark)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        Divider().opacity(0.15).padding(.horizontal, 16)
+                        ForEach(records) { record in
+                            RecordRowView(record: record) { recordToDelete = record }
+                                .padding(.vertical, 6)
+                        }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    Divider().opacity(0.15).padding(.horizontal, 16)
                 }
             }
         }
-        .scrollIndicators(.hidden)
     }
 
     private func filteredRecords(_ records: [RecordItem]) -> [RecordItem] {
