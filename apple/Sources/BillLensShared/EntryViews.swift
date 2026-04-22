@@ -131,8 +131,11 @@ struct ChatScrollView: View {
         GeometryReader { scrollProxy in
             ScrollViewReader { reader in
                 ScrollView {
-                    chatContent(width: max(scrollProxy.size.width - 10, 0))
-                        .padding(.trailing, 10)
+                    chatContent(
+                        width: max(scrollProxy.size.width - 10, 0),
+                        minHeight: scrollProxy.size.height
+                    )
+                    .padding(.trailing, 10)
                 }
                 .scrollIndicators(.hidden)
                 #if os(iOS)
@@ -164,7 +167,7 @@ struct ChatScrollView: View {
         }
     }
 
-    private func chatContent(width: CGFloat) -> some View {
+    private func chatContent(width: CGFloat, minHeight: CGFloat = 0) -> some View {
         LazyVStack(spacing: LayoutMetrics.messageGap) {
             WelcomeBubble()
 
@@ -217,7 +220,9 @@ struct ChatScrollView: View {
 
             Color.clear.frame(height: 1).id("chatBottom")
         }
-        .frame(width: width, alignment: .leading)
+        // minHeight pins messages to the bottom when content is shorter than the chat area,
+        // matching standard chat-app behaviour (WhatsApp/iMessage style).
+        .frame(width: width, minHeight: minHeight, alignment: .bottomLeading)
     }
 }
 

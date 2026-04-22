@@ -4,11 +4,141 @@ import SwiftUI
 
 struct SubscriptionShell: View {
     @EnvironmentObject private var store: BillLensStore
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var subscriptionToDelete: SubscriptionItem? = nil
     @State private var isEditing = false
     @State private var editForm = SubscriptionEditFormState()
+    @State private var isDetailPresented = false
 
     var body: some View {
+        Group {
+            if sizeClass == .compact {
+                compactBody
+            } else {
+                splitBody
+            }
+        }
+        .onAppear {
+            Task { try? await store.loadSubscriptions() }
+        }
+        .alert("确认删除", isPresented: .init(
+            get: { subscriptionToDelete != nil },
+            set: { if !$0 { subscriptionToDelete = nil } }
+        )) {
+            Button("取消", role: .cancel) { subscriptionToDelete = nil }
+            Button("删除", role: .destructive) {
+                if let sub = subscriptionToDelete {
+                    store.deleteSubscription(sub.id)
+                    subscriptionToDelete = nil
+                    isDetailPresented = false
+                }
+            }
+        } message: {
+            Text("删除后将停止自动记账，已生成的账单不会受影响。")
+        }
+        .onChange(of: store.selectedSubscriptionId) {
+            isEditing = false
+        }
+    }
+
+    // MARK: Compact (iPhone): full-width list + sheet detail
+
+    private var compactBody: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("订阅列表")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(IMColors.textPrimary)
+                Spacer()
+                Text("\(store.subscriptions.count) 项")
+                    .font(.system(size: 12))
+                    .foregroundStyle(IMColors.textMuted)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
+
+            Divider().opacity(0.3)
+
+            if store.subscriptions.isEmpty {
+                subscriptionEmptyState
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(store.subscriptions) { sub in
+                            SubscriptionCard(
+                                subscription: sub,
+                                isSelected: store.selectedSubscriptionId == sub.id,
+                                onSelect: {
+                                    store.selectedSubscriptionId = sub.id
+                                    isDetailPresented = true
+                                },
+                                onPause: { store.pauseSubscription(sub.id) },
+                                onResume: { store.resumeSubscription(sub.id) },
+                                onDelete: { subscriptionToDelete = sub }
+                            )
+                        }
+                    }
+                    .padding(14)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(IMColors.panelBg)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(IMColors.divider, lineWidth: 1)
+        )
+        .sheet(isPresented: $isDetailPresented, onDismiss: { store.selectedSubscriptionId = nil }) {
+            compactDetailSheet
+        }
+    }
+
+    @ViewBuilder
+    private var compactDetailSheet: some View {
+        if let sub = store.selectedSubscription {
+            if isEditing {
+                SubscriptionEditPanel(
+                    subscription: sub,
+                    form: $editForm,
+                    onSave: {
+                        let update = SubscriptionUpdateInput(
+                            direction: editForm.direction,
+                            amount: Double(editForm.amount),
+                            currency: editForm.currency.isEmpty ? nil : editForm.currency,
+                            category: editForm.category.isEmpty ? nil : editForm.category,
+                            merchant: editForm.merchant.isEmpty ? nil : editForm.merchant,
+                            note: editForm.note.isEmpty ? nil : editForm.note,
+                            cycle: editForm.cycle,
+                            anchorDay: Int(editForm.anchorDay),
+                            anchorMonth: editForm.cycle == "yearly" ? Int(editForm.anchorMonth) : nil
+                        )
+                        store.updateSubscription(sub.id, update: update)
+                        isEditing = false
+                    },
+                    onCancel: { isEditing = false }
+                )
+                .environmentObject(store)
+            } else {
+                SubscriptionDetailPanel(
+                    subscription: sub,
+                    onEdit: {
+                        hydrateEditForm(from: sub)
+                        isEditing = true
+                    },
+                    onPause: { store.pauseSubscription(sub.id) },
+                    onResume: { store.resumeSubscription(sub.id) },
+                    onDelete: { subscriptionToDelete = sub }
+                )
+                .environmentObject(store)
+            }
+        }
+    }
+
+    // MARK: Regular (iPad/macOS): side-by-side split
+
+    private var splitBody: some View {
         HStack(spacing: 0) {
             // Left: Subscription list
             VStack(alignment: .leading, spacing: 0) {
@@ -114,26 +244,6 @@ struct SubscriptionShell: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(IMColors.divider, lineWidth: 1)
         )
-        .onAppear {
-            Task { try? await store.loadSubscriptions() }
-        }
-        .alert("确认删除", isPresented: .init(
-            get: { subscriptionToDelete != nil },
-            set: { if !$0 { subscriptionToDelete = nil } }
-        )) {
-            Button("取消", role: .cancel) { subscriptionToDelete = nil }
-            Button("删除", role: .destructive) {
-                if let sub = subscriptionToDelete {
-                    store.deleteSubscription(sub.id)
-                    subscriptionToDelete = nil
-                }
-            }
-        } message: {
-            Text("删除后将停止自动记账，已生成的账单不会受影响。")
-        }
-        .onChange(of: store.selectedSubscriptionId) {
-            isEditing = false
-        }
     }
 
     private var subscriptionEmptyState: some View {

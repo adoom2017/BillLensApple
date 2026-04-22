@@ -7,11 +7,138 @@ private let assetCategories = ["存款", "现金", "股票", "基金", "加密�
 
 struct AssetShell: View {
     @EnvironmentObject private var store: BillLensStore
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var assetToDelete: AssetItem? = nil
     @State private var isEditing = false
     @State private var editForm = AssetEditFormState()
+    @State private var isDetailPresented = false
 
     var body: some View {
+        Group {
+            if sizeClass == .compact {
+                compactBody
+            } else {
+                splitBody
+            }
+        }
+        .onAppear {
+            Task { try? await store.loadAssets() }
+        }
+        .alert("确认删除资产", isPresented: .init(
+            get: { assetToDelete != nil },
+            set: { if !$0 { assetToDelete = nil } }
+        )) {
+            Button("取消", role: .cancel) { assetToDelete = nil }
+            Button("删除", role: .destructive) {
+                if let asset = assetToDelete {
+                    store.deleteAsset(asset.id)
+                    assetToDelete = nil
+                    isDetailPresented = false
+                }
+            }
+        } message: {
+            Text("删除资产将同时移除所有历史余额快照，操作不可撤销。")
+        }
+        .onChange(of: store.selectedAssetId) {
+            isEditing = false
+        }
+    }
+
+    // MARK: Compact (iPhone): full-width list + sheet detail
+
+    private var compactBody: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("资产列表")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(IMColors.textPrimary)
+                Spacer()
+                Text("\(store.assets.count) 项")
+                    .font(.system(size: 12))
+                    .foregroundStyle(IMColors.textMuted)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
+
+            Divider().opacity(0.3)
+
+            if store.assets.isEmpty {
+                assetEmptyState
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(store.assets) { asset in
+                            AssetCard(
+                                asset: asset,
+                                isSelected: store.selectedAssetId == asset.id,
+                                onSelect: {
+                                    store.selectedAssetId = asset.id
+                                    isDetailPresented = true
+                                },
+                                onDelete: { assetToDelete = asset }
+                            )
+                        }
+                    }
+                    .padding(14)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(IMColors.panelBg)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(IMColors.divider, lineWidth: 1)
+        )
+        .sheet(isPresented: $isDetailPresented, onDismiss: { store.selectedAssetId = nil }) {
+            compactDetailSheet
+        }
+    }
+
+    @ViewBuilder
+    private var compactDetailSheet: some View {
+        if let asset = store.selectedAsset {
+            if isEditing {
+                AssetEditPanel(
+                    asset: asset,
+                    form: $editForm,
+                    onSave: {
+                        let update = AssetUpdateInput(
+                            name: editForm.name.isEmpty ? nil : editForm.name,
+                            category: editForm.category,
+                            currency: editForm.currency.isEmpty ? nil : editForm.currency,
+                            note: editForm.note.isEmpty ? nil : editForm.note
+                        )
+                        store.updateAsset(asset.id, update: update)
+                        isEditing = false
+                    },
+                    onCancel: { isEditing = false }
+                )
+                .environmentObject(store)
+            } else {
+                AssetDetailPanel(
+                    asset: asset,
+                    onEdit: {
+                        editForm = AssetEditFormState(
+                            name: asset.name,
+                            category: asset.category,
+                            currency: asset.currency,
+                            note: asset.note ?? ""
+                        )
+                        isEditing = true
+                    },
+                    onDelete: { assetToDelete = asset },
+                    onDeleteSnapshot: { store.deleteAssetSnapshot($0) }
+                )
+                .environmentObject(store)
+            }
+        }
+    }
+
+    // MARK: Regular (iPad/macOS): side-by-side split
+
+    private var splitBody: some View {
         HStack(spacing: 0) {
             // Left: Asset list
             VStack(alignment: .leading, spacing: 0) {
@@ -114,26 +241,6 @@ struct AssetShell: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(IMColors.divider, lineWidth: 1)
         )
-        .onAppear {
-            Task { try? await store.loadAssets() }
-        }
-        .alert("确认删除资产", isPresented: .init(
-            get: { assetToDelete != nil },
-            set: { if !$0 { assetToDelete = nil } }
-        )) {
-            Button("取消", role: .cancel) { assetToDelete = nil }
-            Button("删除", role: .destructive) {
-                if let asset = assetToDelete {
-                    store.deleteAsset(asset.id)
-                    assetToDelete = nil
-                }
-            }
-        } message: {
-            Text("删除资产将同时移除所有历史余额快照，操作不可撤销。")
-        }
-        .onChange(of: store.selectedAssetId) {
-            isEditing = false
-        }
     }
 
     private var assetEmptyState: some View {
