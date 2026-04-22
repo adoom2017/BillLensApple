@@ -252,8 +252,7 @@ struct LedgerShell: View {
             .background(
                 statBg
                     .fill(IMColors.statBg)
-                    .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
-                    .overlay(statBg.stroke(Color.black.opacity(0.04), lineWidth: 0.5))
+                    .overlay(statBg.stroke(IMColors.divider, lineWidth: 1))
             )
 
             if let warning = ledger.fxWarning {
@@ -362,21 +361,11 @@ struct LedgerShell: View {
                 .padding(.vertical, 5)
                 .background(
                     Capsule()
-                        .fill(Color.white)
-                        .shadow(
-                            color: isSelected ? Color.clear : Color.black.opacity(0.06),
-                            radius: isSelected ? 0 : 2, x: 0, y: 1
-                        )
+                        .fill(isSelected ? IMColors.accentBgLight : IMColors.statBg)
                 )
                 .overlay(
                     Capsule()
-                        .strokeBorder(Color.black.opacity(isSelected ? 0.08 : 0.03), lineWidth: 0.5)
-                )
-                .overlay(
-                    isSelected
-                        ? Capsule()
-                            .fill(Color.black.opacity(0.03))
-                        : nil
+                        .strokeBorder(isSelected ? IMColors.accent.opacity(0.20) : IMColors.divider, lineWidth: 1)
                 )
                 .contentShape(Capsule())
         }
@@ -736,16 +725,7 @@ struct LedgerShell: View {
 
     private func calendarCellBackground(for cell: LedgerCalendarCell) -> some ShapeStyle {
         if cell.isSelected {
-            return AnyShapeStyle(
-                LinearGradient(
-                    colors: [
-                        IMColors.calendarSelectedTop,
-                        IMColors.calendarSelectedBottom,
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
+            return AnyShapeStyle(IMColors.calendarSelectedTop)
         }
         return AnyShapeStyle(Color.clear)
     }
@@ -843,8 +823,7 @@ struct CalendarDayCellButton<Background: ShapeStyle>: View {
                 .overlay {
                     if isSelected {
                         cellShape
-                            .stroke(Color.black.opacity(0.15), lineWidth: 1)
-                            .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 1)
+                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
                             .clipShape(cellShape)
                     } else if isToday {
                         cellShape.stroke(IMColors.calendarToday, lineWidth: 1.5)
@@ -901,7 +880,7 @@ struct MonthAggregationCard: View {
         HStack(spacing: 2) {
             Text("支")
                 .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(IMColors.accent)
+                .foregroundStyle(IMColors.textSecondary)
             Text(BillLensFormatters.currencyString(item.expenseAmount, currencyCode: item.statsCurrency))
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(IMColors.textSecondary)
@@ -913,7 +892,7 @@ struct MonthAggregationCard: View {
         HStack(spacing: 2) {
             Text("收")
                 .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(IMColors.income)
+                .foregroundStyle(IMColors.textSecondary)
             Text(BillLensFormatters.currencyString(item.incomeAmount, currencyCode: item.statsCurrency))
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(IMColors.textSecondary)

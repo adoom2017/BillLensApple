@@ -45,30 +45,7 @@ public struct RootView: View {
         #if os(macOS)
         .frame(minWidth: 1120, minHeight: 720)
         #endif
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        IMColors.pageBgTop,
-                        IMColors.pageBgMid,
-                        IMColors.pageBgBottom,
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                Circle()
-                    .fill(IMColors.pageBlobA.opacity(0.65))
-                    .frame(width: 480, height: 480)
-                    .blur(radius: 30)
-                    .offset(x: -440, y: -340)
-                Circle()
-                    .fill(IMColors.pageBlobB.opacity(0.7))
-                    .frame(width: 360, height: 360)
-                    .blur(radius: 18)
-                    .offset(x: 480, y: 300)
-            }
-            .ignoresSafeArea()
-        )
+        .background(IMColors.pageBgTop.ignoresSafeArea())
         .fileImporter(
             isPresented: $isImportingImage,
             allowedContentTypes: [.image],
@@ -117,15 +94,7 @@ public struct RootView: View {
             HStack(spacing: 10) {
                 ZStack {
                     Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    IMColors.logoBgTop, Color.white,
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
+                        .fill(IMColors.logoBgTop)
                         .frame(width: 32, height: 32)
                         .overlay(
                             Circle()
@@ -133,16 +102,16 @@ public struct RootView: View {
                         )
                     Image(systemName: "list.bullet.rectangle.portrait")
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(IMColors.accentAlt)
+                        .foregroundStyle(IMColors.navText)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("BillLens")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(IMColors.textPrimary)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(IMColors.navText)
                     Text("账单助手")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(IMColors.textMuted)
+                        .font(.system(size: 11, weight: .regular))
+                        .foregroundStyle(IMColors.navTextSecondary)
                 }
             }
 
@@ -154,33 +123,35 @@ public struct RootView: View {
                 headerTab(.subscriptions)
                 headerTab(.assets)
             }
-            .padding(5)
-            .background(.white.opacity(0.82))
+            .padding(3)
+            .background(.white.opacity(0.08))
             .overlay(
                 Capsule()
                     .stroke(IMColors.headerTabBorder, lineWidth: 1)
             )
             .clipShape(Capsule())
-            .shadow(
-                color: IMColors.headerShadow.opacity(0.08), radius: 12, y: 4)
 
             Button {
                 showSettings = true
             } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(IMColors.textMuted)
+                    .foregroundStyle(IMColors.navTextSecondary)
                     .frame(width: 32, height: 32)
-                    .background(.white.opacity(0.82))
+                    .background(.white.opacity(0.08))
                     .clipShape(Circle())
                     .overlay(Circle().stroke(IMColors.headerTabBorder, lineWidth: 1))
-                    .shadow(color: IMColors.headerShadow.opacity(0.08), radius: 8, y: 2)
             }
             .buttonStyle(.plain)
             .sheet(isPresented: $showSettings) {
                 SettingsShell().environmentObject(store)
             }
         }
+        .padding(.horizontal, 10)
+        .frame(height: 48)
+        .background(IMColors.navGlass)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .shadow(color: IMColors.headerShadow.opacity(0.18), radius: 30, x: 3, y: 5)
     }
 
     private func headerTab(_ page: AppPage) -> some View {
@@ -191,23 +162,23 @@ public struct RootView: View {
             Image(systemName: page.icon)
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(
-                    selectedPage == page ? IMColors.accent : IMColors.textMuted
+                    selectedPage == page ? IMColors.navText : IMColors.navTextSecondary
                 )
                 .frame(width: 38, height: 38)
                 .background(
-                    Circle().fill(selectedPage == page ? IMColors.accentBgActive : .clear)
+                    Circle().fill(selectedPage == page ? Color.white.opacity(0.18) : .clear)
                 )
                 .contentShape(Circle())
             #else
             Text(page.title)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(
-                    selectedPage == page ? IMColors.accent : IMColors.textMuted
+                    selectedPage == page ? IMColors.navText : IMColors.navTextSecondary
                 )
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
                 .background(
-                    Capsule().fill(selectedPage == page ? IMColors.accentBgActive : .clear)
+                    Capsule().fill(selectedPage == page ? Color.white.opacity(0.18) : .clear)
                 )
                 .contentShape(Capsule())
             #endif
@@ -215,4 +186,3 @@ public struct RootView: View {
         .buttonStyle(.plain)
     }
 }
-

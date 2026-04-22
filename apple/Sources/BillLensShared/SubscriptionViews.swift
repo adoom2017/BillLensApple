@@ -331,10 +331,10 @@ struct SubscriptionCard: View {
                     VStack(alignment: .trailing, spacing: 3) {
                         Text(BillLensFormatters.currencyString(subscription.amount, currencyCode: subscription.currency))
                             .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(subscription.direction == "income" ? IMColors.income : IMColors.textPrimary)
+                            .foregroundStyle(IMColors.textPrimary)
                         HStack(spacing: 4) {
                             Circle()
-                                .fill(subscription.isActive ? Color.green : IMColors.textPlaceholder)
+                                .fill(subscription.isActive ? IMColors.textPrimary : IMColors.textPlaceholder)
                                 .frame(width: 6, height: 6)
                             Text(subscription.statusDisplayText)
                                 .font(.system(size: 10))
@@ -428,10 +428,10 @@ struct SubscriptionDetailPanel: View {
                                     .clipShape(Capsule())
                                 Text(subscription.isActive ? "活跃" : "已暂停")
                                     .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(subscription.isActive ? .green : IMColors.textMuted)
+                                    .foregroundStyle(subscription.isActive ? IMColors.textPrimary : IMColors.textMuted)
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 3)
-                                    .background(subscription.isActive ? Color.green.opacity(0.1) : IMColors.controlBg)
+                                    .background(IMColors.controlBg)
                                     .clipShape(Capsule())
                             }
                         }
@@ -441,7 +441,7 @@ struct SubscriptionDetailPanel: View {
                     // Amount display
                     Text(BillLensFormatters.currencyString(subscription.amount, currencyCode: subscription.currency))
                         .font(.system(size: 32, weight: .bold, design: .rounded))
-                        .foregroundStyle(subscription.direction == "income" ? IMColors.income : IMColors.textPrimary)
+                        .foregroundStyle(IMColors.textPrimary)
                         .padding(.top, 4)
                 }
                 .padding(20)

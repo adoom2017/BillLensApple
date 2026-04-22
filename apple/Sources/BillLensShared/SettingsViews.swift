@@ -154,14 +154,14 @@ struct SettingsShell: View {
                 Button {
                     dismiss()
                 } label: {
-                    Text("取消")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(IMColors.textMuted)
+                        Text("取消")
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(IMColors.accentAlt)
                         .frame(maxWidth: .infinity)
                         .frame(height: 36)
-                        .background(.white.opacity(0.6))
-                        .clipShape(Capsule())
-                        .overlay(Capsule().stroke(IMColors.headerTabBorder, lineWidth: 1))
+                        .background(Color.clear)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(IMColors.accentAlt, lineWidth: 1))
                 }
                 .buttonStyle(.plain)
 
@@ -173,13 +173,13 @@ struct SettingsShell: View {
                             ProgressView().controlSize(.small)
                         }
                         Text(isSaving ? "保存中…" : "保存")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: 14, weight: .regular))
                             .foregroundStyle(.white)
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: 36)
                     .background(IMColors.accent)
-                    .clipShape(Capsule())
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .disabled(isSaving)
@@ -193,13 +193,7 @@ struct SettingsShell: View {
         .presentationDetents(focusedField == nil ? [.height(420)] : [.large])
         .presentationDragIndicator(.visible)
         #endif
-        .background(
-            LinearGradient(
-                colors: [IMColors.pageBgTop, IMColors.pageBgMid],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
+        .background(IMColors.pageBgTop)
         .task {
             if store.llmConfig == nil {
                 try? await store.loadLlmConfig()
@@ -246,10 +240,9 @@ struct SettingsShell: View {
         VStack(spacing: 0) {
             content()
         }
-        .background(.white.opacity(0.72))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(IMColors.headerTabBorder, lineWidth: 1))
-        .shadow(color: IMColors.headerShadow.opacity(0.06), radius: 8, y: 2)
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(IMColors.divider, lineWidth: 1))
     }
 
     @ViewBuilder

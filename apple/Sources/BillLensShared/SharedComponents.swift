@@ -274,12 +274,12 @@ struct ComposerPanel: View {
                     .foregroundStyle(IMColors.textTertiary)
                 Button(action: onSubmit) {
                     Text("发送")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 13, weight: .regular))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 6)
                         .background(
-                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 .fill(IMColors.sendButton)
                         )
                 }
@@ -405,8 +405,8 @@ struct ComposerIconButton: View {
                 .frame(width: 36, height: 36)
                 .background(
                     Circle()
-                        .fill(Color.white.opacity(0.92))
-                        .overlay(Circle().stroke(Color.black.opacity(0.05), lineWidth: 1))
+                        .fill(IMColors.statBg)
+                        .overlay(Circle().stroke(IMColors.divider, lineWidth: 1))
                 )
                 .contentShape(Circle())
         }
@@ -512,10 +512,7 @@ struct RecordRowView: View {
             Spacer()
             Text(BillLensFormatters.currencyString(record.amount, currencyCode: record.currency))
                 .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(
-                    record.direction == "income"
-                        ? IMColors.income
-                        : IMColors.textPrimary)
+                .foregroundStyle(IMColors.textPrimary)
             Button(action: onDelete) {
                 Image(systemName: "trash")
                     .font(.system(size: 12, weight: .medium))
@@ -573,16 +570,7 @@ struct UserAvatar: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            IMColors.sendButton,
-                            IMColors.sendButtonDark,
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
+                .fill(IMColors.darkSurface)
                 .frame(width: LayoutMetrics.avatarSize, height: LayoutMetrics.avatarSize)
             Image(systemName: "person.fill")
                 .font(.system(size: 13, weight: .bold))
@@ -595,20 +583,11 @@ struct AssistantAvatar: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            IMColors.assistantAvatarTop,
-                            IMColors.assistantAvatarBottom,
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
+                .fill(IMColors.darkSurface)
                 .frame(width: LayoutMetrics.avatarSize, height: LayoutMetrics.avatarSize)
             Image(systemName: "cpu")
                 .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(IMColors.accent)
+                .foregroundStyle(.white)
         }
     }
 }
@@ -619,19 +598,12 @@ struct DirectionBadge: View {
     var body: some View {
         Text(direction == "income" ? "收入" : "支出")
             .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(
-                direction == "income"
-                    ? IMColors.income
-                    : IMColors.accentDark
-            )
+            .foregroundStyle(IMColors.textSecondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
             .background(
                 Capsule()
-                    .fill(
-                        direction == "income"
-                            ? IMColors.incomeBgLight
-                            : IMColors.accentBgLight)
+                    .fill(IMColors.controlBg)
             )
     }
 }
@@ -643,19 +615,12 @@ struct StatusPill: View {
     var body: some View {
         Text(title)
             .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(
-                warning
-                    ? IMColors.warningText
-                    : IMColors.accentDark
-            )
+            .foregroundStyle(IMColors.textSecondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(
                 Capsule()
-                    .fill(
-                        warning
-                            ? IMColors.warningBg
-                            : IMColors.accentBgLight)
+                    .fill(warning ? IMColors.warningBg : IMColors.controlBg)
             )
     }
 }
@@ -673,18 +638,19 @@ struct ActionButton: View {
     let action: () -> Void
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
         Button(action: action) {
             Text(title)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 14, weight: .regular))
                 .foregroundStyle(foreground)
                 .frame(minWidth: minWidth, minHeight: LayoutMetrics.actionButtonHeight)
                 .padding(.horizontal, 14)
-                .background(background)
+                .background(shape.fill(backgroundFill))
                 .overlay(
-                    Capsule()
+                    shape
                         .stroke(borderColor, lineWidth: kind == .primary ? 0 : 1)
                 )
-                .contentShape(Capsule())
+                .contentShape(shape)
         }
         .buttonStyle(.plain)
         .fixedSize(horizontal: true, vertical: false)
@@ -695,19 +661,14 @@ struct ActionButton: View {
         case .primary:
             return .white
         case .ghost:
-            return IMColors.textMuted
+            return IMColors.accentAlt
         case .dangerGhost:
             return IMColors.danger
         }
     }
 
-    private var background: some View {
-        Capsule()
-            .fill(
-                kind == .primary
-                    ? IMColors.buttonPrimary
-                    : Color.clear
-            )
+    private var backgroundFill: Color {
+        kind == .primary ? IMColors.buttonPrimary : .clear
     }
 
     private var borderColor: Color {
@@ -715,7 +676,7 @@ struct ActionButton: View {
         case .primary:
             return .clear
         case .ghost:
-            return IMColors.ghostBorder
+            return IMColors.accentAlt
         case .dangerGhost:
             return IMColors.dangerBorder
         }

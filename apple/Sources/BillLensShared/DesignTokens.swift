@@ -26,92 +26,99 @@ enum AppPage: String {
 }
 
 enum LayoutMetrics {
-    static let pagePadding: CGFloat = 16
-    static let pageTopPadding: CGFloat = 18
+    static let pagePadding: CGFloat = 14
+    static let pageTopPadding: CGFloat = 12
     static let noteHeight: CGFloat = 72
     static let iconButtonSize: CGFloat = 28
     static let actionButtonHeight: CGFloat = 40
     static let messageGap: CGFloat = 14
-    static let headerSpacing: CGFloat = 14
-    static let bubbleRadius: CGFloat = 6
+    static let headerSpacing: CGFloat = 12
+    static let bubbleRadius: CGFloat = 8
     static let avatarSize: CGFloat = 32
 }
 
 enum IMColors {
     // Text hierarchy
-    static let textPrimary = Color(red: 0.10, green: 0.21, blue: 0.24)
-    static let textSecondary = Color(red: 0.50, green: 0.56, blue: 0.58)
-    static let textMuted = Color(red: 0.42, green: 0.51, blue: 0.54)
-    static let textTertiary = Color(red: 0.55, green: 0.63, blue: 0.65)
-    static let textPlaceholder = Color(red: 0.82, green: 0.84, blue: 0.84)
+    static let textPrimary = Color(red: 0.114, green: 0.114, blue: 0.122)
+    static let textSecondary = Color(red: 0.32, green: 0.32, blue: 0.34)
+    static let textMuted = Color(red: 0.49, green: 0.49, blue: 0.52)
+    static let textTertiary = Color(red: 0.525, green: 0.525, blue: 0.545)
+    static let textPlaceholder = Color(red: 0.824, green: 0.824, blue: 0.843)
 
     // Accent / brand
-    static let accent = Color(red: 0.165, green: 0.426, blue: 0.384)
-    static let accentAlt = Color(red: 0.172, green: 0.431, blue: 0.381)
-    static let accentDark = Color(red: 0.16, green: 0.42, blue: 0.35)
+    static let accent = Color(red: 0.0, green: 0.443, blue: 0.890)
+    static let accentAlt = Color(red: 0.0, green: 0.400, blue: 0.800)
+    static let accentDark = Color(red: 0.0, green: 0.314, blue: 0.659)
+    static let accentBright = Color(red: 0.161, green: 0.592, blue: 1.0)
 
     // Semantic
-    static let income = Color(red: 0.84, green: 0.38, blue: 0.29)
-    static let danger = Color(red: 0.71, green: 0.25, blue: 0.23)
-    static let dangerBg = Color(red: 0.56, green: 0.22, blue: 0.19)
-    static let dangerSubtle = Color(red: 0.65, green: 0.30, blue: 0.27)
-    static let dangerBorder = Color(red: 0.95, green: 0.84, blue: 0.82)
-    static let dangerBgLight = Color(red: 0.98, green: 0.95, blue: 0.95)
-    static let warningText = Color(red: 0.58, green: 0.39, blue: 0.10)
+    static let income = textPrimary
+    static let danger = Color(red: 0.847, green: 0.0, blue: 0.082)
+    static let dangerBg = Color(red: 0.72, green: 0.05, blue: 0.08)
+    static let dangerSubtle = Color(red: 0.847, green: 0.0, blue: 0.082)
+    static let dangerBorder = Color(red: 0.93, green: 0.93, blue: 0.95)
+    static let dangerBgLight = Color(red: 0.965, green: 0.965, blue: 0.973)
+    static let warningText = textSecondary
 
     // Chat
-    static let chatBg = Color(red: 0.953, green: 0.957, blue: 0.961)
-    static let userBubble = Color(red: 0.859, green: 0.918, blue: 0.996)
+    static let chatBg = Color(red: 0.961, green: 0.961, blue: 0.969)
+    static let userBubble = Color(red: 0.929, green: 0.929, blue: 0.949)
     static let botBubble = Color.white
-    static let sendButton = Color(red: 0.231, green: 0.510, blue: 0.965)
-    static let sendButtonDark = Color(red: 0.18, green: 0.42, blue: 0.85)
-    static let systemMsgBg = Color(red: 0.92, green: 0.93, blue: 0.94)
+    static let sendButton = accent
+    static let sendButtonDark = accentAlt
+    static let systemMsgBg = Color(red: 0.929, green: 0.929, blue: 0.949)
 
     // Surfaces & borders
-    static let divider = Color(red: 0.894, green: 0.906, blue: 0.922)
-    static let dividerLegacy = Color(red: 0.88, green: 0.88, blue: 0.88)
-    static let panelBg = Color(red: 0.975, green: 0.975, blue: 0.975)
-    static let controlBg = Color(red: 0.93, green: 0.94, blue: 0.94)
-    static let statBg = Color(red: 0.965, green: 0.97, blue: 0.97)
+    static let divider = Color(red: 0.824, green: 0.824, blue: 0.843).opacity(0.62)
+    static let dividerLegacy = Color(red: 0.824, green: 0.824, blue: 0.843).opacity(0.62)
+    static let panelBg = Color(red: 0.961, green: 0.961, blue: 0.969)
+    static let controlBg = Color(red: 0.929, green: 0.929, blue: 0.949)
+    static let statBg = Color(red: 0.980, green: 0.980, blue: 0.988)
+    static let surface = Color.white
+    static let darkSurface = Color(red: 0.153, green: 0.153, blue: 0.161)
+    static let navGlass = Color.black.opacity(0.80)
+    static let navText = Color.white
+    static let navTextSecondary = Color.white.opacity(0.72)
+    static let cardShadow = Color.black.opacity(0.14)
 
     // Tag backgrounds
-    static let accentBgLight = Color(red: 0.914, green: 0.964, blue: 0.940)
-    static let accentBgActive = Color(red: 0.885, green: 0.949, blue: 0.922)
-    static let incomeBgLight = Color(red: 0.980, green: 0.925, blue: 0.905)
-    static let warningBg = Color(red: 1.0, green: 0.963, blue: 0.902)
+    static let accentBgLight = Color(red: 0.902, green: 0.949, blue: 1.0)
+    static let accentBgActive = Color(red: 0.902, green: 0.949, blue: 1.0)
+    static let incomeBgLight = Color(red: 0.929, green: 0.929, blue: 0.949)
+    static let warningBg = Color(red: 0.929, green: 0.929, blue: 0.949)
 
-    // Global background gradient
-    static let pageBgTop = Color(red: 0.985, green: 0.992, blue: 0.989)
-    static let pageBgMid = Color(red: 0.958, green: 0.979, blue: 0.972)
-    static let pageBgBottom = Color(red: 0.946, green: 0.969, blue: 0.959)
-    static let pageBlobA = Color(red: 0.885, green: 0.944, blue: 0.915)
-    static let pageBlobB = Color(red: 0.907, green: 0.949, blue: 0.939)
+    // Global background
+    static let pageBgTop = Color(red: 0.961, green: 0.961, blue: 0.969)
+    static let pageBgMid = Color(red: 0.961, green: 0.961, blue: 0.969)
+    static let pageBgBottom = Color(red: 0.961, green: 0.961, blue: 0.969)
+    static let pageBlobA = Color.clear
+    static let pageBlobB = Color.clear
 
     // Header / logo
-    static let logoBgTop = Color(red: 0.929, green: 0.974, blue: 0.958)
-    static let logoBorder = Color(red: 0.85, green: 0.914, blue: 0.889)
-    static let headerTabBorder = Color(red: 0.865, green: 0.914, blue: 0.893)
-    static let headerShadow = Color(red: 0.54, green: 0.69, blue: 0.64)
-    static let ghostBorder = Color(red: 0.89, green: 0.937, blue: 0.918)
+    static let logoBgTop = Color.white.opacity(0.18)
+    static let logoBorder = Color.white.opacity(0.16)
+    static let headerTabBorder = Color.white.opacity(0.12)
+    static let headerShadow = Color.black
+    static let ghostBorder = Color(red: 0.824, green: 0.824, blue: 0.843).opacity(0.64)
 
-    // Avatar gradients
-    static let assistantAvatarTop = Color(red: 0.938, green: 0.978, blue: 0.962)
-    static let assistantAvatarBottom = Color(red: 0.864, green: 0.928, blue: 0.903)
+    // Avatars
+    static let assistantAvatarTop = darkSurface
+    static let assistantAvatarBottom = darkSurface
 
-    // Calendar selected cell gradient
-    static let calendarSelectedTop = Color(red: 0.27, green: 0.54, blue: 0.46)
-    static let calendarSelectedBottom = Color(red: 0.19, green: 0.45, blue: 0.39)
+    // Calendar selected cell
+    static let calendarSelectedTop = accent
+    static let calendarSelectedBottom = accent
 
     // Calendar today marker
-    static let calendarToday = Color(red: 0.165, green: 0.426, blue: 0.384)
+    static let calendarToday = accent
 
     // Button primary background (dark)
-    static let buttonPrimary = Color(red: 0.10, green: 0.22, blue: 0.24)
+    static let buttonPrimary = accent
 
     // Ledger category filter pills
-    static let filterMuted = Color(red: 0.45, green: 0.52, blue: 0.55)
+    static let filterMuted = textMuted
 
     // Ledger special stat colors
-    static let ledgerStatGoldBold = Color(red: 0.72, green: 0.46, blue: 0.10)
-    static let ledgerStatGold = Color(red: 0.52, green: 0.37, blue: 0.12)
+    static let ledgerStatGoldBold = textPrimary
+    static let ledgerStatGold = textSecondary
 }
