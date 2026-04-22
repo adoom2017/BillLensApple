@@ -70,6 +70,10 @@ struct EntryShell: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
     }
     #endif
 
@@ -240,7 +244,7 @@ struct ReviewPanel: View {
                     Spacer()
                     StatusPill(title: store.drafts.isEmpty ? "等待解析" : "待确认 (\(store.drafts.count))", warning: !store.drafts.isEmpty)
                 }
-                Text("左侧发送后自动更新，也可直接手动修改。")
+                Text("左侧输入后按 Enter 自动更新，也可直接手动修改。")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(IMColors.textSecondary)
             }
@@ -273,6 +277,9 @@ struct ReviewPanel: View {
                             .frame(width: max(scrollProxy.size.width - 2, 0), alignment: .leading)
                     }
                     .scrollIndicators(.hidden)
+                    #if os(iOS)
+                    .scrollDismissesKeyboard(.interactively)
+                    #endif
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

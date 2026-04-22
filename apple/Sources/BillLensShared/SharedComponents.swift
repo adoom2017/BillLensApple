@@ -227,22 +227,10 @@ struct ComposerPanel: View {
     let onSubmit: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // 1px separator line
+        VStack(alignment: .leading, spacing: 8) {
             IMColors.divider.frame(height: 1)
 
-            // Toolbar row
-            HStack(spacing: 12) {
-                ComposerIconButton(systemImage: "photo") { onImage() }
-                ComposerIconButton(
-                    systemImage: isRecording ? "stop.circle.fill" : "mic.fill",
-                    tint: isRecording ? Color.red : IMColors.textSecondary
-                ) {
-                    onVoice()
-                }
-
-                Divider().frame(height: 16).opacity(0.3)
-
+            HStack(spacing: 8) {
                 Toggle("自动保存", isOn: $autoConfirm)
                     .toggleStyle(.switch)
                     .controlSize(.mini)
@@ -259,34 +247,31 @@ struct ComposerPanel: View {
                 }
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 6)
 
-            // Text input area — borderless, transparent
-            composerEditor
-                .frame(maxWidth: .infinity, minHeight: 48, maxHeight: 48)
-                .padding(.horizontal, 12)
+            HStack(spacing: 8) {
+                ComposerIconButton(systemImage: "photo") { onImage() }
 
-            // Bottom bar with send button
-            HStack {
-                Spacer()
-                Text("Enter 发送")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(IMColors.textTertiary)
-                Button(action: onSubmit) {
-                    Text("发送")
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(IMColors.sendButton)
-                        )
+                composerEditor
+                    .frame(maxWidth: .infinity, minHeight: 40, maxHeight: 40)
+                    .padding(.horizontal, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.white)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(IMColors.divider, lineWidth: 1)
+                    )
+
+                ComposerIconButton(
+                    systemImage: isRecording ? "stop.circle.fill" : "mic.fill",
+                    tint: isRecording ? Color.red : IMColors.textSecondary
+                ) {
+                    onVoice()
                 }
-                .buttonStyle(.plain)
             }
             .padding(.horizontal, 12)
-            .padding(.bottom, 8)
+            .padding(.bottom, 10)
         }
         .background(IMColors.chatBg)
     }
@@ -402,10 +387,10 @@ struct ComposerIconButton: View {
             Image(systemName: systemImage)
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(tint)
-                .frame(width: 36, height: 36)
+                .frame(width: 40, height: 40)
                 .background(
                     Circle()
-                        .fill(IMColors.statBg)
+                        .fill(Color.white)
                         .overlay(Circle().stroke(IMColors.divider, lineWidth: 1))
                 )
                 .contentShape(Circle())
@@ -448,7 +433,7 @@ struct EmptyReviewState: View {
             Text("等待解析结果")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(IMColors.textPrimary)
-            Text("左侧发送账单内容后，这里会显示可编辑的结构化字段。")
+            Text("左侧输入账单内容并按 Enter 后，这里会显示可编辑的结构化字段。")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(IMColors.textSecondary)
             if let latestRecord {
