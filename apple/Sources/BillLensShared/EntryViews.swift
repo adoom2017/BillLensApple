@@ -222,7 +222,7 @@ struct ChatScrollView: View {
         }
         // minHeight pins messages to the bottom when content is shorter than the chat area,
         // matching standard chat-app behaviour (WhatsApp/iMessage style).
-        .frame(width: width, minHeight: minHeight, alignment: .bottomLeading)
+        .frame(minWidth: width, maxWidth: width, minHeight: minHeight, alignment: .bottomLeading)
     }
 }
 

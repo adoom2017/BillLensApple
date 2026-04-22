@@ -47,18 +47,18 @@ public final class BillLensStore: ObservableObject {
     private let bridge = RustBridge()
     private let ocrService: ReceiptTextRecognizing
     private let profileID = "local-default"
-    private let deviceID: String = {
-        let key = "BillLens_DeviceID"
-        if let saved = UserDefaults.standard.string(forKey: key) {
-            return saved
-        }
-        let id = stableDeviceIdentifier()
-        UserDefaults.standard.set(id, forKey: key)
-        return id
-    }()
+    private let deviceID: String
 
     public init(ocrService: ReceiptTextRecognizing = ReceiptOCRService()) {
         self.ocrService = ocrService
+        let key = "BillLens_DeviceID"
+        if let saved = UserDefaults.standard.string(forKey: key) {
+            self.deviceID = saved
+        } else {
+            let id = stableDeviceIdentifier()
+            UserDefaults.standard.set(id, forKey: key)
+            self.deviceID = id
+        }
         bootstrap()
     }
 

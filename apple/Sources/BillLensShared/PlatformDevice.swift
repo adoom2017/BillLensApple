@@ -23,6 +23,7 @@ public func deviceName() -> String {
 }
 
 /// Returns a stable per-install identifier using identifierForVendor.
+@MainActor
 public func stableDeviceIdentifier() -> String {
     UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
 }
