@@ -928,6 +928,20 @@ impl BillRepository {
 
     // ── Asset operations ────────────────────────────────────────────────
 
+    pub async fn list_assets(
+        &self,
+        profile_id: &str,
+    ) -> Result<Vec<Asset>> {
+        let rows = sqlx::query_as::<_, AssetRow>(
+            r#"SELECT * FROM assets WHERE profile_id = ?1 AND deleted_at IS NULL"#,
+        )
+        .bind(profile_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list assets")?;
+        rows.into_iter().map(Asset::try_from).collect()
+    }
+
     pub async fn find_or_create_asset(
         &self,
         profile_id: &str,
@@ -1135,6 +1149,93 @@ impl BillRepository {
         .ok_or_else(|| anyhow!("asset not found"))?;
 
         row.try_into()
+    }
+
+    /// Merge all snapshots from `source_id` into `target_id`, then soft-delete the source asset.
+    /// For same-day conflicts, keeps the snapshot with the later updated_at.
+    pub async fn merge_asset_into(
+        &self,
+        source_id: Uuid,
+        target_id: Uuid,
+        profile_id: &str,
+    ) -> Result<()> {
+        let source = source_id.to_string();
+        let target = target_id.to_string();
+
+        // For each source snapshot, if target already has a snapshot on the same day,
+        // soft-delete whichever is older; otherwise reassign the source snapshot to target.
+        let source_snaps = sqlx::query_as::<_, AssetSnapshotRow>(
+            "SELECT * FROM asset_snapshots WHERE asset_id = ?1 AND deleted_at IS NULL",
+        )
+        .bind(&source)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to load source snapshots")?;
+
+        for snap in source_snaps {
+            let conflict: Option<AssetSnapshotRow> = sqlx::query_as::<_, AssetSnapshotRow>(
+                "SELECT * FROM asset_snapshots WHERE asset_id = ?1 AND recorded_on = ?2 AND deleted_at IS NULL",
+            )
+            .bind(&target)
+            .bind(&snap.recorded_on)
+            .fetch_optional(&self.pool)
+            .await
+            .context("failed to check snapshot conflict")?;
+
+            if let Some(existing) = conflict {
+                // Keep the more recently updated one; soft-delete the other.
+                if snap.updated_at >= existing.updated_at {
+                    // source wins: delete target's conflicting snapshot, then reassign source
+                    sqlx::query(
+                        "UPDATE asset_snapshots SET deleted_at = datetime('now'), sync_version = sync_version + 1 WHERE id = ?1",
+                    )
+                    .bind(&existing.id)
+                    .execute(&self.pool)
+                    .await
+                    .context("failed to delete conflicting target snapshot")?;
+
+                    sqlx::query(
+                        "UPDATE asset_snapshots SET asset_id = ?2, sync_version = sync_version + 1, updated_at = datetime('now') WHERE id = ?1",
+                    )
+                    .bind(&snap.id)
+                    .bind(&target)
+                    .execute(&self.pool)
+                    .await
+                    .context("failed to reassign source snapshot")?;
+                } else {
+                    // target wins: soft-delete the source snapshot
+                    sqlx::query(
+                        "UPDATE asset_snapshots SET deleted_at = datetime('now'), sync_version = sync_version + 1 WHERE id = ?1",
+                    )
+                    .bind(&snap.id)
+                    .execute(&self.pool)
+                    .await
+                    .context("failed to delete losing source snapshot")?;
+                }
+            } else {
+                // No conflict: just reassign
+                sqlx::query(
+                    "UPDATE asset_snapshots SET asset_id = ?2, sync_version = sync_version + 1, updated_at = datetime('now') WHERE id = ?1",
+                )
+                .bind(&snap.id)
+                .bind(&target)
+                .execute(&self.pool)
+                .await
+                .context("failed to reassign source snapshot")?;
+            }
+        }
+
+        // Soft-delete the source asset
+        sqlx::query(
+            "UPDATE assets SET deleted_at = datetime('now'), sync_version = sync_version + 1, updated_at = datetime('now') WHERE id = ?1 AND profile_id = ?2",
+        )
+        .bind(&source)
+        .bind(profile_id)
+        .execute(&self.pool)
+        .await
+        .context("failed to soft-delete source asset")?;
+
+        Ok(())
     }
 
     pub async fn soft_delete_asset(&self, id: Uuid, profile_id: &str) -> Result<()> {

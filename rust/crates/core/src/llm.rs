@@ -35,7 +35,7 @@ note 只保留与交易本身直接相关的简短备注；忽略积分、贴纸
 判断依据：出现"订阅""会员""月费""年费""续费""每月""每年""包月""包年""月付""年付"等关键词时应识别为订阅。
 如果用户描述的是资产余额/账户存款/投资持仓（如"招商银行存款还有 54000 元""支付宝余额 3000 块""股票账户 12 万""持有加密货币市值 5 万"等），额外返回 "asset_info" 字段：
 {
-  "name": 机构或账户名（字符串）,
+  "name": 机构或品牌名（字符串，只保留核心机构/品牌名，去掉"账号""账户""股票""存款""基金""证券"等描述性后缀，如"东方财富股票账号"→"东方财富"，"招商银行存款账户"→"招商银行"）,
   "category": "{asset_categories_pipe}" 之一,
   "amount": 数字（正数）,
   "currency": ISO 4217 代码,
@@ -131,9 +131,10 @@ pub enum LlmProvider {
 impl LlmProvider {
     pub fn parse(value: &str) -> Result<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "openai" | "llamacpp" => Ok(Self::OpenAi),
+            "openai" | "llamacpp" | "deepseek" | "moonshot" | "zhipu" | "qwen"
+            | "openai_compatible" => Ok(Self::OpenAi),
             "anthropic" => Ok(Self::Anthropic),
-            _ => Err(anyhow!("unsupported llm provider")),
+            _ => Err(anyhow!("unsupported llm provider: {value}")),
         }
     }
 }
@@ -614,8 +615,9 @@ fn parse_asset_info_value(value: &Value) -> Option<ParsedAssetInfo> {
         .get("name")
         .and_then(Value::as_str)
         .map(str::trim)
-        .filter(|v| !v.is_empty())?
-        .to_string();
+        .filter(|v| !v.is_empty())
+        .map(clean_asset_name)
+        .filter(|v| !v.is_empty())?;
 
     let amount = object
         .get("amount")
@@ -958,6 +960,29 @@ fn infer_merchant(raw_text: &str) -> Option<String> {
         }
     }
     None
+}
+
+pub(crate) fn clean_asset_name(value: &str) -> String {
+    let suffixes = [
+        "股票账号", "股票账户", "股票账",
+        "基金账号", "基金账户", "基金账",
+        "证券账号", "证券账户", "证券账",
+        "存款账号", "存款账户", "存款账",
+        "理财账号", "理财账户", "理财账",
+        "期货账号", "期货账户", "期货账",
+        "外汇账号", "外汇账户", "外汇账",
+        "账号", "账户",
+    ];
+    let trimmed = value.trim();
+    for suffix in suffixes {
+        if let Some(stripped) = trimmed.strip_suffix(suffix) {
+            let result = stripped.trim();
+            if !result.is_empty() {
+                return result.to_string();
+            }
+        }
+    }
+    trimmed.to_string()
 }
 
 fn clean_merchant(value: &str) -> String {

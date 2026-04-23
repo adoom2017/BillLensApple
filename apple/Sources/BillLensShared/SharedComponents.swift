@@ -237,10 +237,8 @@ struct DraftConversationCard: View {
 
 struct ComposerPanel: View {
     @Binding var composerText: String
-    @Binding var autoConfirm: Bool
     @State private var focusToken = UUID()
     let isRecording: Bool
-    let statusText: String
     let onImage: () -> Void
     let onVoice: () -> Void
     let onSubmit: () -> Void
@@ -249,23 +247,6 @@ struct ComposerPanel: View {
         VStack(alignment: .leading, spacing: 8) {
             IMColors.divider.frame(height: 1)
 
-            HStack(spacing: 8) {
-                Toggle("自动保存", isOn: $autoConfirm)
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(IMColors.textSecondary)
-
-                Spacer()
-
-                if !statusText.isEmpty {
-                    Text(statusText)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(IMColors.textTertiary)
-                        .lineLimit(1)
-                }
-            }
-            .padding(.horizontal, 12)
 
             HStack(spacing: 8) {
                 ComposerIconButton(systemImage: "photo") { onImage() }

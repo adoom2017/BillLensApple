@@ -26,7 +26,9 @@ public final class BillLensStore: ObservableObject {
     @Published public var ledger: LedgerSnapshot?
     @Published public var transientProgressMessage: TransientProgressMessage?
     @Published public var composerText = ""
-    @Published public var autoConfirm = false
+    @Published public var autoConfirm = UserDefaults.standard.bool(forKey: "autoConfirm") {
+        didSet { UserDefaults.standard.set(autoConfirm, forKey: "autoConfirm") }
+    }
     @Published public var statusText = "正在初始化"
     @Published public var errorText: String?
     @Published public var isBusy = false
@@ -416,7 +418,13 @@ public final class BillLensStore: ObservableObject {
                 "update": updateDict
             ])
             try await self.loadAssets()
-            self.statusText = "资产已更新"
+            // If the asset was merged into another (no longer exists), clear the selection.
+            if !self.assets.contains(where: { $0.id == assetId }) {
+                self.selectedAssetId = nil
+                self.statusText = "资产已合并"
+            } else {
+                self.statusText = "资产已更新"
+            }
             AppLogger.log("asset.update", "id=\(assetId)")
             CloudKitSyncService.shared.schedulePush()
         }

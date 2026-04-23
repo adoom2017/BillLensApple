@@ -41,6 +41,9 @@ struct AssetShell: View {
         }
         .onChange(of: store.selectedAssetId) {
             isEditing = false
+            if store.selectedAssetId == nil {
+                isDetailPresented = false
+            }
         }
     }
 

@@ -93,9 +93,7 @@ struct ChatPanel: View {
 
             ComposerPanel(
                 composerText: $store.composerText,
-                autoConfirm: $store.autoConfirm,
                 isRecording: store.speechService.isRecording,
-                statusText: store.statusText,
                 onImage: { isImportingImage = true },
                 onVoice: { store.toggleRecording() },
                 onSubmit: { store.submitText() }
@@ -228,19 +226,6 @@ struct ChatScrollView: View {
                     .opacity(draftCardOpacity(for: index))
                     .onTapGesture { store.selectDraft(at: index) }
                 }
-            } else if let record = store.latestRecord {
-                DraftConversationCard(
-                    title: record.note ?? record.merchant ?? "最近入库账单",
-                    direction: record.direction,
-                    amount: record.amount,
-                    currency: record.currency,
-                    category: record.category,
-                    merchant: record.merchant ?? "未填写商户",
-                    transactionAt: record.transactionAt,
-                    status: "已入库",
-                    copy: "最近确认入库的一笔账单如下。",
-                    actions: nil
-                )
             }
 
             Color.clear.frame(height: 1).id("chatBottom")

@@ -16,7 +16,7 @@ pub use billlens_apple_db::{
 use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, TimeZone, Utc};
 use fx::{FxClient, resolve_fx_rate};
 pub use llm::LlmConfig;
-use llm::{LlmClient, normalize_currency_code};
+use llm::{LlmClient, clean_asset_name, normalize_currency_code};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
@@ -516,11 +516,24 @@ impl AppService {
                 .format("%Y-%m-%d")
                 .to_string(),
         };
-        let asset = self
+        // Try to match an existing asset whose cleaned name equals the incoming cleaned name,
+        // so "东方财富股票账号" and "东方财富" are treated as the same asset.
+        let existing_assets = self
             .repo
-            .find_or_create_asset(profile_id, &self.device_id, name, &category, &currency)
+            .list_assets(profile_id)
             .await
             .map_err(map_internal)?;
+        let matched = existing_assets
+            .into_iter()
+            .find(|a| clean_asset_name(&a.name) == name);
+        let asset = if let Some(existing) = matched {
+            existing
+        } else {
+            self.repo
+                .find_or_create_asset(profile_id, &self.device_id, name, &category, &currency)
+                .await
+                .map_err(map_internal)?
+        };
         let (_snapshot, created) = self
             .repo
             .upsert_asset_snapshot(
@@ -774,19 +787,52 @@ impl AppService {
         asset_id: Uuid,
         update: AssetUpdateInput,
     ) -> Result<AssetWithSnapshots, CoreError> {
-        self.repo
-            .update_asset(asset_id, profile_id, update)
-            .await
-            .map_err(map_internal)?;
-        let assets = self
-            .repo
-            .list_assets_with_snapshots(profile_id)
-            .await
-            .map_err(map_internal)?;
-        assets
-            .into_iter()
-            .find(|a| a.id == asset_id)
-            .ok_or_else(|| CoreError::Internal("updated asset not found".to_string()))
+        // If the new name matches an existing different asset, merge into it.
+        let target_id = if let Some(ref new_name) = update.name {
+            let new_name = new_name.trim();
+            let existing = self
+                .repo
+                .list_assets(profile_id)
+                .await
+                .map_err(map_internal)?;
+            existing
+                .into_iter()
+                .find(|a| a.id != asset_id && a.name.trim() == new_name)
+                .map(|a| a.id)
+        } else {
+            None
+        };
+
+        if let Some(target_id) = target_id {
+            // Merge source (asset_id) into target, then return the target.
+            self.repo
+                .merge_asset_into(asset_id, target_id, profile_id)
+                .await
+                .map_err(map_internal)?;
+            let assets = self
+                .repo
+                .list_assets_with_snapshots(profile_id)
+                .await
+                .map_err(map_internal)?;
+            assets
+                .into_iter()
+                .find(|a| a.id == target_id)
+                .ok_or_else(|| CoreError::Internal("merged asset not found".to_string()))
+        } else {
+            self.repo
+                .update_asset(asset_id, profile_id, update)
+                .await
+                .map_err(map_internal)?;
+            let assets = self
+                .repo
+                .list_assets_with_snapshots(profile_id)
+                .await
+                .map_err(map_internal)?;
+            assets
+                .into_iter()
+                .find(|a| a.id == asset_id)
+                .ok_or_else(|| CoreError::Internal("updated asset not found".to_string()))
+        }
     }
 
     pub async fn delete_asset(&self, profile_id: &str, asset_id: Uuid) -> Result<(), CoreError> {

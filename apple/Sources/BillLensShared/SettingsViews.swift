@@ -1,5 +1,24 @@
 import SwiftUI
 
+// MARK: - Provider definitions
+
+private struct ProviderOption: Identifiable {
+    let id: String
+    let displayName: String
+    let fixedUrl: String?
+    let modelHint: String
+}
+
+private let knownProviders: [ProviderOption] = [
+    ProviderOption(id: "openai",             displayName: "OpenAI",          fixedUrl: "https://api.openai.com/v1",                              modelHint: "gpt-4o"),
+    ProviderOption(id: "anthropic",          displayName: "Anthropic",       fixedUrl: "https://api.anthropic.com/v1",                           modelHint: "claude-sonnet-4-6"),
+    ProviderOption(id: "deepseek",           displayName: "DeepSeek",        fixedUrl: "https://api.deepseek.com/v1",                            modelHint: "deepseek-chat"),
+    ProviderOption(id: "moonshot",           displayName: "月之暗面 (Kimi)", fixedUrl: "https://api.moonshot.cn/v1",                             modelHint: "moonshot-v1-8k"),
+    ProviderOption(id: "zhipu",             displayName: "智谱 (GLM)",      fixedUrl: "https://open.bigmodel.cn/api/paas/v4",                   modelHint: "glm-4-flash"),
+    ProviderOption(id: "qwen",              displayName: "通义千问",         fixedUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",      modelHint: "qwen-plus"),
+    ProviderOption(id: "openai_compatible", displayName: "OpenAI 兼容",     fixedUrl: nil,                                                      modelHint: ""),
+]
+
 // MARK: - Settings Sheet
 
 struct SettingsShell: View {
@@ -19,7 +38,11 @@ struct SettingsShell: View {
     private enum Field { case baseUrl, apiKey, model }
     #endif
 
-    private let providers = ["openai", "anthropic"]
+    private var selectedProvider: ProviderOption {
+        knownProviders.first { $0.id == provider } ?? knownProviders.last!
+    }
+
+    private var urlIsEditable: Bool { selectedProvider.fixedUrl == nil }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -47,11 +70,39 @@ struct SettingsShell: View {
             ScrollView {
                 VStack(spacing: 16) {
                     settingsCard {
-                        fieldRow(label: "Base URL", hint: "http://127.0.0.1:8080/v1") {
-                            TextField("http://127.0.0.1:8080/v1", text: $baseUrl)
+                        // Provider picker
+                        HStack(alignment: .center) {
+                            Text("服务商")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(IMColors.textMuted)
+                                .frame(width: 90, alignment: .leading)
+
+                            Picker("", selection: Binding(
+                                get: { provider },
+                                set: { newValue in
+                                    provider = newValue
+                                    applyProviderDefaults()
+                                }
+                            )) {
+                                ForEach(knownProviders) { p in
+                                    Text(p.displayName).tag(p.id)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+
+                        Divider().opacity(0.25)
+
+                        // Base URL (locked for official providers)
+                        fieldRow(label: "Base URL", hint: "https://api.openai.com/v1") {
+                            TextField("", text: $baseUrl)
                                 .textFieldStyle(.plain)
                                 .font(.system(size: 13))
-                                .foregroundStyle(IMColors.textPrimary)
+                                .foregroundStyle(urlIsEditable ? IMColors.textPrimary : IMColors.textMuted)
+                                .disabled(!urlIsEditable)
                                 #if os(iOS)
                                 .focused($focusedField, equals: .baseUrl)
                                 #endif
@@ -91,8 +142,8 @@ struct SettingsShell: View {
 
                         Divider().opacity(0.25)
 
-                        fieldRow(label: "模型名称", hint: "qwen-local") {
-                            TextField("qwen-local", text: $model)
+                        fieldRow(label: "模型名称", hint: selectedProvider.modelHint.isEmpty ? "model-name" : selectedProvider.modelHint) {
+                            TextField(selectedProvider.modelHint.isEmpty ? "model-name" : selectedProvider.modelHint, text: $model)
                                 .textFieldStyle(.plain)
                                 .font(.system(size: 13))
                                 .foregroundStyle(IMColors.textPrimary)
@@ -100,22 +151,23 @@ struct SettingsShell: View {
                                 .focused($focusedField, equals: .model)
                                 #endif
                         }
+                    }
 
-                        Divider().opacity(0.25)
-
-                        HStack(alignment: .center) {
-                            Text("Provider")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(IMColors.textMuted)
-                                .frame(width: 90, alignment: .leading)
-
-                            Picker("", selection: $provider) {
-                                ForEach(providers, id: \.self) { p in
-                                    Text(p).tag(p)
-                                }
+                    settingsCard {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("自动保存")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(IMColors.textPrimary)
+                                Text("解析完成后跳过草稿直接入库")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(IMColors.textMuted)
                             }
-                            .pickerStyle(.segmented)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            Spacer()
+                            Toggle("", isOn: $store.autoConfirm)
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                                .labelsHidden()
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
@@ -205,10 +257,25 @@ struct SettingsShell: View {
     }
 
     private func populate(_ cfg: LlmConfigItem) {
-        baseUrl = cfg.baseUrl
+        // Match saved provider id; fall back to openai_compatible if unknown
+        let matched = knownProviders.first { $0.id == cfg.provider }
+        provider = matched?.id ?? "openai_compatible"
         apiKey = cfg.apiKey
         model = cfg.model
-        provider = cfg.provider
+        // For official providers, always show the fixed URL
+        if let fixedUrl = selectedProvider.fixedUrl {
+            baseUrl = fixedUrl
+        } else {
+            baseUrl = cfg.baseUrl
+        }
+    }
+
+    private func applyProviderDefaults() {
+        if let fixedUrl = selectedProvider.fixedUrl {
+            baseUrl = fixedUrl
+        } else {
+            baseUrl = ""
+        }
     }
 
     private func saveConfig() {
