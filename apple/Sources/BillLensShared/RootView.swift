@@ -90,12 +90,28 @@ public struct RootView: View {
     }
 
     private var appHeader: some View {
-        HStack(alignment: .center, spacing: 14) {
-            HStack(spacing: 10) {
+        #if os(iOS)
+        let outerSpacing: CGFloat = 6
+        let brandSpacing: CGFloat = 6
+        let logoSize: CGFloat = 28
+        let headerHorizontalPadding: CGFloat = 4
+        let tabSpacing: CGFloat = 2
+        let settingsButtonSize: CGFloat = 30
+        #else
+        let outerSpacing: CGFloat = 14
+        let brandSpacing: CGFloat = 10
+        let logoSize: CGFloat = 32
+        let headerHorizontalPadding: CGFloat = 10
+        let tabSpacing: CGFloat = 8
+        let settingsButtonSize: CGFloat = 32
+        #endif
+
+        return HStack(alignment: .center, spacing: outerSpacing) {
+            HStack(spacing: brandSpacing) {
                 ZStack {
                     Circle()
                         .fill(IMColors.logoBgTop)
-                        .frame(width: 32, height: 32)
+                        .frame(width: logoSize, height: logoSize)
                         .overlay(
                             Circle()
                                 .stroke(IMColors.logoBorder, lineWidth: 1)
@@ -109,15 +125,19 @@ public struct RootView: View {
                     Text("BillLens")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(IMColors.navText)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                     Text("账单助手")
                         .font(.system(size: 11, weight: .regular))
                         .foregroundStyle(IMColors.navTextSecondary)
                 }
+                .fixedSize(horizontal: true, vertical: false)
             }
+            .layoutPriority(2)
 
-            Spacer()
+            Spacer(minLength: 4)
 
-            HStack(spacing: 8) {
+            HStack(spacing: tabSpacing) {
                 headerTab(.entry)
                 headerTab(.ledger)
                 headerTab(.subscriptions)
@@ -137,7 +157,7 @@ public struct RootView: View {
                 Image(systemName: "gearshape")
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(IMColors.navTextSecondary)
-                    .frame(width: 32, height: 32)
+                    .frame(width: settingsButtonSize, height: settingsButtonSize)
                     .background(.white.opacity(0.08))
                     .clipShape(Circle())
                     .overlay(Circle().stroke(IMColors.headerTabBorder, lineWidth: 1))
@@ -147,7 +167,7 @@ public struct RootView: View {
                 SettingsShell().environmentObject(store)
             }
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, headerHorizontalPadding)
         .frame(height: 48)
         .background(IMColors.navGlass)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -155,7 +175,11 @@ public struct RootView: View {
     }
 
     private func headerTab(_ page: AppPage) -> some View {
-        Button {
+        #if os(iOS)
+        let tabButtonSize: CGFloat = 32
+        #endif
+
+        return Button {
             selectedPage = page
         } label: {
             #if os(iOS)
@@ -164,7 +188,7 @@ public struct RootView: View {
                 .foregroundStyle(
                     selectedPage == page ? IMColors.navText : IMColors.navTextSecondary
                 )
-                .frame(width: 38, height: 38)
+                .frame(width: tabButtonSize, height: tabButtonSize)
                 .background(
                     Circle().fill(selectedPage == page ? Color.white.opacity(0.18) : .clear)
                 )
