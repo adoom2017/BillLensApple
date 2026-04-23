@@ -11,11 +11,6 @@ struct EntryShell: View {
 
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
-    @State private var selectedTab: EntryTab = .chat
-
-    private enum EntryTab {
-        case chat, review
-    }
     #endif
 
     private var reviewWidth: CGFloat {
@@ -47,27 +42,8 @@ struct EntryShell: View {
 
     #if os(iOS)
     private var compactLayout: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $selectedTab) {
-                Text("记账").tag(EntryTab.chat)
-                Text("审核").tag(EntryTab.review)
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-
-            Group {
-                switch selectedTab {
-                case .chat:
-                    ChatPanel(isImportingImage: $isImportingImage)
-                        .background(IMColors.chatBg)
-                case .review:
-                    ReviewPanel()
-                        .background(Color.white)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
+        ChatPanel(isImportingImage: $isImportingImage)
+            .background(IMColors.chatBg)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .contentShape(Rectangle())
@@ -130,6 +106,10 @@ struct ChatPanel: View {
 
 struct ChatScrollView: View {
     @EnvironmentObject private var store: BillLensStore
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var reviewDraftId: String?
+    #endif
 
     var body: some View {
         GeometryReader { scrollProxy in
@@ -167,9 +147,48 @@ struct ChatScrollView: View {
                 .onChange(of: store.speechService.isRecording) {
                     withAnimation { reader.scrollTo("chatBottom", anchor: .bottom) }
                 }
+                #if os(iOS)
+                .onChange(of: draftIdSignature) {
+                    closeReviewIfDraftIsGone()
+                }
+                .sheet(
+                    isPresented: Binding(
+                        get: { reviewDraftId != nil },
+                        set: { if !$0 { reviewDraftId = nil } }
+                    )
+                ) {
+                    ReviewPanel(style: .compactSheet)
+                        .environmentObject(store)
+                        .presentationDetents([.medium, .large])
+                        .presentationDragIndicator(.visible)
+                }
+                #endif
             }
         }
     }
+
+    #if os(iOS)
+    private var draftIdSignature: String {
+        store.drafts.map(\.id).joined(separator: "|")
+    }
+
+    private func openReview(for index: Int, draftId: String) {
+        store.selectDraft(at: index)
+        reviewDraftId = draftId
+    }
+
+    private func confirmDraft(at index: Int) {
+        store.selectDraft(at: index)
+        store.confirmDraft()
+    }
+
+    private func closeReviewIfDraftIsGone() {
+        guard let reviewDraftId else { return }
+        if !store.drafts.contains(where: { $0.id == reviewDraftId }) {
+            self.reviewDraftId = nil
+        }
+    }
+    #endif
 
     private func chatContent(width: CGFloat, minHeight: CGFloat = 0) -> some View {
         LazyVStack(spacing: LayoutMetrics.messageGap) {
@@ -202,10 +221,11 @@ struct ChatScrollView: View {
                         transactionAt: draft.transactionAt,
                         status: "待确认",
                         copy: draftCount > 1
-                            ? "共 \(draftCount) 笔待确认账单，点击可切换编辑。"
-                            : "已为你解析出一张待确认账单。若要修改，可以继续说\"改成300元\"，右侧表单也支持直接手动编辑。"
+                            ? "共 \(draftCount) 笔待确认账单，每张卡片可单独审核或确认。"
+                            : "已为你解析出一张待确认账单。若要修改，可以继续说\"改成300元\"，也可以点审核手动编辑。",
+                        actions: draftActions(for: index, draft: draft)
                     )
-                    .opacity(index == store.activeDraftIndex ? 1.0 : 0.7)
+                    .opacity(draftCardOpacity(for: index))
                     .onTapGesture { store.selectDraft(at: index) }
                 }
             } else if let record = store.latestRecord {
@@ -218,7 +238,8 @@ struct ChatScrollView: View {
                     merchant: record.merchant ?? "未填写商户",
                     transactionAt: record.transactionAt,
                     status: "已入库",
-                    copy: "最近确认入库的一笔账单如下。"
+                    copy: "最近确认入库的一笔账单如下。",
+                    actions: nil
                 )
             }
 
@@ -228,31 +249,56 @@ struct ChatScrollView: View {
         // matching standard chat-app behaviour (WhatsApp/iMessage style).
         .frame(minWidth: width, maxWidth: width, minHeight: minHeight, alignment: .bottomLeading)
     }
+
+    private func draftActions(for index: Int, draft: RecordDraft) -> DraftConversationCard.Actions? {
+        #if os(iOS)
+        guard usesCompactDraftReview else { return nil }
+        return .init(
+            review: { openReview(for: index, draftId: draft.id) },
+            confirm: { confirmDraft(at: index) }
+        )
+        #else
+        return nil
+        #endif
+    }
+
+    private func draftCardOpacity(for index: Int) -> Double {
+        #if os(iOS)
+        if usesCompactDraftReview {
+            return 1.0
+        }
+        #endif
+        return index == store.activeDraftIndex ? 1.0 : 0.7
+    }
+
+    private var usesCompactDraftReview: Bool {
+        #if os(iOS)
+        return sizeClass == .compact
+        #else
+        return false
+        #endif
+    }
 }
 
 struct ReviewPanel: View {
+    enum Style: Equatable {
+        case sidebar
+        case compactSheet
+    }
+
     @EnvironmentObject private var store: BillLensStore
+    let style: Style
+
+    init(style: Style = .sidebar) {
+        self.style = style
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("核对确认")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(IMColors.textPrimary)
-                    Spacer()
-                    StatusPill(title: store.drafts.isEmpty ? "等待解析" : "待确认 (\(store.drafts.count))", warning: !store.drafts.isEmpty)
-                }
-                Text("左侧输入后按 Enter 自动更新，也可直接手动修改。")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(IMColors.textSecondary)
+            if style == .sidebar {
+                header
+                IMColors.divider.frame(height: 1)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 10)
-
-            IMColors.divider.frame(height: 1)
 
             // Amount summary — flat, no border
             ReviewSummaryCard(
@@ -293,6 +339,24 @@ struct ReviewPanel: View {
                     .padding(.vertical, 10)
             }
         }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("核对确认")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(IMColors.textPrimary)
+                Spacer()
+                StatusPill(title: store.drafts.isEmpty ? "等待解析" : "待确认 (\(store.drafts.count))", warning: !store.drafts.isEmpty)
+            }
+            Text("左侧输入后按 Enter 自动更新，也可直接手动修改。")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(IMColors.textSecondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
     }
 
     private var reviewSummaryMeta: String {
@@ -369,7 +433,7 @@ struct ReviewPanel: View {
 
     private var reviewActions: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if store.drafts.count > 1 {
+            if style == .sidebar && store.drafts.count > 1 {
                 HStack(spacing: 8) {
                     Button(action: { store.selectDraft(at: store.activeDraftIndex - 1) }) {
                         Image(systemName: "chevron.left")
@@ -404,7 +468,7 @@ struct ReviewPanel: View {
                 ActionButton(title: "确认入库", kind: .primary, minWidth: 76) {
                     store.confirmDraft()
                 }
-                if store.drafts.count > 1 {
+                if style == .sidebar && store.drafts.count > 1 {
                     ActionButton(title: "全部确认", kind: .primary, minWidth: 76) {
                         store.confirmAllDrafts()
                     }

@@ -141,6 +141,11 @@ struct ProgressBubble: View {
 }
 
 struct DraftConversationCard: View {
+    struct Actions {
+        let review: () -> Void
+        let confirm: () -> Void
+    }
+
     let title: String
     let direction: String
     let amount: Double?
@@ -150,6 +155,7 @@ struct DraftConversationCard: View {
     let transactionAt: String?
     let status: String
     let copy: String
+    let actions: Actions?
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -211,6 +217,19 @@ struct DraftConversationCard: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(IMColors.textSecondary)
                 .lineLimit(1)
+            }
+
+            if let actions {
+                HStack(spacing: 8) {
+                    ActionButton(title: "审核", kind: .ghost, minWidth: 56) {
+                        actions.review()
+                    }
+                    ActionButton(title: "确认", kind: .primary, minWidth: 56) {
+                        actions.confirm()
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 2)
             }
         }
     }
