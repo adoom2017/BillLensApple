@@ -5,7 +5,24 @@ import BillLensShared
 import BillLensAppleServices
 
 final class BillLensAppDelegate: NSObject, NSApplicationDelegate {
+    @MainActor
+    private func installDockIcon() {
+        let bundleIconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns")
+        let sourceIconURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("AppIcon.icns")
+
+        for iconURL in [bundleIconURL, sourceIconURL] {
+            guard let iconURL, let iconImage = NSImage(contentsOf: iconURL) else {
+                continue
+            }
+            NSApp.applicationIconImage = iconImage
+            break
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        installDockIcon()
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
         RustBridge.registerSttBackend()

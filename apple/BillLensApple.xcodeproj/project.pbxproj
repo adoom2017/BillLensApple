@@ -7,19 +7,26 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0D4B71531C7A4D6ABF5E9011 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0D4B71521C7A4D6ABF5E9011 /* Assets.xcassets */; };
+		13D2C9AA9EF046A0A47D03A8 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 13D2C9A99EF046A0A47D03A8 /* AppIcon.icns */; };
 		2C5A41B597C546280F2582F9 /* BillLensIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 968DF4D9C5C6410DB7CF0700 /* BillLensIOSApp.swift */; };
 		5C8073FCFA8A3DE41DC3DDCF /* BillLensShared in Frameworks */ = {isa = PBXBuildFile; productRef = D6E37C17C3A4A3256FE6A83B /* BillLensShared */; };
 		5FAAABA1B6FAE90C0D5522E7 /* BillLensAppleServices in Frameworks */ = {isa = PBXBuildFile; productRef = 9119C4F24AF97D7C891E6B46 /* BillLensAppleServices */; };
+		7A6E42CC5A9C44FBA7EFA2AA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7A6E42CB5A9C44FBA7EFA2AA /* Assets.xcassets */; };
 		CAB9E0C11D9D4F688A78F662 /* BillLensAppleServices in Frameworks */ = {isa = PBXBuildFile; productRef = 3AF36A7261AB854C4EABAA1F /* BillLensAppleServices */; };
 		EF836DB681DCFC150E145A9D /* BillLensShared in Frameworks */ = {isa = PBXBuildFile; productRef = 7458D7AC63DB652E864D9498 /* BillLensShared */; };
 		F087F3430891856AC66F1697 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FF3181BDBF6416114DCA583 /* main.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0D4B71521C7A4D6ABF5E9011 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		13D2C9A99EF046A0A47D03A8 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
 		30C9F5D7068F7F964F10475D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		3E86FB5C63FA63F9EE21FBEC /* apple */ = {isa = PBXFileReference; lastKnownFileType = folder; name = apple; path = .; sourceTree = SOURCE_ROOT; };
+		4B5A7F40A0D448E7A1238B11 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5FF3181BDBF6416114DCA583 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		6F653F9DED3ABDD79B39CC0F /* BillLensIOSApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BillLensIOSApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7A6E42CB5A9C44FBA7EFA2AA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		87EBA2BB967BFCF4CF588E43 /* BillLensIOSApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BillLensIOSApp.entitlements; sourceTree = "<group>"; };
 		968DF4D9C5C6410DB7CF0700 /* BillLensIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillLensIOSApp.swift; sourceTree = "<group>"; };
 		97B3DA48E7488EB0FE84B575 /* BillLensMacApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BillLensMacApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -51,6 +58,7 @@
 		0B2B26E3025DBCEB5A202978 /* BillLensIOSApp */ = {
 			isa = PBXGroup;
 			children = (
+				7A6E42CB5A9C44FBA7EFA2AA /* Assets.xcassets */,
 				87EBA2BB967BFCF4CF588E43 /* BillLensIOSApp.entitlements */,
 				968DF4D9C5C6410DB7CF0700 /* BillLensIOSApp.swift */,
 				30C9F5D7068F7F964F10475D /* Info.plist */,
@@ -78,7 +86,10 @@
 		6F92965C9BD3B1FCEBB0917D /* BillLensMacApp */ = {
 			isa = PBXGroup;
 			children = (
+				13D2C9A99EF046A0A47D03A8 /* AppIcon.icns */,
+				0D4B71521C7A4D6ABF5E9011 /* Assets.xcassets */,
 				EC4026DC417A2924A359DAC3 /* BillLensMacApp.entitlements */,
+				4B5A7F40A0D448E7A1238B11 /* Info.plist */,
 				5FF3181BDBF6416114DCA583 /* main.swift */,
 			);
 			path = BillLensMacApp;
@@ -111,6 +122,7 @@
 			buildPhases = (
 				FF527EAFD3A91F6F044D897A /* Sources */,
 				D719820099568E41D4923E36 /* Frameworks */,
+				0D4B71541C7A4D6ABF5E9011 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -131,6 +143,7 @@
 			buildPhases = (
 				E33E37474A904056A7AF0438 /* Sources */,
 				6A3B41DA4E473B0ABAC47092 /* Frameworks */,
+				7A6E42CD5A9C44FBA7EFA2AA /* Resources */,
 			);
 			buildRules = (
 			);
@@ -177,6 +190,26 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		0D4B71541C7A4D6ABF5E9011 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				13D2C9AA9EF046A0A47D03A8 /* AppIcon.icns in Resources */,
+				0D4B71531C7A4D6ABF5E9011 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7A6E42CD5A9C44FBA7EFA2AA /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7A6E42CC5A9C44FBA7EFA2AA /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		E33E37474A904056A7AF0438 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -207,8 +240,8 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "BillLens 需要麦克风权限以支持语音输入账单。";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "BillLens 需要语音识别权限以将语音转换为文字。";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Sources/BillLensMacApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -237,8 +270,8 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "BillLens 需要麦克风权限以支持语音输入账单。";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "BillLens 需要语音识别权限以将语音转换为文字。";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Sources/BillLensMacApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

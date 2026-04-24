@@ -52,7 +52,7 @@ var targets: [Target] = [
     .executableTarget(
         name: "BillLensMacApp",
         dependencies: ["BillLensShared", "BillLensAppleServices"],
-        exclude: ["BillLensMacApp.entitlements"],
+        exclude: ["AppIcon.icns", "Assets.xcassets", "BillLensMacApp.entitlements", "Info.plist"],
         linkerSettings: [
             .unsafeFlags(["-L", macosLibPath, "-lbilllens_ffi"]),
         ]
@@ -66,7 +66,7 @@ if includeIOSApp {
         .executableTarget(
             name: "BillLensIOSApp",
             dependencies: ["BillLensShared", "BillLensAppleServices"],
-            exclude: ["BillLensIOSApp.entitlements", "Info.plist"],
+            exclude: ["Assets.xcassets", "BillLensIOSApp.entitlements", "Info.plist"],
             linkerSettings: [
                 .unsafeFlags(["-L", iosLibPath, "-lbilllens_ffi"]),
             ]
