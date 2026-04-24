@@ -928,10 +928,7 @@ impl BillRepository {
 
     // ── Asset operations ────────────────────────────────────────────────
 
-    pub async fn list_assets(
-        &self,
-        profile_id: &str,
-    ) -> Result<Vec<Asset>> {
+    pub async fn list_assets(&self, profile_id: &str) -> Result<Vec<Asset>> {
         let rows = sqlx::query_as::<_, AssetRow>(
             r#"SELECT * FROM assets WHERE profile_id = ?1 AND deleted_at IS NULL"#,
         )
@@ -2453,7 +2450,7 @@ mod tests {
         BillRepository::connect(&db_path).await.unwrap()
     }
 
-    fn base_record(profile: &str, device: &str) -> (Uuid, RecordCreate) {
+    fn base_record(_profile: &str, _device: &str) -> (Uuid, RecordCreate) {
         (
             Uuid::new_v4(),
             RecordCreate {
