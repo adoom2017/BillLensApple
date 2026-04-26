@@ -256,7 +256,7 @@ struct ComposerPanel: View {
                     .padding(.horizontal, 12)
                     .background(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color.white)
+                            .fill(IMColors.surfaceStrong)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -390,7 +390,7 @@ struct ComposerIconButton: View {
                 .frame(width: 40, height: 40)
                 .background(
                     Circle()
-                        .fill(Color.white)
+                        .fill(IMColors.surfaceStrong)
                         .overlay(Circle().stroke(IMColors.divider, lineWidth: 1))
                 )
                 .contentShape(Circle())
@@ -555,7 +555,7 @@ struct UserAvatar: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .fill(IMColors.darkSurface)
+                .fill(IMColors.accent)
                 .frame(width: LayoutMetrics.avatarSize, height: LayoutMetrics.avatarSize)
             Image(systemName: "person.fill")
                 .font(.system(size: 13, weight: .bold))
@@ -568,7 +568,7 @@ struct AssistantAvatar: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .fill(IMColors.darkSurface)
+                .fill(IMColors.accentDark)
                 .frame(width: LayoutMetrics.avatarSize, height: LayoutMetrics.avatarSize)
             Image(systemName: "cpu")
                 .font(.system(size: 14, weight: .bold))

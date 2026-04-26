@@ -74,7 +74,7 @@ struct EntryShell: View {
         ReviewPanel()
             .frame(width: reviewWidth)
             .frame(maxHeight: .infinity)
-            .background(Color.white)
+            .background(IMColors.surface)
             .clipShape(Rectangle())
     }
 }

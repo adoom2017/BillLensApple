@@ -45,7 +45,7 @@ public struct RootView: View {
         #if os(macOS)
         .frame(minWidth: 1120, minHeight: 720)
         #endif
-        .background(IMColors.pageBgTop.ignoresSafeArea())
+        .background(AppBackdrop().ignoresSafeArea())
         .fileImporter(
             isPresented: $isImportingImage,
             allowedContentTypes: [.image],
@@ -144,7 +144,7 @@ public struct RootView: View {
                 headerTab(.assets)
             }
             .padding(3)
-            .background(.white.opacity(0.08))
+            .background(IMColors.surface.opacity(0.76))
             .overlay(
                 Capsule()
                     .stroke(IMColors.headerTabBorder, lineWidth: 1)
@@ -158,7 +158,7 @@ public struct RootView: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(IMColors.navTextSecondary)
                     .frame(width: settingsButtonSize, height: settingsButtonSize)
-                    .background(.white.opacity(0.08))
+                    .background(IMColors.surface.opacity(0.76))
                     .clipShape(Circle())
                     .overlay(Circle().stroke(IMColors.headerTabBorder, lineWidth: 1))
             }
@@ -170,8 +170,12 @@ public struct RootView: View {
         .padding(.horizontal, headerHorizontalPadding)
         .frame(height: 48)
         .background(IMColors.navGlass)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(IMColors.headerTabBorder, lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .shadow(color: IMColors.headerShadow.opacity(0.18), radius: 30, x: 3, y: 5)
+        .shadow(color: IMColors.headerShadow.opacity(0.12), radius: 24, x: 0, y: 10)
     }
 
     private func headerTab(_ page: AppPage) -> some View {
@@ -190,7 +194,7 @@ public struct RootView: View {
                 )
                 .frame(width: tabButtonSize, height: tabButtonSize)
                 .background(
-                    Circle().fill(selectedPage == page ? Color.white.opacity(0.18) : .clear)
+                    Circle().fill(selectedPage == page ? IMColors.accentBgActive : .clear)
                 )
                 .contentShape(Circle())
             #else
@@ -202,11 +206,41 @@ public struct RootView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
                 .background(
-                    Capsule().fill(selectedPage == page ? Color.white.opacity(0.18) : .clear)
+                    Capsule().fill(selectedPage == page ? IMColors.accentBgActive : .clear)
                 )
                 .contentShape(Capsule())
             #endif
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct AppBackdrop: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [IMColors.pageBgTop, IMColors.pageBgMid, IMColors.pageBgBottom],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            Circle()
+                .fill(IMColors.pageBlobA)
+                .frame(width: 320, height: 320)
+                .blur(radius: 18)
+                .offset(x: -280, y: -220)
+
+            Circle()
+                .fill(IMColors.pageBlobB)
+                .frame(width: 260, height: 260)
+                .blur(radius: 16)
+                .offset(x: 300, y: -170)
+
+            Circle()
+                .fill(IMColors.pageBlobA.opacity(0.45))
+                .frame(width: 360, height: 360)
+                .blur(radius: 20)
+                .offset(x: 360, y: 300)
+        }
     }
 }

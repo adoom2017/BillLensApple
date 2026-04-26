@@ -90,7 +90,7 @@ struct LedgerShell: View {
 
             detailPanel(ledger)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.white)
+                .background(IMColors.surface)
         }
     }
 
@@ -106,11 +106,11 @@ struct LedgerShell: View {
 
                 detailPanel(ledger)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .background(Color.white)
+                    .background(IMColors.surface)
             }
         }
         .scrollIndicators(.automatic)
-        .background(Color.white)
+        .background(IMColors.surface)
     }
 
     private func masterPanel(_ ledger: LedgerSnapshot) -> some View {
@@ -175,7 +175,7 @@ struct LedgerShell: View {
         ZStack {
             IMColors.dividerLegacy
                 .frame(width: 1)
-            Color.white.opacity(0.5)
+            IMColors.surface.opacity(0.72)
                 .frame(width: 1)
                 .offset(x: 1)
         }
@@ -384,7 +384,7 @@ struct LedgerShell: View {
                         .frame(width: 36, height: 36)
                         .background(
                             Circle()
-                                .fill(Color.white.opacity(0.96))
+                                .fill(IMColors.surfaceStrong)
                                 .overlay(Circle().stroke(Color.black.opacity(0.06), lineWidth: 1))
                         )
                         .contentShape(Circle())
@@ -411,7 +411,7 @@ struct LedgerShell: View {
                         .frame(width: 36, height: 36)
                         .background(
                             Circle()
-                                .fill(Color.white.opacity(0.96))
+                                .fill(IMColors.surfaceStrong)
                                 .overlay(Circle().stroke(Color.black.opacity(0.06), lineWidth: 1))
                         )
                         .contentShape(Circle())
@@ -469,7 +469,7 @@ struct LedgerShell: View {
                         .frame(width: 36, height: 36)
                         .background(
                             Circle()
-                                .fill(Color.white.opacity(0.96))
+                                .fill(IMColors.surfaceStrong)
                                 .overlay(Circle().stroke(Color.black.opacity(0.06), lineWidth: 1))
                         )
                         .contentShape(Circle())
@@ -496,7 +496,7 @@ struct LedgerShell: View {
                         .frame(width: 36, height: 36)
                         .background(
                             Circle()
-                                .fill(Color.white.opacity(0.96))
+                                .fill(IMColors.surfaceStrong)
                                 .overlay(Circle().stroke(Color.black.opacity(0.06), lineWidth: 1))
                         )
                         .contentShape(Circle())
@@ -794,7 +794,7 @@ struct CalendarCellLabel: View {
 
     private var amountTextColor: Color {
         if isSelected {
-            return Color.white.opacity(0.9)
+            return IMColors.surface.opacity(0.96)
         }
         if isHot {
             return IMColors.income
@@ -843,7 +843,7 @@ struct MonthAggregationCard: View {
     private static let monthNames = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"]
 
     private var titleColor: Color { item.hasData ? IMColors.textPrimary : IMColors.textPlaceholder }
-    private var bgColor: Color { item.hasData ? Color.white : IMColors.statBg }
+    private var bgColor: Color { item.hasData ? IMColors.surfaceStrong : IMColors.statBg }
     private var borderColor: Color { item.hasData ? Color.black.opacity(0.08) : Color.black.opacity(0.04) }
 
     var body: some View {

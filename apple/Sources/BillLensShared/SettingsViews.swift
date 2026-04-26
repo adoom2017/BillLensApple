@@ -307,7 +307,7 @@ struct SettingsShell: View {
         VStack(spacing: 0) {
             content()
         }
-        .background(Color.white)
+        .background(IMColors.surface)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(IMColors.divider, lineWidth: 1))
     }

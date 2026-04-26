@@ -184,7 +184,7 @@ struct SubscriptionShell: View {
             // Divider
             ZStack {
                 IMColors.dividerLegacy.frame(width: 1)
-                Color.white.opacity(0.5).frame(width: 1).offset(x: 1)
+                IMColors.surface.opacity(0.72).frame(width: 1).offset(x: 1)
             }
             .frame(width: 2)
 
@@ -237,7 +237,7 @@ struct SubscriptionShell: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.white)
+            .background(IMColors.surface)
         }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
@@ -362,7 +362,7 @@ struct SubscriptionCard: View {
             .padding(12)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(isSelected ? IMColors.accentBgActive : Color.white)
+                    .fill(isSelected ? IMColors.accentBgActive : IMColors.surfaceStrong)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
