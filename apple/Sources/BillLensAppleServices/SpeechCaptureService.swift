@@ -47,6 +47,12 @@ private final class AudioCaptureEngine: @unchecked Sendable {
         request.shouldReportPartialResults = true
         recognitionRequest = request
 
+        #if os(iOS)
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.record, mode: .measurement, options: .duckOthers)
+        try session.setActive(true, options: .notifyOthersOnDeactivation)
+        #endif
+
         let inputNode = audioEngine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
         inputNode.removeTap(onBus: 0)
@@ -96,6 +102,9 @@ private final class AudioCaptureEngine: @unchecked Sendable {
         recognitionTask?.cancel()
         recognitionTask = nil
         recognitionRequest = nil
+        #if os(iOS)
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        #endif
     }
 }
 
