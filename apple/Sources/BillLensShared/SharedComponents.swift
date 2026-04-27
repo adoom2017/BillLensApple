@@ -18,12 +18,7 @@ struct WelcomeBubble: View {
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(IMColors.textTertiary)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: LayoutMetrics.bubbleRadius, style: .continuous)
-                    .fill(IMColors.botBubble)
-            )
+            .chatBubbleSurface(fill: IMColors.botBubble, prominence: .regular)
             Spacer(minLength: 44)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -45,12 +40,7 @@ struct MessageBubble: View {
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(IMColors.textTertiary)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: LayoutMetrics.bubbleRadius, style: .continuous)
-                        .fill(IMColors.userBubble)
-                )
+                .chatBubbleSurface(fill: IMColors.userBubble, prominence: .prominent)
                 UserAvatar()
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -65,12 +55,7 @@ struct MessageBubble: View {
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(IMColors.textTertiary)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: LayoutMetrics.bubbleRadius, style: .continuous)
-                        .fill(IMColors.botBubble)
-                )
+                .chatBubbleSurface(fill: IMColors.botBubble, prominence: .regular)
                 Spacer(minLength: 60)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -107,12 +92,7 @@ struct SpeechLiveBubble: View {
                         .foregroundStyle(IMColors.textTertiary)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: LayoutMetrics.bubbleRadius, style: .continuous)
-                    .fill(IMColors.userBubble)
-            )
+            .chatBubbleSurface(fill: IMColors.userBubble, prominence: .prominent)
             UserAvatar()
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -166,18 +146,15 @@ struct DraftConversationCard: View {
                     .foregroundStyle(IMColors.textPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .lineLimit(2)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: LayoutMetrics.bubbleRadius, style: .continuous)
-                            .fill(IMColors.botBubble)
-                    )
+                    .chatBubbleSurface(fill: IMColors.botBubble, prominence: .regular)
 
                 draftCardContent
-                    .padding(12)
-                    .background(
-                        RoundedRectangle(cornerRadius: LayoutMetrics.bubbleRadius, style: .continuous)
-                            .fill(IMColors.botBubble)
+                    .padding(14)
+                    .appRoundedGlass(
+                        cornerRadius: 26,
+                        prominence: .regular,
+                        tint: IMColors.accentBright.opacity(0.08),
+                        fallbackFill: IMColors.botBubble
                     )
                     .frame(maxWidth: 520, alignment: .leading)
 
@@ -235,6 +212,20 @@ struct DraftConversationCard: View {
     }
 }
 
+private extension View {
+    func chatBubbleSurface(fill: Color, prominence: IMGlassProminence) -> some View {
+        self
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .appRoundedGlass(
+                cornerRadius: LayoutMetrics.bubbleRadius,
+                prominence: prominence,
+                tint: IMColors.accentBright.opacity(prominence == .prominent ? 0.10 : 0.06),
+                fallbackFill: fill
+            )
+    }
+}
+
 struct ComposerPanel: View {
     @Binding var composerText: String
     @State private var focusToken = UUID()
@@ -254,13 +245,10 @@ struct ComposerPanel: View {
                 composerEditor
                     .frame(maxWidth: .infinity, minHeight: 40, maxHeight: 40)
                     .padding(.horizontal, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(IMColors.surfaceStrong)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(IMColors.divider, lineWidth: 1)
+                    .appRoundedGlass(
+                        cornerRadius: 12,
+                        tint: IMColors.accentBright.opacity(0.08),
+                        fallbackFill: IMColors.surfaceStrong
                     )
 
                 ComposerIconButton(
@@ -388,10 +376,11 @@ struct ComposerIconButton: View {
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(tint)
                 .frame(width: 40, height: 40)
-                .background(
-                    Circle()
-                        .fill(IMColors.surfaceStrong)
-                        .overlay(Circle().stroke(IMColors.divider, lineWidth: 1))
+                .appCircleGlass(
+                    prominence: .regular,
+                    interactive: true,
+                    tint: IMColors.accentBright.opacity(0.10),
+                    fallbackFill: IMColors.surfaceStrong
                 )
                 .contentShape(Circle())
         }
@@ -422,6 +411,14 @@ struct ReviewSummaryCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .lineLimit(1)
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .appRoundedGlass(
+            cornerRadius: 26,
+            prominence: .regular,
+            tint: IMColors.accentBright.opacity(0.08),
+            fallbackFill: IMColors.surfaceStrong.opacity(0.96)
+        )
     }
 }
 
@@ -446,6 +443,13 @@ struct EmptyReviewState: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .appRoundedGlass(
+            cornerRadius: 24,
+            prominence: .regular,
+            tint: IMColors.accentBright.opacity(0.06),
+            fallbackFill: IMColors.surface.opacity(0.98)
+        )
     }
 }
 
@@ -456,7 +460,7 @@ struct ReviewField<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(IMColors.textSecondary)
@@ -472,9 +476,11 @@ struct ReviewField<Content: View>: View {
             maxWidth: .infinity, minHeight: minimumHeight,
             alignment: alignTop ? .topLeading : .center
         )
-        .overlay(alignment: .bottom) {
-            IMColors.divider.frame(height: 1).opacity(0.5)
-        }
+        .padding(.horizontal, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.white.opacity(0.46))
+        )
     }
 }
 
@@ -483,34 +489,91 @@ struct RecordRowView: View {
     let onDelete: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(record.merchant ?? record.category)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(IMColors.textPrimary)
-                Text(
-                    "\(record.category) · \(BillLensFormatters.displayDateTime(record.transactionAt))"
-                )
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(IMColors.textSecondary)
+        HStack(spacing: 14) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(iconBackground)
+                        .frame(width: 44, height: 44)
+                    Image(systemName: record.direction == "income" ? "arrow.down.circle.fill" : "pills.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(iconForeground)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(record.merchant ?? record.category)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(IMColors.textPrimary)
+                        .lineLimit(1)
+
+                    HStack(spacing: 6) {
+                        recordMetaPill(record.category)
+                        recordMetaPill(BillLensFormatters.displayDateTime(record.transactionAt))
+                    }
+                }
             }
-            Spacer()
-            Text(BillLensFormatters.currencyString(record.amount, currencyCode: record.currency))
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(IMColors.textPrimary)
+
+            Spacer(minLength: 8)
+
+            VStack(alignment: .trailing, spacing: 8) {
+                Text(BillLensFormatters.currencyString(record.amount, currencyCode: record.currency))
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(IMColors.textPrimary)
+                    .lineLimit(1)
+                Text(record.direction == "income" ? "收入" : "支出")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(iconForeground)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(iconBackground)
+                    )
+            }
+
             Button(action: onDelete) {
                 Image(systemName: "trash")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(IMColors.dangerSubtle)
-                    .frame(width: 36, height: 36)
-                    .background(
-                        Circle()
-                            .fill(IMColors.dangerBgLight)
-                    )
+                    .frame(width: 38, height: 38)
+                    .background(Circle().fill(IMColors.dangerBgLight))
+                    .overlay(Circle().stroke(Color.white.opacity(0.75), lineWidth: 1))
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 14)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Color.white.opacity(0.72))
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(Color.white.opacity(0.86), lineWidth: 1)
+        )
+        .shadow(color: IMColors.cardShadow.opacity(0.42), radius: 10, y: 6)
+    }
+
+    private var iconBackground: Color {
+        record.direction == "income" ? IMColors.incomeBgLight : IMColors.accentBgLight
+    }
+
+    private var iconForeground: Color {
+        record.direction == "income" ? IMColors.income : IMColors.accentDark
+    }
+
+    private func recordMetaPill(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(IMColors.textSecondary)
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.white.opacity(0.64))
+            )
     }
 }
 
@@ -553,26 +616,120 @@ struct LedgerSummaryCard: View {
 
 struct UserAvatar: View {
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .fill(IMColors.accent)
-                .frame(width: LayoutMetrics.avatarSize, height: LayoutMetrics.avatarSize)
+        ConversationAvatarShell(
+            gradient: LinearGradient(
+                colors: [
+                    IMColors.accentBright.opacity(0.95),
+                    IMColors.accent.opacity(0.98),
+                    IMColors.accentDark.opacity(0.96)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            rimColor: Color.white.opacity(0.65),
+            glowColor: IMColors.accentBright.opacity(0.22)
+        ) {
             Image(systemName: "person.fill")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.white)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.96))
+                .offset(y: 0.5)
+        } badge: {
+            Circle()
+                .fill(Color.white.opacity(0.90))
+                .frame(width: 8, height: 8)
+                .overlay(
+                    Circle()
+                        .fill(IMColors.accentBright)
+                        .frame(width: 4.5, height: 4.5)
+                )
         }
+        .accessibilityLabel("用户头像")
     }
 }
 
 struct AssistantAvatar: View {
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .fill(IMColors.accentDark)
-                .frame(width: LayoutMetrics.avatarSize, height: LayoutMetrics.avatarSize)
-            Image(systemName: "cpu")
-                .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(.white)
+        ConversationAvatarShell(
+            gradient: LinearGradient(
+                colors: [
+                    Color(red: 0.93, green: 0.98, blue: 1.0),
+                    IMColors.accentBright.opacity(0.92),
+                    IMColors.accent.opacity(0.96)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            rimColor: Color.white.opacity(0.82),
+            glowColor: IMColors.accentBright.opacity(0.28)
+        ) {
+            ZStack {
+                Circle()
+                    .fill(Color.white.opacity(0.24))
+                    .frame(width: 18, height: 18)
+                Image(systemName: "sparkles")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(IMColors.accentDark.opacity(0.92))
+            }
+        } badge: {
+            Capsule(style: .continuous)
+                .fill(Color.white.opacity(0.92))
+                .frame(width: 10, height: 6)
+                .overlay(
+                    Capsule(style: .continuous)
+                        .fill(IMColors.accent.opacity(0.95))
+                        .frame(width: 5.5, height: 3)
+                )
+        }
+        .accessibilityLabel("账单助手头像")
+    }
+}
+
+private struct ConversationAvatarShell<Content: View, Badge: View>: View {
+    let gradient: LinearGradient
+    let rimColor: Color
+    let glowColor: Color
+    @ViewBuilder let content: Content
+    @ViewBuilder let badge: Badge
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            ZStack {
+                Circle()
+                    .fill(gradient)
+                    .shadow(color: glowColor, radius: 8, y: 4)
+
+                Circle()
+                    .stroke(rimColor, lineWidth: 1)
+
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.42),
+                                Color.white.opacity(0.08),
+                                .clear
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .padding(1.5)
+
+                Circle()
+                    .fill(Color.black.opacity(0.06))
+                    .blur(radius: 4)
+                    .offset(y: 5)
+                    .mask(
+                        Circle()
+                            .padding(5)
+                    )
+
+                content
+            }
+            .frame(width: LayoutMetrics.avatarSize, height: LayoutMetrics.avatarSize)
+
+            badge
+                .offset(x: 1, y: 1)
         }
     }
 }
@@ -630,11 +787,8 @@ struct ActionButton: View {
                 .foregroundStyle(foreground)
                 .frame(minWidth: minWidth, minHeight: LayoutMetrics.actionButtonHeight)
                 .padding(.horizontal, 14)
-                .background(shape.fill(backgroundFill))
-                .overlay(
-                    shape
-                        .stroke(borderColor, lineWidth: kind == .primary ? 0 : 1)
-                )
+                .background(buttonBackground(shape: shape))
+                .overlay(shape.stroke(borderColor, lineWidth: kind == .primary ? 0 : 1))
                 .contentShape(shape)
         }
         .buttonStyle(.plain)
@@ -665,6 +819,161 @@ struct ActionButton: View {
         case .dangerGhost:
             return IMColors.dangerBorder
         }
+    }
+
+    @ViewBuilder
+    private func buttonBackground(shape: RoundedRectangle) -> some View {
+        if kind == .primary {
+            shape
+                .fill(IMColors.buttonPrimary)
+                .shadow(color: IMColors.accent.opacity(0.22), radius: 10, y: 6)
+        } else if kind == .ghost {
+            shape
+                .fill(IMColors.surface.opacity(0.36))
+        } else {
+            shape
+                .fill(IMColors.dangerBgLight.opacity(0.72))
+        }
+    }
+}
+
+enum IMGlassProminence {
+    case regular
+    case prominent
+}
+
+extension View {
+    @ViewBuilder
+    func appRoundedGlass(
+        cornerRadius: CGFloat = 18,
+        prominence: IMGlassProminence = .regular,
+        interactive: Bool = false,
+        tint: Color = IMColors.accentBright.opacity(0.12),
+        fallbackFill: Color = IMColors.surface
+    ) -> some View {
+        modifier(
+            IMRoundedGlassModifier(
+                cornerRadius: cornerRadius,
+                prominence: prominence,
+                interactive: interactive,
+                tint: tint,
+                fallbackFill: fallbackFill
+            )
+        )
+    }
+
+    @ViewBuilder
+    func appCapsuleGlass(
+        prominence: IMGlassProminence = .regular,
+        interactive: Bool = false,
+        tint: Color = IMColors.accentBright.opacity(0.12),
+        fallbackFill: Color = IMColors.surface
+    ) -> some View {
+        modifier(
+            IMCapsuleGlassModifier(
+                prominence: prominence,
+                interactive: interactive,
+                tint: tint,
+                fallbackFill: fallbackFill
+            )
+        )
+    }
+
+    @ViewBuilder
+    func appCircleGlass(
+        prominence: IMGlassProminence = .regular,
+        interactive: Bool = false,
+        tint: Color = IMColors.accentBright.opacity(0.12),
+        fallbackFill: Color = IMColors.surface
+    ) -> some View {
+        modifier(
+            IMCircleGlassModifier(
+                prominence: prominence,
+                interactive: interactive,
+                tint: tint,
+                fallbackFill: fallbackFill
+            )
+        )
+    }
+}
+
+private struct IMRoundedGlassModifier: ViewModifier {
+    let cornerRadius: CGFloat
+    let prominence: IMGlassProminence
+    let interactive: Bool
+    let tint: Color
+    let fallbackFill: Color
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        content
+            .background(.ultraThinMaterial, in: shape)
+            .background(shape.fill(fallbackFill.opacity(prominence == .prominent ? 0.90 : 0.82)))
+            .overlay(
+                shape
+                    .fill(tint.opacity(prominence == .prominent ? 0.22 : 0.14))
+                    .allowsHitTesting(false)
+            )
+            .overlay(
+                shape
+                    .stroke(IMColors.headerTabBorder.opacity(borderOpacity), lineWidth: 1)
+                    .allowsHitTesting(false)
+            )
+            .shadow(color: IMColors.cardShadow.opacity(shadowOpacity), radius: shadowRadius, y: shadowYOffset)
+    }
+
+    private var borderOpacity: Double { prominence == .prominent ? 0.95 : 0.72 }
+    private var shadowOpacity: Double { prominence == .prominent ? 0.95 : 0.72 }
+    private var shadowRadius: CGFloat { prominence == .prominent ? 18 : 12 }
+    private var shadowYOffset: CGFloat { prominence == .prominent ? 10 : 6 }
+}
+
+private struct IMCapsuleGlassModifier: ViewModifier {
+    let prominence: IMGlassProminence
+    let interactive: Bool
+    let tint: Color
+    let fallbackFill: Color
+
+    func body(content: Content) -> some View {
+        let shape = Capsule()
+        content
+            .background(.ultraThinMaterial, in: shape)
+            .background(shape.fill(fallbackFill.opacity(prominence == .prominent ? 0.88 : 0.80)))
+            .overlay(
+                shape
+                    .fill(tint.opacity(prominence == .prominent ? 0.20 : 0.12))
+                    .allowsHitTesting(false)
+            )
+            .overlay(
+                shape
+                    .stroke(IMColors.headerTabBorder.opacity(prominence == .prominent ? 0.9 : 0.7), lineWidth: 1)
+                    .allowsHitTesting(false)
+            )
+    }
+}
+
+private struct IMCircleGlassModifier: ViewModifier {
+    let prominence: IMGlassProminence
+    let interactive: Bool
+    let tint: Color
+    let fallbackFill: Color
+
+    func body(content: Content) -> some View {
+        let shape = Circle()
+        content
+            .background(.ultraThinMaterial, in: shape)
+            .background(shape.fill(fallbackFill.opacity(prominence == .prominent ? 0.88 : 0.80)))
+            .overlay(
+                shape
+                    .fill(tint.opacity(prominence == .prominent ? 0.20 : 0.12))
+                    .allowsHitTesting(false)
+            )
+            .overlay(
+                shape
+                    .stroke(IMColors.headerTabBorder.opacity(prominence == .prominent ? 0.9 : 0.7), lineWidth: 1)
+                    .allowsHitTesting(false)
+            )
+            .shadow(color: IMColors.cardShadow.opacity(0.6), radius: 8, y: 4)
     }
 }
 

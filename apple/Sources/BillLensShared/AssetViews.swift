@@ -333,9 +333,11 @@ struct AssetCard: View {
                 }
             }
             .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(isSelected ? IMColors.accentBgActive : IMColors.surfaceStrong)
+            .appRoundedGlass(
+                cornerRadius: 16,
+                prominence: isSelected ? .prominent : .regular,
+                tint: isSelected ? IMColors.accentBright.opacity(0.18) : IMColors.accentBright.opacity(0.08),
+                fallbackFill: isSelected ? IMColors.accentBgActive : IMColors.surfaceStrong
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)

@@ -10,6 +10,9 @@ public struct RootView: View {
     @State private var selectedPage: AppPage = .entry
     @State private var isImportingImage = false
     @State private var showSettings = false
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
 
     public init() {}
 
@@ -76,7 +79,6 @@ public struct RootView: View {
                 .background(IMColors.dangerBg)
                 .clipShape(Capsule())
                 .shadow(color: .black.opacity(0.12), radius: 16, y: 8)
-                .padding(.bottom, 18)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .onAppear {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
@@ -85,6 +87,7 @@ public struct RootView: View {
                         }
                     }
                 }
+                .padding(.bottom, 18)
             }
         }
     }
@@ -93,17 +96,15 @@ public struct RootView: View {
         #if os(iOS)
         let outerSpacing: CGFloat = 6
         let brandSpacing: CGFloat = 6
-        let logoSize: CGFloat = 28
+        let logoSize: CGFloat = 24
         let headerHorizontalPadding: CGFloat = 4
-        let tabSpacing: CGFloat = 2
-        let settingsButtonSize: CGFloat = 30
+        let settingsButtonSize: CGFloat = 28
         #else
-        let outerSpacing: CGFloat = 14
-        let brandSpacing: CGFloat = 10
-        let logoSize: CGFloat = 32
+        let outerSpacing: CGFloat = 12
+        let brandSpacing: CGFloat = 8
+        let logoSize: CGFloat = 26
         let headerHorizontalPadding: CGFloat = 10
-        let tabSpacing: CGFloat = 8
-        let settingsButtonSize: CGFloat = 32
+        let settingsButtonSize: CGFloat = 30
         #endif
 
         return HStack(alignment: .center, spacing: outerSpacing) {
@@ -117,50 +118,48 @@ public struct RootView: View {
                                 .stroke(IMColors.logoBorder, lineWidth: 1)
                         )
                     Image(systemName: "list.bullet.rectangle.portrait")
-                        .font(.system(size: 14, weight: .bold))
+                        .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(IMColors.navText)
                 }
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 1) {
                     Text("BillLens")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(IMColors.navText)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                     Text("账单助手")
-                        .font(.system(size: 11, weight: .regular))
+                        .font(.system(size: 10, weight: .regular))
                         .foregroundStyle(IMColors.navTextSecondary)
                 }
                 .fixedSize(horizontal: true, vertical: false)
             }
             .layoutPriority(2)
 
-            Spacer(minLength: 4)
+            Spacer(minLength: 8)
 
-            HStack(spacing: tabSpacing) {
-                headerTab(.entry)
-                headerTab(.ledger)
-                headerTab(.subscriptions)
-                headerTab(.assets)
+            mergedNavBar
+                .layoutPriority(1)
+
+            Spacer(minLength: 8)
+
+            if showsHeaderStats {
+                headerStatusPanel
             }
-            .padding(3)
-            .background(IMColors.surface.opacity(0.76))
-            .overlay(
-                Capsule()
-                    .stroke(IMColors.headerTabBorder, lineWidth: 1)
-            )
-            .clipShape(Capsule())
 
             Button {
                 showSettings = true
             } label: {
                 Image(systemName: "gearshape")
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(IMColors.navTextSecondary)
                     .frame(width: settingsButtonSize, height: settingsButtonSize)
-                    .background(IMColors.surface.opacity(0.76))
-                    .clipShape(Circle())
-                    .overlay(Circle().stroke(IMColors.headerTabBorder, lineWidth: 1))
+                    .appCircleGlass(
+                        prominence: .regular,
+                        interactive: true,
+                        tint: IMColors.accentBright.opacity(0.10),
+                        fallbackFill: IMColors.surfaceStrong
+                    )
             }
             .buttonStyle(.plain)
             .sheet(isPresented: $showSettings) {
@@ -168,50 +167,138 @@ public struct RootView: View {
             }
         }
         .padding(.horizontal, headerHorizontalPadding)
-        .frame(height: 48)
-        .background(IMColors.navGlass)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(IMColors.headerTabBorder, lineWidth: 1)
+        .padding(.vertical, 8)
+        .appRoundedGlass(
+            cornerRadius: 18,
+            prominence: .prominent,
+            tint: IMColors.accentBright.opacity(0.10),
+            fallbackFill: IMColors.navGlass
         )
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .shadow(color: IMColors.headerShadow.opacity(0.12), radius: 24, x: 0, y: 10)
     }
 
-    private func headerTab(_ page: AppPage) -> some View {
-        #if os(iOS)
-        let tabButtonSize: CGFloat = 32
-        #endif
+    private var headerStatusPanel: some View {
+        HStack(spacing: 10) {
+            HeaderStatusChip(
+                title: "待确认",
+                value: "\(store.drafts.count)",
+                highlight: store.drafts.isEmpty ? IMColors.textSecondary : IMColors.accentDark
+            )
+            HeaderStatusChip(
+                title: "最近入库",
+                value: store.latestRecord.map { BillLensFormatters.currencyString($0.amount, currencyCode: $0.currency) } ?? "暂无",
+                highlight: IMColors.textPrimary
+            )
+        }
+    }
 
-        return Button {
-            selectedPage = page
+    private var mergedNavBar: some View {
+        HStack(spacing: 8) {
+            ForEach(AppPage.allCases, id: \.rawValue) { page in
+                bottomDockItem(page)
+            }
+        }
+        .padding(.horizontal, compactDock ? 2 : 4)
+        .padding(.vertical, 2)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.24))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.40), lineWidth: 1)
+        )
+    }
+
+    private func bottomDockItem(_ page: AppPage) -> some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.22)) {
+                selectedPage = page
+            }
         } label: {
-            #if os(iOS)
-            Image(systemName: page.icon)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(
-                    selectedPage == page ? IMColors.navText : IMColors.navTextSecondary
-                )
-                .frame(width: tabButtonSize, height: tabButtonSize)
-                .background(
-                    Circle().fill(selectedPage == page ? IMColors.accentBgActive : .clear)
-                )
-                .contentShape(Circle())
-            #else
-            Text(page.title)
-                .font(.system(size: 13, weight: .regular))
-                .foregroundStyle(
-                    selectedPage == page ? IMColors.navText : IMColors.navTextSecondary
-                )
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(
-                    Capsule().fill(selectedPage == page ? IMColors.accentBgActive : .clear)
-                )
-                .contentShape(Capsule())
-            #endif
+            HStack(spacing: compactDock ? 0 : 8) {
+                Image(systemName: page.icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(selectedPage == page ? .white : IMColors.navTextSecondary)
+                    .frame(width: 26, height: 26)
+                    .background(
+                        Circle()
+                            .fill(selectedPage == page ? IMColors.accent : Color.white.opacity(0.44))
+                    )
+
+                if !compactDock {
+                    Text(page.title)
+                        .font(.system(size: 12, weight: selectedPage == page ? .semibold : .medium))
+                        .foregroundStyle(selectedPage == page ? IMColors.navText : IMColors.navTextSecondary)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, compactDock ? 6 : 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(selectedPage == page ? Color.white.opacity(0.52) : Color.clear)
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(Color.white.opacity(selectedPage == page ? 0.72 : 0.0), lineWidth: 1)
+            )
+            .overlay(alignment: .bottom) {
+                Capsule(style: .continuous)
+                    .fill(selectedPage == page ? IMColors.accent.opacity(0.92) : .clear)
+                    .frame(width: compactDock ? 16 : 24, height: 3)
+                    .offset(y: 6)
+            }
+            .scaleEffect(selectedPage == page ? 1.0 : 0.97)
+            .shadow(
+                color: selectedPage == page
+                    ? IMColors.accent.opacity(0.16)
+                    : .clear,
+                radius: 10,
+                y: 6
+            )
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+    }
+
+    private var showsHeaderStats: Bool {
+        #if os(iOS)
+        return sizeClass != .compact
+        #else
+        return true
+        #endif
+    }
+
+    private var compactDock: Bool {
+        #if os(iOS)
+        return sizeClass == .compact
+        #else
+        return false
+        #endif
+    }
+}
+
+private struct HeaderStatusChip: View {
+    let title: String
+    let value: String
+    let highlight: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(IMColors.textMuted)
+            Text(value)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(highlight)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.38))
+        )
     }
 }
 

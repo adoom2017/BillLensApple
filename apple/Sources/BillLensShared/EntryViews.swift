@@ -31,21 +31,17 @@ struct EntryShell: View {
     }
 
     private var desktopLayout: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 14) {
             chatSide
-            groovedDivider
             reviewSide
         }
         .frame(width: availableWidth, height: availableHeight, alignment: .topLeading)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     #if os(iOS)
     private var compactLayout: some View {
         ChatPanel(isImportingImage: $isImportingImage)
-            .background(IMColors.chatBg)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .contentShape(Rectangle())
         .onTapGesture {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
@@ -61,21 +57,24 @@ struct EntryShell: View {
         ChatPanel(isImportingImage: $isImportingImage)
             .frame(width: chatWidth)
             .frame(maxHeight: .infinity)
-            .background(IMColors.chatBg)
-            .clipShape(Rectangle())
-    }
-
-    private var groovedDivider: some View {
-        IMColors.divider
-            .frame(width: 1)
+            .appRoundedGlass(
+                cornerRadius: 34,
+                prominence: .prominent,
+                tint: IMColors.accentBright.opacity(0.08),
+                fallbackFill: IMColors.chatBg.opacity(0.95)
+            )
     }
 
     private var reviewSide: some View {
         ReviewPanel()
             .frame(width: reviewWidth)
             .frame(maxHeight: .infinity)
-            .background(IMColors.surface)
-            .clipShape(Rectangle())
+            .appRoundedGlass(
+                cornerRadius: 34,
+                prominence: .prominent,
+                tint: IMColors.accentBright.opacity(0.05),
+                fallbackFill: IMColors.surface.opacity(0.98)
+            )
     }
 }
 
@@ -87,8 +86,8 @@ struct ChatPanel: View {
         VStack(alignment: .leading, spacing: 0) {
             ChatScrollView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.horizontal, 14)
-                .padding(.top, 14)
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
                 .clipShape(Rectangle())
 
             ComposerPanel(
@@ -98,6 +97,8 @@ struct ChatPanel: View {
                 onVoice: { store.toggleRecording() },
                 onSubmit: { store.submitText() }
             )
+            .padding(.horizontal, 16)
+            .padding(.bottom, 14)
         }
     }
 }
@@ -282,10 +283,8 @@ struct ReviewPanel: View {
         VStack(alignment: .leading, spacing: 0) {
             if style == .sidebar {
                 header
-                IMColors.divider.frame(height: 1)
             }
 
-            // Amount summary — flat, no border
             ReviewSummaryCard(
                 direction: store.draftForm.direction,
                 amount: store.currentDraft?.amount,
@@ -295,8 +294,6 @@ struct ReviewPanel: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
 
-            IMColors.divider.frame(height: 1)
-
             if store.currentDraft == nil {
                 EmptyReviewState(latestRecord: store.latestRecord)
                     .padding(16)
@@ -304,7 +301,10 @@ struct ReviewPanel: View {
             } else {
                 GeometryReader { scrollProxy in
                     ScrollView {
-                        reviewFields
+                        VStack(alignment: .leading, spacing: 12) {
+                            draftSourceCard
+                            reviewFields
+                        }
                             .frame(width: max(scrollProxy.size.width - 2, 0), alignment: .leading)
                     }
                     .scrollIndicators(.hidden)
@@ -317,8 +317,6 @@ struct ReviewPanel: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
 
-                IMColors.divider.frame(height: 1)
-
                 reviewActions
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
@@ -327,21 +325,33 @@ struct ReviewPanel: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
-                Text("核对确认")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(IMColors.textPrimary)
-                Spacer()
                 StatusPill(title: store.drafts.isEmpty ? "等待解析" : "待确认 (\(store.drafts.count))", warning: !store.drafts.isEmpty)
+                Spacer()
+                if store.drafts.count > 1 {
+                    Text("多笔")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(IMColors.accentDark)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(IMColors.accentBgLight)
+                        )
+                }
             }
-            Text("左侧输入后按 Enter 自动更新，也可直接手动修改。")
+
+            Text("草稿编辑")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(IMColors.textPrimary)
+            Text("先看识别结果，再改字段；确认后会直接写入账单。")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(IMColors.textSecondary)
         }
         .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 10)
+        .padding(.top, 18)
+        .padding(.bottom, 6)
     }
 
     private var reviewSummaryMeta: String {
@@ -354,64 +364,74 @@ struct ReviewPanel: View {
     }
 
     private var reviewFields: some View {
-        VStack(spacing: 8) {
-            ReviewField(title: "类型") {
-                Picker(
-                    "",
-                    selection: Binding(
-                        get: { store.draftForm.direction },
-                        set: { store.setDraftDirection($0) }
-                    )
-                ) {
-                    Text("支出").tag("expense")
-                    Text("收入").tag("income")
-                }
-                .pickerStyle(.segmented)
-            }
-
-            ReviewField(title: "金额") {
-                TextField("0.00", text: $store.draftForm.amount)
-                    .textFieldStyle(.plain)
-            }
-
-            ReviewField(title: "币种") {
-                TextField(
-                    "例如：CNY / USD / EUR",
-                    text: Binding(
-                        get: { store.draftForm.currency },
-                        set: { store.draftForm.currency = $0.uppercased() }
-                    )
-                )
-                .textFieldStyle(.plain)
-            }
-
-            ReviewField(title: "分类") {
-                Picker("", selection: $store.draftForm.category) {
-                    ForEach(store.availableCategories, id: \.self) { category in
-                        Text(category).tag(category)
+        VStack(spacing: 12) {
+            ReviewFieldGroup(
+                title: "核心字段",
+                subtitle: "把金额、方向、分类先修准。"
+            ) {
+                ReviewField(title: "类型") {
+                    Picker(
+                        "",
+                        selection: Binding(
+                            get: { store.draftForm.direction },
+                            set: { store.setDraftDirection($0) }
+                        )
+                    ) {
+                        Text("支出").tag("expense")
+                        Text("收入").tag("income")
                     }
+                    .pickerStyle(.segmented)
                 }
-                .pickerStyle(.menu)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
 
-            ReviewField(title: "商户") {
-                TextField("例如：牛肉馆", text: $store.draftForm.merchant)
+                ReviewField(title: "金额") {
+                    TextField("0.00", text: $store.draftForm.amount)
+                        .textFieldStyle(.plain)
+                }
+
+                ReviewField(title: "币种") {
+                    TextField(
+                        "例如：CNY / USD / EUR",
+                        text: Binding(
+                            get: { store.draftForm.currency },
+                            set: { store.draftForm.currency = $0.uppercased() }
+                        )
+                    )
                     .textFieldStyle(.plain)
-            }
+                }
 
-            ReviewField(title: "时间") {
-                DatePicker("", selection: $store.draftForm.transactionAt)
-                    .labelsHidden()
+                ReviewField(title: "分类") {
+                    Picker("", selection: $store.draftForm.category) {
+                        ForEach(store.availableCategories, id: \.self) { category in
+                            Text(category).tag(category)
+                        }
+                    }
+                    .pickerStyle(.menu)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
 
-            ReviewField(title: "备注", minimumHeight: LayoutMetrics.noteHeight, alignTop: true) {
-                TextEditor(text: $store.draftForm.note)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(IMColors.textPrimary)
-                    .scrollContentBackground(.hidden)
-                    .frame(minHeight: 44, maxHeight: 44)
+            ReviewFieldGroup(
+                title: "补充信息",
+                subtitle: "商户、时间和备注决定后续检索体验。"
+            ) {
+                ReviewField(title: "商户") {
+                    TextField("例如：牛肉馆", text: $store.draftForm.merchant)
+                        .textFieldStyle(.plain)
+                }
+
+                ReviewField(title: "时间") {
+                    DatePicker("", selection: $store.draftForm.transactionAt)
+                        .labelsHidden()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                ReviewField(title: "备注", minimumHeight: LayoutMetrics.noteHeight, alignTop: true) {
+                    TextEditor(text: $store.draftForm.note)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(IMColors.textPrimary)
+                        .scrollContentBackground(.hidden)
+                        .frame(minHeight: 44, maxHeight: 60)
+                }
             }
         }
     }
@@ -419,26 +439,10 @@ struct ReviewPanel: View {
     private var reviewActions: some View {
         VStack(alignment: .leading, spacing: 10) {
             if style == .sidebar && store.drafts.count > 1 {
-                HStack(spacing: 8) {
-                    Button(action: { store.selectDraft(at: store.activeDraftIndex - 1) }) {
-                        Image(systemName: "chevron.left")
-                    }
-                    .disabled(store.activeDraftIndex <= 0)
-
-                    Text("第 \(store.activeDraftIndex + 1)/\(store.drafts.count) 笔")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(IMColors.textSecondary)
-
-                    Button(action: { store.selectDraft(at: store.activeDraftIndex + 1) }) {
-                        Image(systemName: "chevron.right")
-                    }
-                    .disabled(store.activeDraftIndex >= store.drafts.count - 1)
-
-                    Spacer()
-                }
+                reviewNavigator
             }
 
-            Text("确认后将写入数据库，并同步出现在账单一览中。")
+            Text("确认后会写入数据库，并出现在账单一览里。")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(IMColors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -461,6 +465,285 @@ struct ReviewPanel: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.top, 4)
+        .padding(14)
+        .appRoundedGlass(
+            cornerRadius: 24,
+            prominence: .regular,
+            tint: IMColors.accentBright.opacity(0.06),
+            fallbackFill: IMColors.surface.opacity(0.96)
+        )
+    }
+
+    private var draftSourceCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                AssistantAvatar()
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("识别草稿")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(IMColors.textSecondary)
+                    Text(draftSourceText)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(IMColors.textPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .lineLimit(3)
+                    Text(reviewSummaryMeta)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(IMColors.textTertiary)
+                        .lineLimit(2)
+                }
+            }
+        }
+        .padding(14)
+        .appRoundedGlass(
+            cornerRadius: 24,
+            prominence: .regular,
+            tint: IMColors.accentBright.opacity(0.06),
+            fallbackFill: IMColors.surface.opacity(0.96)
+        )
+    }
+
+    private var draftSourceText: String {
+        if let content = store.currentDraft?.content, !content.isEmpty {
+            return content
+        }
+        return "等待新的账单输入。"
+    }
+
+    private var reviewNavigator: some View {
+        HStack(spacing: 8) {
+            ReviewPagerButton(systemImage: "chevron.left") {
+                store.selectDraft(at: store.activeDraftIndex - 1)
+            }
+            .disabled(store.activeDraftIndex <= 0)
+
+            Text("第 \(store.activeDraftIndex + 1)/\(store.drafts.count) 笔")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(IMColors.textSecondary)
+
+            ReviewPagerButton(systemImage: "chevron.right") {
+                store.selectDraft(at: store.activeDraftIndex + 1)
+            }
+            .disabled(store.activeDraftIndex >= store.drafts.count - 1)
+
+            Spacer()
+        }
+    }
+}
+
+private struct ReviewFieldGroup<Content: View>: View {
+    let title: String
+    let subtitle: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(IMColors.textPrimary)
+                Text(subtitle)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(IMColors.textSecondary)
+            }
+
+            content
+        }
+        .padding(14)
+        .appRoundedGlass(
+            cornerRadius: 24,
+            prominence: .regular,
+            tint: IMColors.accentBright.opacity(0.05),
+            fallbackFill: IMColors.surface.opacity(0.94)
+        )
+    }
+}
+
+private struct ReviewPagerButton: View {
+    let systemImage: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(IMColors.accentDark)
+                .frame(width: 30, height: 30)
+                .background(
+                    Circle()
+                        .fill(Color.white.opacity(0.7))
+                )
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.82), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct EntryOverviewStrip: View {
+    @EnvironmentObject private var store: BillLensStore
+    let isRecording: Bool
+    let onImage: () -> Void
+    let onVoice: () -> Void
+
+    var body: some View {
+        Group {
+            #if os(iOS)
+            VStack(alignment: .leading, spacing: 12) {
+                compactHeadline
+                compactMetrics
+                quickActionsRow
+            }
+            #else
+            HStack(spacing: 14) {
+                compactHeadline
+                Spacer(minLength: 0)
+                compactMetrics
+                quickActionsRow
+                    .frame(width: 208)
+            }
+            #endif
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .appRoundedGlass(
+            cornerRadius: 24,
+            prominence: .regular,
+            tint: IMColors.accentBright.opacity(0.08),
+            fallbackFill: IMColors.surfaceStrong.opacity(0.94)
+        )
+    }
+
+    private var compactHeadline: some View {
+        HStack(alignment: .center, spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(IMColors.accentBgLight)
+                    .frame(width: 36, height: 36)
+                Image(systemName: isRecording ? "waveform.circle.fill" : "ellipsis.message.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(IMColors.accentDark)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(heroTitle)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(IMColors.textPrimary)
+                Text(headlineSubtitle)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(IMColors.textSecondary)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    private var heroTitle: String {
+        if isRecording {
+            return "正在聆听"
+        }
+        if !store.drafts.isEmpty {
+            return "还有 \(store.drafts.count) 笔待确认"
+        }
+        return "准备录入新账单"
+    }
+
+    private var headlineSubtitle: String {
+        if let draft = store.currentDraft {
+            return draft.note ?? draft.merchant ?? "已有草稿，继续在对话里补充。"
+        }
+        return "先说一句，下面的对话区直接接住。"
+    }
+
+    private var compactMetrics: some View {
+        HStack(spacing: 8) {
+            compactMetric(title: "待确认", value: "\(store.drafts.count)")
+            compactMetric(title: "对话", value: "\(store.messages.count)")
+            compactMetric(title: "最近", value: latestRecordValue)
+        }
+    }
+
+    private var quickActionsRow: some View {
+        HStack(spacing: 10) {
+            EntryStripAction(
+                title: "票据",
+                systemImage: "photo",
+                primary: false,
+                action: onImage
+            )
+            EntryStripAction(
+                title: isRecording ? "停止" : "语音",
+                systemImage: isRecording ? "stop.fill" : "waveform",
+                primary: true,
+                action: onVoice
+            )
+        }
+    }
+
+    private var latestRecordValue: String {
+        if let latest = store.latestRecord {
+            return BillLensFormatters.currencyString(latest.amount, currencyCode: latest.currency)
+        }
+        return "暂无"
+    }
+
+    private func compactMetric(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(IMColors.textMuted)
+            Text(value)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(IMColors.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Color.white.opacity(0.52))
+        )
+    }
+}
+
+private struct EntryStripAction: View {
+    let title: String
+    let systemImage: String
+    let primary: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(primary ? IMColors.accent : Color.white.opacity(0.68))
+                    .frame(width: 30, height: 30)
+                    .overlay(
+                        Image(systemName: systemImage)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(primary ? Color.white : IMColors.accentDark)
+                    )
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(IMColors.textPrimary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(primary ? Color.white.opacity(0.62) : Color.white.opacity(0.42))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(Color.white.opacity(0.78), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }

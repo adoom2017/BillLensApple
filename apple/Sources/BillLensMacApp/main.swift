@@ -51,6 +51,10 @@ struct BillLensMacApp: App {
             RootView()
                 .environmentObject(store)
         }
+        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unifiedCompact)
+        .defaultSize(width: 1240, height: 820)
+        .windowResizability(.contentMinSize)
     }
 }
 #endif

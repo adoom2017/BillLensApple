@@ -382,10 +382,10 @@ struct LedgerShell: View {
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(IMColors.textMuted)
                         .frame(width: 36, height: 36)
-                        .background(
-                            Circle()
-                                .fill(IMColors.surfaceStrong)
-                                .overlay(Circle().stroke(Color.black.opacity(0.06), lineWidth: 1))
+                        .appCircleGlass(
+                            interactive: true,
+                            tint: IMColors.accentBright.opacity(0.08),
+                            fallbackFill: IMColors.surfaceStrong
                         )
                         .contentShape(Circle())
                 }
@@ -409,10 +409,10 @@ struct LedgerShell: View {
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(IMColors.textMuted)
                         .frame(width: 36, height: 36)
-                        .background(
-                            Circle()
-                                .fill(IMColors.surfaceStrong)
-                                .overlay(Circle().stroke(Color.black.opacity(0.06), lineWidth: 1))
+                        .appCircleGlass(
+                            interactive: true,
+                            tint: IMColors.accentBright.opacity(0.08),
+                            fallbackFill: IMColors.surfaceStrong
                         )
                         .contentShape(Circle())
                 }
@@ -467,10 +467,10 @@ struct LedgerShell: View {
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(IMColors.textMuted)
                         .frame(width: 36, height: 36)
-                        .background(
-                            Circle()
-                                .fill(IMColors.surfaceStrong)
-                                .overlay(Circle().stroke(Color.black.opacity(0.06), lineWidth: 1))
+                        .appCircleGlass(
+                            interactive: true,
+                            tint: IMColors.accentBright.opacity(0.08),
+                            fallbackFill: IMColors.surfaceStrong
                         )
                         .contentShape(Circle())
                 }
@@ -494,10 +494,10 @@ struct LedgerShell: View {
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(IMColors.textMuted)
                         .frame(width: 36, height: 36)
-                        .background(
-                            Circle()
-                                .fill(IMColors.surfaceStrong)
-                                .overlay(Circle().stroke(Color.black.opacity(0.06), lineWidth: 1))
+                        .appCircleGlass(
+                            interactive: true,
+                            tint: IMColors.accentBright.opacity(0.08),
+                            fallbackFill: IMColors.surfaceStrong
                         )
                         .contentShape(Circle())
                 }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum AppPage: String {
+enum AppPage: String, CaseIterable {
     case entry
     case ledger
     case subscriptions
@@ -33,7 +33,7 @@ enum LayoutMetrics {
     static let actionButtonHeight: CGFloat = 40
     static let messageGap: CGFloat = 14
     static let headerSpacing: CGFloat = 12
-    static let bubbleRadius: CGFloat = 8
+    static let bubbleRadius: CGFloat = 22
     static let avatarSize: CGFloat = 32
 }
 
