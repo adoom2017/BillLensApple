@@ -1,5 +1,7 @@
 import SwiftUI
 
+private let openAICompatibleProviderID = "openai_compatible"
+
 // MARK: - Provider definitions
 
 private struct ProviderOption: Identifiable {
@@ -10,13 +12,17 @@ private struct ProviderOption: Identifiable {
 }
 
 private let knownProviders: [ProviderOption] = [
-    ProviderOption(id: "openai",             displayName: "OpenAI",          fixedUrl: "https://api.openai.com/v1",                              modelHint: "gpt-4o"),
-    ProviderOption(id: "anthropic",          displayName: "Anthropic",       fixedUrl: "https://api.anthropic.com/v1",                           modelHint: "claude-sonnet-4-6"),
-    ProviderOption(id: "deepseek",           displayName: "DeepSeek",        fixedUrl: "https://api.deepseek.com/v1",                            modelHint: "deepseek-chat"),
-    ProviderOption(id: "moonshot",           displayName: "月之暗面 (Kimi)", fixedUrl: "https://api.moonshot.cn/v1",                             modelHint: "moonshot-v1-8k"),
-    ProviderOption(id: "zhipu",             displayName: "智谱 (GLM)",      fixedUrl: "https://open.bigmodel.cn/api/paas/v4",                   modelHint: "glm-4-flash"),
-    ProviderOption(id: "qwen",              displayName: "通义千问",         fixedUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",      modelHint: "qwen-plus"),
-    ProviderOption(id: "openai_compatible", displayName: "OpenAI 兼容",     fixedUrl: nil,                                                      modelHint: ""),
+    ProviderOption(id: "openai",             displayName: "OpenAI",          fixedUrl: "https://api.openai.com/v1",                         modelHint: "gpt-4o"),
+    ProviderOption(id: "anthropic",          displayName: "Anthropic",       fixedUrl: "https://api.anthropic.com/v1",                      modelHint: "claude-sonnet-4-6"),
+    ProviderOption(id: "deepseek",           displayName: "DeepSeek",        fixedUrl: "https://api.deepseek.com/v1",                       modelHint: "deepseek-chat"),
+    ProviderOption(id: "moonshot",           displayName: "月之暗面 (Kimi)", fixedUrl: "https://api.moonshot.cn/v1",                        modelHint: "moonshot-v1-8k"),
+    ProviderOption(id: "zhipu",              displayName: "智谱 (GLM)",      fixedUrl: "https://open.bigmodel.cn/api/paas/v4",              modelHint: "glm-4-flash"),
+    ProviderOption(id: "qwen",               displayName: "通义千问",         fixedUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", modelHint: "qwen-plus"),
+    ProviderOption(id: "groq",               displayName: "Groq",            fixedUrl: "https://api.groq.com/openai/v1",                    modelHint: "llama-3.3-70b-versatile"),
+    ProviderOption(id: "xai",                displayName: "xAI",             fixedUrl: "https://api.x.ai/v1",                               modelHint: "grok-3-mini"),
+    ProviderOption(id: "siliconflow",        displayName: "SiliconFlow",     fixedUrl: "https://api.siliconflow.com/v1",                    modelHint: "Qwen/Qwen3-32B"),
+    ProviderOption(id: "volcengine_ark",     displayName: "火山方舟",         fixedUrl: "https://ark.cn-beijing.volces.com/api/v3",          modelHint: "doubao-1-5-pro-32k"),
+    ProviderOption(id: openAICompatibleProviderID, displayName: "OpenAI 兼容", fixedUrl: nil,                                                modelHint: "model-name"),
 ]
 
 // MARK: - Settings Sheet
@@ -33,6 +39,11 @@ struct SettingsShell: View {
     @State private var isSaving = false
     @State private var saveSuccess = false
     @State private var saveError: String?
+    @State private var fetchedModels: [LlmModelItem] = []
+    @State private var isLoadingModels = false
+    @State private var modelLoadError: String?
+    @State private var hasLoadedModels = false
+
     #if os(iOS)
     @FocusState private var focusedField: Field?
     private enum Field { case baseUrl, apiKey, model }
@@ -42,11 +53,37 @@ struct SettingsShell: View {
         knownProviders.first { $0.id == provider } ?? knownProviders.last!
     }
 
-    private var urlIsEditable: Bool { selectedProvider.fixedUrl == nil }
+    private var urlIsEditable: Bool {
+        selectedProvider.fixedUrl == nil
+    }
+
+    private var normalizedModel: String {
+        model.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var normalizedBaseUrl: String {
+        baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var selectedFetchedModel: LlmModelItem? {
+        fetchedModels.first { $0.id == normalizedModel }
+    }
+
+    private var modelMenuTitle: String {
+        if let selectedFetchedModel {
+            return modelMenuLabel(for: selectedFetchedModel)
+        }
+        if isLoadingModels {
+            return "加载中…"
+        }
+        if hasLoadedModels && fetchedModels.isEmpty {
+            return "未返回可选模型"
+        }
+        return "从列表选择"
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            // Title bar
             HStack {
                 Text("LLM 连接配置")
                     .font(.system(size: 16, weight: .bold))
@@ -70,87 +107,15 @@ struct SettingsShell: View {
             ScrollView {
                 VStack(spacing: 16) {
                     settingsCard {
-                        // Provider picker
-                        HStack(alignment: .center) {
-                            Text("服务商")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(IMColors.textMuted)
-                                .frame(width: 90, alignment: .leading)
-
-                            Picker("", selection: Binding(
-                                get: { provider },
-                                set: { newValue in
-                                    provider = newValue
-                                    applyProviderDefaults()
-                                }
-                            )) {
-                                ForEach(knownProviders) { p in
-                                    Text(p.displayName).tag(p.id)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-
+                        providerPickerRow
                         Divider().opacity(0.25)
-
-                        // Base URL (locked for official providers)
-                        fieldRow(label: "Base URL", hint: "https://api.openai.com/v1") {
-                            TextField("", text: $baseUrl)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 13))
-                                .foregroundStyle(urlIsEditable ? IMColors.textPrimary : IMColors.textMuted)
-                                .disabled(!urlIsEditable)
-                                #if os(iOS)
-                                .focused($focusedField, equals: .baseUrl)
-                                #endif
-                        }
-
+                        baseURLRow
                         Divider().opacity(0.25)
-
-                        fieldRow(label: "API Key", hint: "留空则不鉴权") {
-                            HStack(spacing: 6) {
-                                if showApiKey {
-                                    TextField("留空则不鉴权", text: $apiKey)
-                                        .textFieldStyle(.plain)
-                                        .font(.system(size: 13))
-                                        .foregroundStyle(IMColors.textPrimary)
-                                        #if os(iOS)
-                                        .focused($focusedField, equals: .apiKey)
-                                        #endif
-                                } else {
-                                    SecureField("留空则不鉴权", text: $apiKey)
-                                        .textFieldStyle(.plain)
-                                        .font(.system(size: 13))
-                                        .foregroundStyle(IMColors.textPrimary)
-                                        #if os(iOS)
-                                        .focused($focusedField, equals: .apiKey)
-                                        #endif
-                                }
-                                Button {
-                                    showApiKey.toggle()
-                                } label: {
-                                    Image(systemName: showApiKey ? "eye.slash" : "eye")
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(IMColors.textMuted)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-
+                        apiKeyRow
                         Divider().opacity(0.25)
-
-                        fieldRow(label: "模型名称", hint: selectedProvider.modelHint.isEmpty ? "model-name" : selectedProvider.modelHint) {
-                            TextField(selectedProvider.modelHint.isEmpty ? "model-name" : selectedProvider.modelHint, text: $model)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 13))
-                                .foregroundStyle(IMColors.textPrimary)
-                                #if os(iOS)
-                                .focused($focusedField, equals: .model)
-                                #endif
-                        }
+                        modelFieldRow
+                        Divider().opacity(0.25)
+                        modelPickerRow
                     }
 
                     settingsCard {
@@ -173,28 +138,36 @@ struct SettingsShell: View {
                         .padding(.vertical, 12)
                     }
 
-                    if let errMsg = saveError {
-                        HStack(spacing: 6) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.system(size: 12))
-                                .foregroundStyle(IMColors.danger)
-                            Text(errMsg)
-                                .font(.system(size: 12))
-                                .foregroundStyle(IMColors.danger)
-                        }
-                        .padding(.horizontal, 4)
+                    if let modelLoadError {
+                        statusRow(
+                            icon: "exclamationmark.triangle.fill",
+                            color: IMColors.danger,
+                            message: modelLoadError
+                        )
+                    } else if hasLoadedModels {
+                        statusRow(
+                            icon: fetchedModels.isEmpty ? "tray" : "checkmark.circle.fill",
+                            color: fetchedModels.isEmpty ? IMColors.textMuted : IMColors.accent,
+                            message: fetchedModels.isEmpty
+                                ? "当前接口没有返回可选模型，可直接手填模型 ID。"
+                                : "已拉取 \(fetchedModels.count) 个模型，可下拉选择，也可继续手填模型 ID。"
+                        )
+                    }
+
+                    if let saveError {
+                        statusRow(
+                            icon: "exclamationmark.triangle.fill",
+                            color: IMColors.danger,
+                            message: saveError
+                        )
                     }
 
                     if saveSuccess {
-                        HStack(spacing: 6) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 12))
-                                .foregroundStyle(IMColors.accent)
-                            Text("配置已保存并立即生效")
-                                .font(.system(size: 12))
-                                .foregroundStyle(IMColors.accent)
-                        }
-                        .padding(.horizontal, 4)
+                        statusRow(
+                            icon: "checkmark.circle.fill",
+                            color: IMColors.accent,
+                            message: "配置已保存并立即生效"
+                        )
                     }
                 }
                 .padding(20)
@@ -206,14 +179,17 @@ struct SettingsShell: View {
                 Button {
                     dismiss()
                 } label: {
-                        Text("取消")
+                    Text("取消")
                         .font(.system(size: 14, weight: .regular))
                         .foregroundStyle(IMColors.accentAlt)
                         .frame(maxWidth: .infinity)
                         .frame(height: 36)
                         .background(Color.clear)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(IMColors.accentAlt, lineWidth: 1))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(IMColors.accentAlt, lineWidth: 1)
+                        )
                 }
                 .buttonStyle(.plain)
 
@@ -240,9 +216,9 @@ struct SettingsShell: View {
             .padding(.vertical, 14)
         }
         #if os(macOS)
-        .frame(width: 460)
+        .frame(width: 540)
         #else
-        .presentationDetents(focusedField == nil ? [.height(420)] : [.large])
+        .presentationDetents(focusedField == nil ? [.height(520)] : [.large])
         .presentationDragIndicator(.visible)
         #endif
         .background(IMColors.pageBgTop)
@@ -256,18 +232,170 @@ struct SettingsShell: View {
         }
     }
 
+    private var providerPickerRow: some View {
+        HStack(alignment: .center) {
+            Text("服务商")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(IMColors.textMuted)
+                .frame(width: 90, alignment: .leading)
+
+            Picker("", selection: Binding(
+                get: { provider },
+                set: { newValue in
+                    provider = newValue
+                    applyProviderDefaults()
+                    clearModelFetchState()
+                    saveSuccess = false
+                    saveError = nil
+                }
+            )) {
+                ForEach(knownProviders) { item in
+                    Text(item.displayName).tag(item.id)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    private var baseURLRow: some View {
+        fieldRow(label: "Base URL") {
+            TextField("https://api.openai.com/v1", text: $baseUrl)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .foregroundStyle(urlIsEditable ? IMColors.textPrimary : IMColors.textMuted)
+                .disabled(!urlIsEditable)
+                #if os(iOS)
+                .focused($focusedField, equals: .baseUrl)
+                #endif
+        }
+    }
+
+    @ViewBuilder private var apiKeyFieldContent: some View {
+        if showApiKey {
+            TextField("留空则不鉴权", text: $apiKey)
+        } else {
+            SecureField("留空则不鉴权", text: $apiKey)
+        }
+    }
+
+    private var apiKeyRow: some View {
+        fieldRow(label: "API Key") {
+            HStack(spacing: 6) {
+                apiKeyFieldContent
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .foregroundStyle(IMColors.textPrimary)
+                    #if os(iOS)
+                    .focused($focusedField, equals: .apiKey)
+                    #endif
+                Button {
+                    showApiKey.toggle()
+                } label: {
+                    Image(systemName: showApiKey ? "eye.slash" : "eye")
+                        .font(.system(size: 12))
+                        .foregroundStyle(IMColors.textMuted)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var modelFieldRow: some View {
+        fieldRow(label: "模型 ID") {
+            TextField(selectedProvider.modelHint, text: $model)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .foregroundStyle(IMColors.textPrimary)
+                #if os(iOS)
+                .focused($focusedField, equals: .model)
+                #endif
+        }
+    }
+
+    private var modelPickerRow: some View {
+        fieldRow(label: "模型列表") {
+            HStack(spacing: 10) {
+                Menu {
+                    if isLoadingModels {
+                        Text("加载中…")
+                    } else if fetchedModels.isEmpty {
+                        Text(hasLoadedModels ? "未返回可选模型" : "先获取模型列表")
+                    } else {
+                        ForEach(fetchedModels) { item in
+                            Button {
+                                model = item.id
+                                saveSuccess = false
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(modelMenuLabel(for: item))
+                                    if let subtitle = modelMenuSubtitle(for: item) {
+                                        Text(subtitle)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(modelMenuTitle)
+                            .font(.system(size: 13))
+                            .foregroundStyle(fetchedModels.isEmpty ? IMColors.textMuted : IMColors.textPrimary)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(IMColors.textMuted)
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(height: 34)
+                    .background(IMColors.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(IMColors.divider, lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
+
+                Button {
+                    fetchModelList()
+                } label: {
+                    HStack(spacing: 6) {
+                        if isLoadingModels {
+                            ProgressView().controlSize(.small)
+                        }
+                        Text(isLoadingModels ? "拉取中…" : "获取模型列表")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundStyle(IMColors.accentAlt)
+                    .padding(.horizontal, 12)
+                    .frame(height: 34)
+                    .background(IMColors.accent.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoadingModels || isSaving)
+            }
+        }
+    }
+
     private func populate(_ cfg: LlmConfigItem) {
-        // Match saved provider id; fall back to openai_compatible if unknown
         let matched = knownProviders.first { $0.id == cfg.provider }
-        provider = matched?.id ?? "openai_compatible"
+        provider = matched?.id ?? openAICompatibleProviderID
         apiKey = cfg.apiKey
         model = cfg.model
-        // For official providers, always show the fixed URL
         if let fixedUrl = selectedProvider.fixedUrl {
             baseUrl = fixedUrl
         } else {
             baseUrl = cfg.baseUrl
         }
+        clearModelFetchState()
+        saveError = nil
+        saveSuccess = false
     }
 
     private func applyProviderDefaults() {
@@ -278,11 +406,49 @@ struct SettingsShell: View {
         }
     }
 
+    private func clearModelFetchState() {
+        fetchedModels = []
+        isLoadingModels = false
+        modelLoadError = nil
+        hasLoadedModels = false
+    }
+
+    private func fetchModelList() {
+        guard !isLoadingModels else { return }
+        guard !normalizedBaseUrl.isEmpty else {
+            modelLoadError = "Base URL 不能为空。"
+            hasLoadedModels = false
+            fetchedModels = []
+            return
+        }
+
+        isLoadingModels = true
+        modelLoadError = nil
+        saveSuccess = false
+
+        Task {
+            defer { isLoadingModels = false }
+            do {
+                let models = try await store.listLlmModels(
+                    baseUrl: normalizedBaseUrl,
+                    apiKey: apiKey,
+                    provider: provider
+                )
+                fetchedModels = models
+                hasLoadedModels = true
+            } catch {
+                fetchedModels = []
+                hasLoadedModels = false
+                modelLoadError = error.localizedDescription
+            }
+        }
+    }
+
     private func saveConfig() {
         let cfg = LlmConfigItem(
-            baseUrl: baseUrl.trimmingCharacters(in: .whitespacesAndNewlines),
+            baseUrl: normalizedBaseUrl,
             apiKey: apiKey,
-            model: model.trimmingCharacters(in: .whitespacesAndNewlines),
+            model: normalizedModel,
             provider: provider
         )
         isSaving = true
@@ -302,6 +468,17 @@ struct SettingsShell: View {
         }
     }
 
+    private func modelMenuLabel(for item: LlmModelItem) -> String {
+        item.displayName ?? item.id
+    }
+
+    private func modelMenuSubtitle(for item: LlmModelItem) -> String? {
+        if let displayName = item.displayName, displayName != item.id {
+            return item.id
+        }
+        return item.ownedBy
+    }
+
     @ViewBuilder
     private func settingsCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         VStack(spacing: 0) {
@@ -309,13 +486,15 @@ struct SettingsShell: View {
         }
         .background(IMColors.surface)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(IMColors.divider, lineWidth: 1))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(IMColors.divider, lineWidth: 1)
+        )
     }
 
     @ViewBuilder
     private func fieldRow<Content: View>(
         label: String,
-        hint: String,
         @ViewBuilder field: () -> Content
     ) -> some View {
         HStack(alignment: .center) {
@@ -327,5 +506,19 @@ struct SettingsShell: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+
+    @ViewBuilder
+    private func statusRow(icon: String, color: Color, message: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 12))
+                .foregroundStyle(color)
+            Text(message)
+                .font(.system(size: 12))
+                .foregroundStyle(color)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 4)
     }
 }

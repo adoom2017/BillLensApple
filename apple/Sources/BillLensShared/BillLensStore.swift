@@ -481,6 +481,21 @@ public final class BillLensStore: ObservableObject {
         CloudKitSyncService.shared.schedulePush()
     }
 
+    public func listLlmModels(
+        baseUrl: String,
+        apiKey: String,
+        provider: String
+    ) async throws -> [LlmModelItem] {
+        let models: [LlmModelItem] = try await bridge.sendAsync([
+            "action": "list_llm_models",
+            "base_url": baseUrl,
+            "api_key": apiKey,
+            "provider": provider
+        ])
+        AppLogger.log("llm_models.list", "provider=\(provider) count=\(models.count)")
+        return models
+    }
+
     public func refreshLedger() async throws {
         let payload = ledgerPayload()
         let snapshot: LedgerSnapshot = try await bridge.sendAsync(payload)
@@ -690,4 +705,3 @@ public final class BillLensStore: ObservableObject {
         ]
     }
 }
-

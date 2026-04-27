@@ -14,6 +14,18 @@ public struct LlmConfigItem: Codable, Sendable {
     }
 }
 
+public struct LlmModelItem: Codable, Sendable, Identifiable, Hashable {
+    public let id: String
+    public let displayName: String?
+    public let ownedBy: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case displayName = "display_name"
+        case ownedBy = "owned_by"
+    }
+}
+
 public struct EngineEnvelope<T: Decodable>: Decodable {
     public let ok: Bool
     public let data: T?

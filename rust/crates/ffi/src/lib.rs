@@ -118,6 +118,11 @@ enum EngineRequest {
         snapshot_id: String,
     },
     GetLlmConfig,
+    ListLlmModels {
+        base_url: String,
+        api_key: String,
+        provider: String,
+    },
     UpdateLlmConfig {
         base_url: String,
         api_key: String,
@@ -434,6 +439,19 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
         EngineRequest::GetLlmConfig => with_app(|app| {
             let cfg = runtime().block_on(app.get_llm_config())?;
             Ok(encode_ok(cfg))
+        }),
+        EngineRequest::ListLlmModels {
+            base_url,
+            api_key,
+            provider,
+        } => with_app(|app| {
+            let models = runtime().block_on(app.list_llm_models(LlmConfig {
+                base_url,
+                api_key,
+                model: String::new(),
+                provider,
+            }))?;
+            Ok(encode_ok(models))
         }),
         EngineRequest::UpdateLlmConfig {
             base_url,

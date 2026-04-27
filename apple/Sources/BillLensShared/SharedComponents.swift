@@ -259,7 +259,7 @@ struct ComposerPanel: View {
                 }
             }
             .padding(.horizontal, 12)
-            .padding(.bottom, 10)
+            .padding(.bottom, 4)
         }
         .background(IMColors.chatBg)
     }

@@ -122,6 +122,13 @@ impl LlmConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmModelItem {
+    pub id: String,
+    pub display_name: Option<String>,
+    pub owned_by: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LlmProvider {
     OpenAi,
@@ -132,7 +139,9 @@ impl LlmProvider {
     pub fn parse(value: &str) -> Result<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "openai" | "llamacpp" | "deepseek" | "moonshot" | "zhipu" | "qwen"
-            | "openai_compatible" => Ok(Self::OpenAi),
+            | "groq" | "xai" | "siliconflow" | "volcengine_ark" | "openai_compatible" => {
+                Ok(Self::OpenAi)
+            }
             "anthropic" => Ok(Self::Anthropic),
             _ => Err(anyhow!("unsupported llm provider: {value}")),
         }
@@ -156,6 +165,7 @@ pub struct LlmClient {
     api_key: String,
     model: String,
     provider: LlmProvider,
+    provider_id: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -164,18 +174,34 @@ enum NoteFallbackMode {
     SkipInputText,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelListStrategy {
+    OpenAiModels,
+    AnthropicModels,
+    XaiLanguageModels,
+    SiliconFlowChatModels,
+}
+
 impl LlmClient {
     pub fn from_config(config: LlmConfig) -> Result<Self> {
         let provider = LlmProvider::parse(&config.provider).context("invalid LLM_PROVIDER")?;
+        let provider_id = normalize_provider_id(&config.provider);
         Ok(Self::new(
             config.base_url,
             config.api_key,
             config.model,
             provider,
+            provider_id,
         ))
     }
 
-    pub fn new(base_url: String, api_key: String, model: String, provider: LlmProvider) -> Self {
+    pub fn new(
+        base_url: String,
+        api_key: String,
+        model: String,
+        provider: LlmProvider,
+        provider_id: String,
+    ) -> Self {
         Self {
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(60))
@@ -185,6 +211,7 @@ impl LlmClient {
             api_key,
             model,
             provider,
+            provider_id,
         }
     }
 
@@ -199,6 +226,37 @@ impl LlmClient {
     pub async fn parse_record_text_multi(&self, text: String) -> Result<Vec<ParsedRecordPayload>> {
         self.parse_records_multi(text, NoteFallbackMode::PreserveInputText)
             .await
+    }
+
+    pub async fn list_models(&self) -> Result<Vec<LlmModelItem>> {
+        let strategy = self.model_list_strategy();
+        let path = match strategy {
+            ModelListStrategy::OpenAiModels => "/models",
+            ModelListStrategy::AnthropicModels => "/models",
+            ModelListStrategy::XaiLanguageModels => "/language-models",
+            ModelListStrategy::SiliconFlowChatModels => "/models?type=text&sub_type=chat",
+        };
+        let url = self.endpoint_url(path);
+        logger::info(
+            "llm.models.request",
+            format!("provider={} strategy={strategy:?} url={url}", self.provider_id),
+        );
+        let request = self.authorize_request(self.http.get(url));
+        let payload: Value = request
+            .send()
+            .await
+            .context("failed to list llm models")?
+            .error_for_status()
+            .context("llm models endpoint returned error status")?
+            .json()
+            .await
+            .context("failed to decode llm models response")?;
+        let items = parse_llm_model_items(&payload)?;
+        logger::info(
+            "llm.models.response",
+            format!("provider={} count={}", self.provider_id, items.len()),
+        );
+        Ok(items)
     }
 
     async fn parse_records_multi(
@@ -267,14 +325,30 @@ impl LlmClient {
             ),
         };
 
-        let url = format!(
+        let url = self.endpoint_url(path);
+        logger::info("llm.http", format!("url={url}"));
+        let request = self.http.post(url).header(CONTENT_TYPE, "application/json");
+        let request = self.authorize_request(request);
+
+        request
+            .json(&body)
+            .send()
+            .await
+            .context("failed to call llm provider")?
+            .error_for_status()
+            .context("llm provider returned error status")
+    }
+
+    fn endpoint_url(&self, path: &str) -> String {
+        format!(
             "{}/{}",
             self.base_url.trim_end_matches('/'),
             path.trim_start_matches('/')
-        );
-        logger::info("llm.http", format!("url={url}"));
-        let request = self.http.post(url).header(CONTENT_TYPE, "application/json");
-        let request = match self.provider {
+        )
+    }
+
+    fn authorize_request(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match self.provider {
             LlmProvider::OpenAi => {
                 if self.api_key.trim().is_empty() {
                     request
@@ -285,16 +359,61 @@ impl LlmClient {
             LlmProvider::Anthropic => request
                 .header("x-api-key", &self.api_key)
                 .header("anthropic-version", "2023-06-01"),
-        };
-
-        request
-            .json(&body)
-            .send()
-            .await
-            .context("failed to call llm provider")?
-            .error_for_status()
-            .context("llm provider returned error status")
+        }
     }
+
+    fn model_list_strategy(&self) -> ModelListStrategy {
+        match self.provider_id.as_str() {
+            "anthropic" => ModelListStrategy::AnthropicModels,
+            "xai" => ModelListStrategy::XaiLanguageModels,
+            "siliconflow" => ModelListStrategy::SiliconFlowChatModels,
+            _ => ModelListStrategy::OpenAiModels,
+        }
+    }
+}
+
+fn normalize_provider_id(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+fn parse_llm_model_items(payload: &Value) -> Result<Vec<LlmModelItem>> {
+    let items = payload
+        .get("data")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow!("llm models response missing data array"))?;
+    items.iter().map(parse_llm_model_item).collect()
+}
+
+fn parse_llm_model_item(value: &Value) -> Result<LlmModelItem> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("llm model entry is not an object"))?;
+    let id = object
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow!("llm model entry missing id"))?
+        .to_string();
+    let display_name = object
+        .get("display_name")
+        .or_else(|| object.get("name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    let owned_by = object
+        .get("owned_by")
+        .or_else(|| object.get("ownedBy"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    Ok(LlmModelItem {
+        id,
+        display_name,
+        owned_by,
+    })
 }
 
 fn build_record_prompt() -> String {
@@ -1110,10 +1229,12 @@ fn parse_record_datetime(value: &str) -> Result<DateTime<Utc>> {
 #[cfg(test)]
 mod tests {
     use billlens_apple_db::ParsedRecordPayload;
+    use serde_json::json;
 
     use super::{
         LlmProvider, NoteFallbackMode, clean_merchant, finalize_record_payload,
-        normalize_currency_code, normalize_json_payload, parse_record_payload_text,
+        normalize_currency_code, normalize_json_payload, parse_llm_model_items,
+        parse_record_payload_text,
     };
 
     #[test]
@@ -1130,6 +1251,49 @@ mod tests {
             LlmProvider::parse("anthropic").unwrap(),
             LlmProvider::Anthropic
         ));
+        assert!(matches!(
+            LlmProvider::parse("groq").unwrap(),
+            LlmProvider::OpenAi
+        ));
+        assert!(matches!(
+            LlmProvider::parse("xai").unwrap(),
+            LlmProvider::OpenAi
+        ));
+        assert!(matches!(
+            LlmProvider::parse("siliconflow").unwrap(),
+            LlmProvider::OpenAi
+        ));
+        assert!(matches!(
+            LlmProvider::parse("volcengine_ark").unwrap(),
+            LlmProvider::OpenAi
+        ));
+    }
+
+    #[test]
+    fn parse_llm_model_items_supports_openai_shape() {
+        let items = parse_llm_model_items(&json!({
+            "data": [
+                { "id": "gpt-4o", "owned_by": "openai" },
+                { "id": "gpt-4.1-mini", "owned_by": "openai" }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].id, "gpt-4o");
+        assert_eq!(items[0].owned_by.as_deref(), Some("openai"));
+    }
+
+    #[test]
+    fn parse_llm_model_items_supports_anthropic_shape() {
+        let items = parse_llm_model_items(&json!({
+            "data": [
+                { "id": "claude-sonnet-4-6", "display_name": "Claude Sonnet 4.6" }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "claude-sonnet-4-6");
+        assert_eq!(items[0].display_name.as_deref(), Some("Claude Sonnet 4.6"));
     }
 
     #[test]

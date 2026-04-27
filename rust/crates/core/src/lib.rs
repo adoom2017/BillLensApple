@@ -15,7 +15,7 @@ pub use billlens_apple_db::{
 };
 use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, TimeZone, Utc};
 use fx::{FxClient, resolve_fx_rate};
-pub use llm::LlmConfig;
+pub use llm::{LlmConfig, LlmModelItem};
 use llm::{LlmClient, clean_asset_name, normalize_currency_code};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -880,6 +880,11 @@ impl AppService {
             .map_err(map_internal)?;
         self.llm = Some(new_client);
         Ok(())
+    }
+
+    pub async fn list_llm_models(&self, cfg: LlmConfig) -> Result<Vec<LlmModelItem>, CoreError> {
+        let client = LlmClient::from_config(cfg).map_err(map_internal)?;
+        client.list_models().await.map_err(map_internal)
     }
 
     /// Process all due subscriptions: create records for each past-due cycle.

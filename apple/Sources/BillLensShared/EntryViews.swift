@@ -98,7 +98,9 @@ struct ChatPanel: View {
                 onSubmit: { store.submitText() }
             )
             .padding(.horizontal, 16)
+            #if os(macOS)
             .padding(.bottom, 14)
+            #endif
         }
     }
 }
