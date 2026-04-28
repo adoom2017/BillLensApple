@@ -130,22 +130,7 @@ struct ChatScrollView: View {
                 .onAppear {
                     reader.scrollTo("chatBottom")
                 }
-                .onChange(of: store.messages.count) {
-                    withAnimation { reader.scrollTo("chatBottom", anchor: .bottom) }
-                }
-                .onChange(of: store.drafts.count) {
-                    withAnimation { reader.scrollTo("chatBottom", anchor: .bottom) }
-                }
-                .onChange(of: store.latestRecord?.id) {
-                    withAnimation { reader.scrollTo("chatBottom", anchor: .bottom) }
-                }
-                .onChange(of: store.transientProgressMessage?.id) {
-                    withAnimation { reader.scrollTo("chatBottom", anchor: .bottom) }
-                }
-                .onChange(of: store.speechService.liveTranscript) {
-                    withAnimation { reader.scrollTo("chatBottom", anchor: .bottom) }
-                }
-                .onChange(of: store.speechService.isRecording) {
+                .onChange(of: chatScrollSignature) {
                     withAnimation { reader.scrollTo("chatBottom", anchor: .bottom) }
                 }
                 #if os(iOS)
@@ -166,6 +151,10 @@ struct ChatScrollView: View {
                 #endif
             }
         }
+    }
+
+    private var chatScrollSignature: String {
+        "\(store.messages.count)|\(store.drafts.count)|\(store.latestRecord?.id ?? "")|\(store.transientProgressMessage?.id.uuidString ?? "")|\(store.speechService.isRecording)"
     }
 
     #if os(iOS)

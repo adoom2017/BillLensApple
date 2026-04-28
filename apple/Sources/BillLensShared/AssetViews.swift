@@ -184,7 +184,7 @@ struct AssetShell: View {
 
             // Divider
             ZStack {
-                IMColors.dividerLegacy.frame(width: 1)
+                IMColors.divider.frame(width: 1)
                 IMColors.surface.opacity(0.72).frame(width: 1).offset(x: 1)
             }
             .frame(width: 2)

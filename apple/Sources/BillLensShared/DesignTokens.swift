@@ -70,7 +70,6 @@ enum IMColors {
 
     // Surfaces & borders
     static let divider = Color(red: 0.803, green: 0.850, blue: 0.886).opacity(0.72)
-    static let dividerLegacy = Color(red: 0.803, green: 0.850, blue: 0.886).opacity(0.72)
     static let panelBg = Color(red: 0.948, green: 0.955, blue: 0.964).opacity(0.94)
     static let controlBg = Color(red: 0.969, green: 0.977, blue: 0.984)
     static let statBg = Color(red: 0.982, green: 0.986, blue: 0.990)

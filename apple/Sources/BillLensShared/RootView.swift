@@ -80,8 +80,10 @@ public struct RootView: View {
                 .clipShape(Capsule())
                 .shadow(color: .black.opacity(0.12), radius: 16, y: 8)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-                .onAppear {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                .task {
+                    let snapshot = store.errorText
+                    try? await Task.sleep(for: .seconds(5))
+                    if store.errorText == snapshot {
                         withAnimation(.easeOut(duration: 0.3)) {
                             store.errorText = nil
                         }

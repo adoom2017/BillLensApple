@@ -173,7 +173,7 @@ struct LedgerShell: View {
 
     private var groovedDivider: some View {
         ZStack {
-            IMColors.dividerLegacy
+            IMColors.divider
                 .frame(width: 1)
             IMColors.surface.opacity(0.72)
                 .frame(width: 1)
