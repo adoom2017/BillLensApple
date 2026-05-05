@@ -55,6 +55,7 @@ Cargo.lock
 *~
 .idea/
 .vscode/
+.codex/
 
 # Temporary
 *.tmp

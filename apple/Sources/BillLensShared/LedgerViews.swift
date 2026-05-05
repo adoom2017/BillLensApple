@@ -10,6 +10,7 @@ struct LedgerShell: View {
     @State private var selectedCategoryFilter: String? = nil
     @State private var recordToDelete: RecordItem? = nil
     let availableHeight: CGFloat
+    private let shellCornerRadius: CGFloat = LayoutRadii.shell
 
     private let masterWidth: CGFloat = 340
     private var usesCompactLayout: Bool {
@@ -46,8 +47,14 @@ struct LedgerShell: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: shellCornerRadius, style: .continuous))
         .frame(maxHeight: availableHeight)
+        .appRoundedGlass(
+            cornerRadius: shellCornerRadius,
+            prominence: .prominent,
+            tint: IMColors.glassCoolTint,
+            fallbackFill: IMColors.surface
+        )
         .alert(
             "确认删除",
             isPresented: Binding(
@@ -84,13 +91,13 @@ struct LedgerShell: View {
                 .frame(width: masterWidth)
                 .padding(14)
                 .frame(maxHeight: .infinity, alignment: .top)
-                .background(IMColors.panelBg)
+                .background(IMColors.panelBg.opacity(0.82))
 
             groovedDivider
 
             detailPanel(ledger)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(IMColors.surface)
+                .background(IMColors.surface.opacity(0.74))
         }
     }
 
@@ -100,17 +107,17 @@ struct LedgerShell: View {
                 masterPanel(ledger)
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .background(IMColors.panelBg)
+                    .background(IMColors.panelBg.opacity(0.82))
 
                 Divider().opacity(0.2)
 
                 detailPanel(ledger)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .background(IMColors.surface)
+                    .background(IMColors.surface.opacity(0.74))
             }
         }
         .scrollIndicators(.automatic)
-        .background(IMColors.surface)
+        .background(Color.clear)
     }
 
     private func masterPanel(_ ledger: LedgerSnapshot) -> some View {
@@ -130,7 +137,7 @@ struct LedgerShell: View {
                             .padding(.horizontal, 8)
                             .padding(.vertical, 5)
                             .background(
-                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                RoundedRectangle(cornerRadius: LayoutRadii.tiny, style: .continuous)
                                     .fill(
                                         store.selectedPreset == preset
                                             ? IMColors.controlBg
@@ -222,7 +229,6 @@ struct LedgerShell: View {
 
     private func statBar(_ ledger: LedgerSnapshot) -> some View {
         let billCount = ledger.byDay.reduce(0) { $0 + $1.records.count }
-        let statBg = RoundedRectangle(cornerRadius: 8, style: .continuous)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 0) {
                 LedgerSummaryCard(
@@ -249,10 +255,11 @@ struct LedgerShell: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(
-                statBg
-                    .fill(IMColors.statBg)
-                    .overlay(statBg.stroke(IMColors.divider, lineWidth: 1))
+            .appRoundedGlass(
+                cornerRadius: LayoutRadii.field,
+                prominence: .regular,
+                tint: IMColors.glassCoolTint,
+                fallbackFill: IMColors.statBg
             )
 
             if let warning = ledger.fxWarning {
@@ -268,9 +275,11 @@ struct LedgerShell: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(IMColors.warningBg)
+                .appRoundedGlass(
+                    cornerRadius: LayoutRadii.field,
+                    prominence: .regular,
+                    tint: IMColors.glassWarmTint,
+                    fallbackFill: IMColors.warningBg
                 )
             }
         }
@@ -290,13 +299,13 @@ struct LedgerShell: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .background(
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    RoundedRectangle(cornerRadius: LayoutRadii.tiny, style: .continuous)
                         .fill(
                             ledgerMode == mode
                                 ? IMColors.controlBg
                                 : Color.clear)
                 )
-                .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: LayoutRadii.tiny, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -346,6 +355,13 @@ struct LedgerShell: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .appRoundedGlass(
+            cornerRadius: LayoutRadii.field,
+            prominence: .regular,
+            tint: IMColors.glassWarmTint.opacity(0.72),
+            fallbackFill: IMColors.surfaceStrong.opacity(0.48)
+        )
     }
 
     private func categoryPill(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
@@ -359,9 +375,11 @@ struct LedgerShell: View {
                 )
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(
-                    Capsule()
-                        .fill(isSelected ? IMColors.accentBgLight : IMColors.statBg)
+                .appCapsuleGlass(
+                    prominence: isSelected ? .prominent : .regular,
+                    interactive: true,
+                    tint: isSelected ? IMColors.glassCoolTint : IMColors.glassWarmTint.opacity(0.60),
+                    fallbackFill: isSelected ? IMColors.accentBgLight : IMColors.statBg
                 )
                 .overlay(
                     Capsule()
@@ -454,6 +472,13 @@ struct LedgerShell: View {
                 }
             }
         }
+        .padding(12)
+        .appRoundedGlass(
+            cornerRadius: LayoutRadii.section,
+            prominence: .regular,
+            tint: IMColors.glassCoolTint.opacity(0.88),
+            fallbackFill: IMColors.surfaceStrong.opacity(0.38)
+        )
     }
 
     private func monthlyAggregationGrid(_ ledger: LedgerSnapshot) -> some View {
@@ -512,6 +537,13 @@ struct LedgerShell: View {
                 }
             }
         }
+        .padding(12)
+        .appRoundedGlass(
+            cornerRadius: LayoutRadii.section,
+            prominence: .regular,
+            tint: IMColors.glassWarmTint.opacity(0.80),
+            fallbackFill: IMColors.surfaceStrong.opacity(0.34)
+        )
     }
 
     struct MonthlyAggregationItem: Identifiable {
@@ -586,7 +618,13 @@ struct LedgerShell: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
-                    Divider().opacity(0.15).padding(.horizontal, 16)
+                    .appRoundedGlass(
+                        cornerRadius: LayoutRadii.section,
+                        prominence: .regular,
+                        tint: IMColors.glassCoolTint.opacity(0.62),
+                        fallbackFill: IMColors.surfaceStrong.opacity(0.40)
+                    )
+                    .padding(.horizontal, 6)
                 }
             }
         }
@@ -623,6 +661,12 @@ struct LedgerShell: View {
             }
         }
         .padding(16)
+        .appRoundedGlass(
+            cornerRadius: LayoutRadii.section,
+            prominence: .regular,
+            tint: IMColors.glassCoolTint.opacity(0.78),
+            fallbackFill: IMColors.surfaceStrong.opacity(0.46)
+        )
     }
 
     private func syncCalendarState(for ledger: LedgerSnapshot) {
@@ -814,12 +858,19 @@ struct CalendarDayCellButton<Background: ShapeStyle>: View {
     let action: () -> Void
 
     var body: some View {
-        let cellShape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+        let cellShape = RoundedRectangle(cornerRadius: LayoutRadii.micro, style: .continuous)
 
         Button(action: action) {
             CalendarCellLabel(day: day, amountText: amountText, isSelected: isSelected, isHot: isHot, isToday: isToday)
                 .frame(maxWidth: .infinity, minHeight: 54)
                 .background(cellShape.fill(backgroundStyle))
+                .appRoundedGlass(
+                    cornerRadius: LayoutRadii.micro,
+                    prominence: isSelected ? .prominent : .regular,
+                    interactive: true,
+                    tint: isSelected ? IMColors.accent.opacity(0.32) : IMColors.glassCoolTint.opacity(0.58),
+                    fallbackFill: isSelected ? IMColors.accentBgActive : IMColors.surface.opacity(0.26)
+                )
                 .overlay {
                     if isSelected {
                         cellShape
@@ -847,12 +898,19 @@ struct MonthAggregationCard: View {
     private var borderColor: Color { item.hasData ? Color.black.opacity(0.08) : Color.black.opacity(0.04) }
 
     var body: some View {
-        let cardShape = RoundedRectangle(cornerRadius: 8, style: .continuous)
         cardContent
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(8)
-            .background(cardShape.fill(bgColor))
-            .overlay(cardShape.stroke(borderColor, lineWidth: 1))
+            .appRoundedGlass(
+                cornerRadius: LayoutRadii.field,
+                prominence: .regular,
+                tint: item.hasData ? IMColors.glassWarmTint.opacity(0.58) : IMColors.glassCoolTint.opacity(0.40),
+                fallbackFill: bgColor
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: LayoutRadii.field, style: .continuous)
+                    .stroke(borderColor, lineWidth: 1)
+            )
     }
 
     @ViewBuilder

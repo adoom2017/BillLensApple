@@ -8,6 +8,7 @@ struct EntryShell: View {
     @Binding var isImportingImage: Bool
     let availableWidth: CGFloat
     let availableHeight: CGFloat
+    private let reviewTrailingInset: CGFloat = 12
 
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -35,6 +36,7 @@ struct EntryShell: View {
             chatSide
             reviewSide
         }
+        .padding(.trailing, reviewTrailingInset)
         .frame(width: availableWidth, height: availableHeight, alignment: .topLeading)
     }
 
@@ -50,7 +52,7 @@ struct EntryShell: View {
     #endif
 
     private var chatWidth: CGFloat {
-        availableWidth - reviewWidth - 1
+        availableWidth - reviewWidth - reviewTrailingInset - 1
     }
 
     private var chatSide: some View {
@@ -58,9 +60,9 @@ struct EntryShell: View {
             .frame(width: chatWidth)
             .frame(maxHeight: .infinity)
             .appRoundedGlass(
-                cornerRadius: 34,
+                cornerRadius: LayoutRadii.shell,
                 prominence: .prominent,
-                tint: IMColors.accentBright.opacity(0.08),
+                tint: IMColors.glassCoolTint,
                 fallbackFill: IMColors.chatBg.opacity(0.95)
             )
     }
@@ -70,9 +72,9 @@ struct EntryShell: View {
             .frame(width: reviewWidth)
             .frame(maxHeight: .infinity)
             .appRoundedGlass(
-                cornerRadius: 34,
+                cornerRadius: LayoutRadii.shell,
                 prominence: .prominent,
-                tint: IMColors.accentBright.opacity(0.05),
+                tint: IMColors.glassWarmTint.opacity(0.78),
                 fallbackFill: IMColors.surface.opacity(0.98)
             )
     }
@@ -84,10 +86,18 @@ struct ChatPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            EntryOverviewStrip(
+                isRecording: store.speechService.isRecording,
+                onImage: { isImportingImage = true },
+                onVoice: { store.toggleRecording() }
+            )
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+
             ChatScrollView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.horizontal, 16)
-                .padding(.top, 16)
+                .padding(.top, 12)
                 .clipShape(Rectangle())
 
             ComposerPanel(
@@ -323,7 +333,7 @@ struct ReviewPanel: View {
                 if store.drafts.count > 1 {
                     Text("多笔")
                         .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(IMColors.accentDark)
+                        .foregroundStyle(IMColors.textBody)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
                         .background(
@@ -335,10 +345,10 @@ struct ReviewPanel: View {
 
             Text("草稿编辑")
                 .font(.system(size: 22, weight: .bold))
-                .foregroundStyle(IMColors.textPrimary)
+                .foregroundStyle(IMColors.textTitle)
             Text("先看识别结果，再改字段；确认后会直接写入账单。")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(IMColors.textSecondary)
+                .foregroundStyle(IMColors.textBody)
         }
         .padding(.horizontal, 16)
         .padding(.top, 18)
@@ -419,7 +429,7 @@ struct ReviewPanel: View {
                 ReviewField(title: "备注", minimumHeight: LayoutMetrics.noteHeight, alignTop: true) {
                     TextEditor(text: $store.draftForm.note)
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(IMColors.textPrimary)
+                        .foregroundStyle(IMColors.textBody)
                         .scrollContentBackground(.hidden)
                         .frame(minHeight: 44, maxHeight: 60)
                 }
@@ -435,7 +445,7 @@ struct ReviewPanel: View {
 
             Text("确认后会写入数据库，并出现在账单一览里。")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(IMColors.textSecondary)
+                .foregroundStyle(IMColors.textBody)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: 6) {
@@ -458,7 +468,7 @@ struct ReviewPanel: View {
         }
         .padding(14)
         .appRoundedGlass(
-            cornerRadius: 24,
+            cornerRadius: LayoutRadii.section,
             prominence: .regular,
             tint: IMColors.accentBright.opacity(0.06),
             fallbackFill: IMColors.surface.opacity(0.96)
@@ -473,22 +483,22 @@ struct ReviewPanel: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("识别草稿")
                         .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(IMColors.textSecondary)
+                        .foregroundStyle(IMColors.textLabel)
                     Text(draftSourceText)
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(IMColors.textPrimary)
+                        .foregroundStyle(IMColors.textBody)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .lineLimit(3)
                     Text(reviewSummaryMeta)
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(IMColors.textTertiary)
+                        .foregroundStyle(IMColors.textMeta)
                         .lineLimit(2)
                 }
             }
         }
         .padding(14)
         .appRoundedGlass(
-            cornerRadius: 24,
+            cornerRadius: LayoutRadii.section,
             prominence: .regular,
             tint: IMColors.accentBright.opacity(0.06),
             fallbackFill: IMColors.surface.opacity(0.96)
@@ -533,17 +543,17 @@ private struct ReviewFieldGroup<Content: View>: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(IMColors.textPrimary)
+                    .foregroundStyle(IMColors.textTitle)
                 Text(subtitle)
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(IMColors.textSecondary)
+                    .foregroundStyle(IMColors.textBody)
             }
 
             content
         }
         .padding(14)
         .appRoundedGlass(
-            cornerRadius: 24,
+            cornerRadius: LayoutRadii.section,
             prominence: .regular,
             tint: IMColors.accentBright.opacity(0.05),
             fallbackFill: IMColors.surface.opacity(0.94)
@@ -559,7 +569,7 @@ private struct ReviewPagerButton: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(IMColors.accentDark)
+                .foregroundStyle(IMColors.textBody)
                 .frame(width: 30, height: 30)
                 .background(
                     Circle()
@@ -602,9 +612,9 @@ private struct EntryOverviewStrip: View {
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .appRoundedGlass(
-            cornerRadius: 24,
+            cornerRadius: LayoutRadii.section,
             prominence: .regular,
-            tint: IMColors.accentBright.opacity(0.08),
+            tint: IMColors.glassCoolTint,
             fallbackFill: IMColors.surfaceStrong.opacity(0.94)
         )
     }
@@ -623,10 +633,10 @@ private struct EntryOverviewStrip: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(heroTitle)
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(IMColors.textPrimary)
+                    .foregroundStyle(IMColors.textTitle)
                 Text(headlineSubtitle)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(IMColors.textSecondary)
+                    .foregroundStyle(IMColors.textBody)
                     .lineLimit(2)
             }
         }
@@ -685,18 +695,19 @@ private struct EntryOverviewStrip: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(IMColors.textMuted)
+                .foregroundStyle(IMColors.textLabel)
             Text(value)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(IMColors.textPrimary)
+                .foregroundStyle(IMColors.textTitle)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(
-            Capsule(style: .continuous)
-                .fill(Color.white.opacity(0.52))
+        .appCapsuleGlass(
+            prominence: .regular,
+            tint: IMColors.glassWarmTint.opacity(0.56),
+            fallbackFill: Color.white.opacity(0.36)
         )
     }
 }
@@ -720,19 +731,17 @@ private struct EntryStripAction: View {
                     )
                 Text(title)
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(IMColors.textPrimary)
+                    .foregroundStyle(IMColors.textTitle)
                     .lineLimit(1)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(primary ? Color.white.opacity(0.62) : Color.white.opacity(0.42))
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(Color.white.opacity(0.78), lineWidth: 1)
+            .appCapsuleGlass(
+                prominence: primary ? .prominent : .regular,
+                interactive: true,
+                tint: primary ? IMColors.accent.opacity(0.34) : IMColors.glassCoolTint.opacity(0.84),
+                fallbackFill: primary ? Color.white.opacity(0.52) : Color.white.opacity(0.32)
             )
         }
         .buttonStyle(.plain)

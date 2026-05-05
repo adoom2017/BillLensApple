@@ -10,13 +10,13 @@ struct WelcomeBubble: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("账单助手")
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(IMColors.textSecondary)
+                    .foregroundStyle(IMColors.textLabel)
                 Text("输入一句账单描述，或上传图片、语音记账，我会先生成待确认记录。")
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(IMColors.textPrimary)
+                    .foregroundStyle(IMColors.textBody)
                 Text("刚刚")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(IMColors.textTertiary)
+                    .foregroundStyle(IMColors.textMeta)
             }
             .chatBubbleSurface(fill: IMColors.botBubble, prominence: .regular)
             Spacer(minLength: 44)
@@ -35,10 +35,10 @@ struct MessageBubble: View {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(message.content)
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(IMColors.textPrimary)
+                        .foregroundStyle(IMColors.textBody)
                     Text(BillLensFormatters.displayDateTime(message.createdAt))
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(IMColors.textTertiary)
+                        .foregroundStyle(IMColors.textMeta)
                 }
                 .chatBubbleSurface(fill: IMColors.userBubble, prominence: .prominent)
                 UserAvatar()
@@ -50,10 +50,10 @@ struct MessageBubble: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(message.content)
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(IMColors.textPrimary)
+                        .foregroundStyle(IMColors.textBody)
                     Text(BillLensFormatters.displayDateTime(message.createdAt))
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(IMColors.textTertiary)
+                        .foregroundStyle(IMColors.textMeta)
                 }
                 .chatBubbleSurface(fill: IMColors.botBubble, prominence: .regular)
                 Spacer(minLength: 60)
@@ -76,12 +76,12 @@ struct SpeechLiveBubble: View {
                             .controlSize(.small)
                         Text("正在聆听...")
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(IMColors.textTertiary)
+                            .foregroundStyle(IMColors.textMeta)
                     }
                 } else {
                     Text(transcript)
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(IMColors.textPrimary)
+                        .foregroundStyle(IMColors.textBody)
                 }
                 HStack(spacing: 6) {
                     Circle()
@@ -89,7 +89,7 @@ struct SpeechLiveBubble: View {
                         .frame(width: 8, height: 8)
                     Text("录音中")
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(IMColors.textTertiary)
+                        .foregroundStyle(IMColors.textMeta)
                 }
             }
             .chatBubbleSurface(fill: IMColors.userBubble, prominence: .prominent)
@@ -108,13 +108,15 @@ struct ProgressBubble: View {
                 .controlSize(.small)
             Text(message)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(IMColors.textSecondary)
+                .foregroundStyle(IMColors.textBody)
                 .lineLimit(2)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
-        .background(
-            Capsule().fill(IMColors.systemMsgBg)
+        .appCapsuleGlass(
+            prominence: .regular,
+            tint: IMColors.glassWarmTint,
+            fallbackFill: IMColors.systemMsgBg
         )
         .frame(maxWidth: .infinity, alignment: .center)
     }
@@ -143,7 +145,7 @@ struct DraftConversationCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(copy)
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(IMColors.textPrimary)
+                    .foregroundStyle(IMColors.textBody)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .lineLimit(2)
                     .chatBubbleSurface(fill: IMColors.botBubble, prominence: .regular)
@@ -151,7 +153,7 @@ struct DraftConversationCard: View {
                 draftCardContent
                     .padding(14)
                     .appRoundedGlass(
-                        cornerRadius: 26,
+                        cornerRadius: LayoutRadii.section,
                         prominence: .regular,
                         tint: IMColors.accentBright.opacity(0.08),
                         fallbackFill: IMColors.botBubble
@@ -160,7 +162,7 @@ struct DraftConversationCard: View {
 
                 Text("刚刚")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(IMColors.textTertiary)
+                    .foregroundStyle(IMColors.textMeta)
             }
             Spacer(minLength: 44)
         }
@@ -177,7 +179,7 @@ struct DraftConversationCard: View {
                             ?? "¥0.00"
                     )
                         .font(.system(size: 24, weight: .bold))
-                        .foregroundStyle(IMColors.textPrimary)
+                        .foregroundStyle(IMColors.textTitle)
                 }
                 Spacer()
                 StatusPill(title: status, warning: status != "已入库")
@@ -186,13 +188,13 @@ struct DraftConversationCard: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(IMColors.textPrimary)
+                    .foregroundStyle(IMColors.textTitle)
                     .lineLimit(1)
                 Text(
                     "\(category) · \(merchant) · \(BillLensFormatters.displayDateTime(transactionAt))"
                 )
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(IMColors.textSecondary)
+                .foregroundStyle(IMColors.textBody)
                 .lineLimit(1)
             }
 
@@ -238,7 +240,6 @@ struct ComposerPanel: View {
         VStack(alignment: .leading, spacing: 8) {
             IMColors.divider.frame(height: 1)
 
-
             HStack(spacing: 8) {
                 ComposerIconButton(systemImage: "photo") { onImage() }
 
@@ -246,7 +247,7 @@ struct ComposerPanel: View {
                     .frame(maxWidth: .infinity, minHeight: 40, maxHeight: 40)
                     .padding(.horizontal, 12)
                     .appRoundedGlass(
-                        cornerRadius: 12,
+                        cornerRadius: LayoutRadii.compactField,
                         tint: IMColors.accentBright.opacity(0.08),
                         fallbackFill: IMColors.surfaceStrong
                     )
@@ -261,7 +262,12 @@ struct ComposerPanel: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 4)
         }
-        .background(IMColors.chatBg)
+        .appRoundedGlass(
+            cornerRadius: LayoutRadii.section,
+            prominence: .regular,
+            tint: IMColors.glassCoolTint.opacity(0.72),
+            fallbackFill: IMColors.chatBg
+        )
     }
 
     private var composerEditor: some View {
@@ -351,7 +357,7 @@ struct ComposerInputField: View {
     var body: some View {
         TextField(placeholder, text: $text)
             .font(.system(size: 14, weight: .medium))
-            .foregroundStyle(IMColors.textPrimary)
+            .foregroundStyle(IMColors.textBody)
             .textFieldStyle(.plain)
             .focused($isFocused)
             .onSubmit { onSubmit() }
@@ -403,18 +409,18 @@ struct ReviewSummaryCard: View {
                         ?? "¥0.00"
                 )
                     .font(.system(size: 28, weight: .bold))
-                    .foregroundStyle(IMColors.textPrimary)
+                    .foregroundStyle(IMColors.textTitle)
             }
             Text(meta)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(IMColors.textSecondary)
+                .foregroundStyle(IMColors.textBody)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .lineLimit(1)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .appRoundedGlass(
-            cornerRadius: 26,
+            cornerRadius: LayoutRadii.section,
             prominence: .regular,
             tint: IMColors.accentBright.opacity(0.08),
             fallbackFill: IMColors.surfaceStrong.opacity(0.96)
@@ -429,23 +435,23 @@ struct EmptyReviewState: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("等待解析结果")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(IMColors.textPrimary)
+                .foregroundStyle(IMColors.textTitle)
             Text("左侧输入账单内容并按 Enter 后，这里会显示可编辑的结构化字段。")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(IMColors.textSecondary)
+                .foregroundStyle(IMColors.textBody)
             if let latestRecord {
                 Text(
                     "最近入库：\(latestRecord.category) · \(BillLensFormatters.currencyString(latestRecord.amount, currencyCode: latestRecord.currency))"
                 )
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(IMColors.textSecondary)
+                .foregroundStyle(IMColors.textBody)
                 .padding(.top, 4)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .appRoundedGlass(
-            cornerRadius: 24,
+            cornerRadius: LayoutRadii.section,
             prominence: .regular,
             tint: IMColors.accentBright.opacity(0.06),
             fallbackFill: IMColors.surface.opacity(0.98)
@@ -463,10 +469,10 @@ struct ReviewField<Content: View>: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(IMColors.textSecondary)
+                .foregroundStyle(IMColors.textLabel)
             content
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(IMColors.textPrimary)
+                .foregroundStyle(IMColors.textBody)
                 .frame(
                     maxWidth: .infinity, maxHeight: .infinity,
                     alignment: alignTop ? .topLeading : .leading)
@@ -478,7 +484,7 @@ struct ReviewField<Content: View>: View {
         )
         .padding(.horizontal, 14)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: LayoutRadii.field, style: .continuous)
                 .fill(Color.white.opacity(0.46))
         )
     }
@@ -503,7 +509,7 @@ struct RecordRowView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(record.merchant ?? record.category)
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(IMColors.textPrimary)
+                        .foregroundStyle(IMColors.textTitle)
                         .lineLimit(1)
 
                     HStack(spacing: 6) {
@@ -518,7 +524,7 @@ struct RecordRowView: View {
             VStack(alignment: .trailing, spacing: 8) {
                 Text(BillLensFormatters.currencyString(record.amount, currencyCode: record.currency))
                     .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(IMColors.textPrimary)
+                    .foregroundStyle(IMColors.textTitle)
                     .lineLimit(1)
                 Text(record.direction == "income" ? "收入" : "支出")
                     .font(.system(size: 11, weight: .bold))
@@ -566,7 +572,7 @@ struct RecordRowView: View {
     private func recordMetaPill(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(IMColors.textSecondary)
+            .foregroundStyle(IMColors.textBody)
             .lineLimit(1)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -592,7 +598,7 @@ struct LedgerSummaryCard: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(IMColors.textMuted)
+                .foregroundStyle(IMColors.textLabel)
             Text(value)
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(valueColor)
@@ -743,9 +749,10 @@ struct DirectionBadge: View {
             .foregroundStyle(IMColors.textSecondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(
-                Capsule()
-                    .fill(IMColors.controlBg)
+            .appCapsuleGlass(
+                prominence: .regular,
+                tint: direction == "income" ? IMColors.glassWarmTint : IMColors.glassCoolTint,
+                fallbackFill: IMColors.controlBg
             )
     }
 }
@@ -760,9 +767,10 @@ struct StatusPill: View {
             .foregroundStyle(IMColors.textSecondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(
-                Capsule()
-                    .fill(warning ? IMColors.warningBg : IMColors.controlBg)
+            .appCapsuleGlass(
+                prominence: warning ? .prominent : .regular,
+                tint: warning ? IMColors.glassWarmTint : IMColors.glassCoolTint.opacity(0.70),
+                fallbackFill: warning ? IMColors.warningBg : IMColors.controlBg
             )
     }
 }
@@ -780,19 +788,24 @@ struct ActionButton: View {
     let action: () -> Void
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: LayoutRadii.chip, style: .continuous)
         Button(action: action) {
             Text(title)
-                .font(.system(size: 14, weight: .regular))
+                .font(.system(size: 14, weight: kind == .primary ? .semibold : .medium))
                 .foregroundStyle(foreground)
                 .frame(minWidth: minWidth, minHeight: LayoutMetrics.actionButtonHeight)
                 .padding(.horizontal, 14)
-                .background(buttonBackground(shape: shape))
-                .overlay(shape.stroke(borderColor, lineWidth: kind == .primary ? 0 : 1))
+                .appRoundedGlass(
+                    cornerRadius: LayoutRadii.chip,
+                    prominence: kind == .primary ? .prominent : .regular,
+                    interactive: true,
+                    tint: glassTint,
+                    fallbackFill: backgroundFill
+                )
+                .overlay(shape.stroke(borderColor, lineWidth: borderWidth))
                 .contentShape(shape)
         }
         .buttonStyle(.plain)
-        .fixedSize(horizontal: true, vertical: false)
     }
 
     private var foreground: Color {
@@ -807,32 +820,42 @@ struct ActionButton: View {
     }
 
     private var backgroundFill: Color {
-        kind == .primary ? IMColors.buttonPrimary : .clear
+        switch kind {
+        case .primary:
+            return IMColors.buttonPrimary.opacity(0.94)
+        case .ghost:
+            return IMColors.surfaceStrong.opacity(0.72)
+        case .dangerGhost:
+            return IMColors.dangerBgLight.opacity(0.82)
+        }
     }
 
     private var borderColor: Color {
         switch kind {
         case .primary:
-            return .clear
+            return Color.white.opacity(0.22)
         case .ghost:
-            return IMColors.accentAlt
+            return IMColors.glassStroke.opacity(0.70)
         case .dangerGhost:
-            return IMColors.dangerBorder
+            return IMColors.dangerBorder.opacity(0.88)
         }
     }
 
-    @ViewBuilder
-    private func buttonBackground(shape: RoundedRectangle) -> some View {
+    private var borderWidth: CGFloat {
         if kind == .primary {
-            shape
-                .fill(IMColors.buttonPrimary)
-                .shadow(color: IMColors.accent.opacity(0.22), radius: 10, y: 6)
-        } else if kind == .ghost {
-            shape
-                .fill(IMColors.surface.opacity(0.36))
-        } else {
-            shape
-                .fill(IMColors.dangerBgLight.opacity(0.72))
+            return 0
+        }
+        return 1
+    }
+
+    private var glassTint: Color {
+        switch kind {
+        case .primary:
+            return IMColors.accent.opacity(0.52)
+        case .ghost:
+            return IMColors.glassCoolTint
+        case .dangerGhost:
+            return IMColors.danger.opacity(0.12)
         }
     }
 }
@@ -897,6 +920,26 @@ extension View {
     }
 }
 
+struct AppGlassGroup<Content: View>: View {
+    let spacing: CGFloat
+    let content: Content
+
+    init(spacing: CGFloat = 12, @ViewBuilder content: () -> Content) {
+        self.spacing = spacing
+        self.content = content()
+    }
+
+    var body: some View {
+        if #available(macOS 26.0, iOS 26.0, *) {
+            GlassEffectContainer(spacing: spacing) {
+                content
+            }
+        } else {
+            content
+        }
+    }
+}
+
 private struct IMRoundedGlassModifier: ViewModifier {
     let cornerRadius: CGFloat
     let prominence: IMGlassProminence
@@ -906,26 +949,70 @@ private struct IMRoundedGlassModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        content
-            .background(.ultraThinMaterial, in: shape)
-            .background(shape.fill(fallbackFill.opacity(prominence == .prominent ? 0.90 : 0.82)))
-            .overlay(
-                shape
-                    .fill(tint.opacity(prominence == .prominent ? 0.22 : 0.14))
-                    .allowsHitTesting(false)
-            )
-            .overlay(
-                shape
-                    .stroke(IMColors.headerTabBorder.opacity(borderOpacity), lineWidth: 1)
-                    .allowsHitTesting(false)
-            )
-            .shadow(color: IMColors.cardShadow.opacity(shadowOpacity), radius: shadowRadius, y: shadowYOffset)
+        if #available(macOS 26.0, iOS 26.0, *) {
+            let style = interactive
+                ? Glass.regular.tint(tint).interactive()
+                : Glass.clear.tint(tint.opacity(prominence == .prominent ? 0.60 : 0.42))
+
+            content
+                .background(shape.fill(fallbackFill.opacity(prominence == .prominent ? 0.88 : 0.80)))
+                .overlay(
+                    shape
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    IMColors.glassHighlightStrong.opacity(prominence == .prominent ? 0.55 : 0.36),
+                                    Color.clear
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .allowsHitTesting(false)
+                )
+                .overlay(
+                    shape
+                        .stroke(IMColors.glassStrokeStrong.opacity(borderOpacity), lineWidth: 1)
+                        .allowsHitTesting(false)
+                )
+                .glassEffect(style, in: shape)
+                .shadow(color: IMColors.cardShadow.opacity(shadowOpacity), radius: shadowRadius, y: shadowYOffset)
+        } else {
+            content
+                .background(.thinMaterial, in: shape)
+                .background(shape.fill(fallbackFill.opacity(prominence == .prominent ? 0.97 : 0.92)))
+                .overlay(
+                    shape
+                        .fill(tint.opacity(prominence == .prominent ? 0.10 : 0.06))
+                        .allowsHitTesting(false)
+                )
+                .overlay(
+                    shape
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    IMColors.glassHighlight.opacity(prominence == .prominent ? 0.44 : 0.28),
+                                    Color.clear
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .allowsHitTesting(false)
+                )
+                .overlay(
+                    shape
+                        .stroke(IMColors.headerTabBorder.opacity(borderOpacity), lineWidth: 1)
+                        .allowsHitTesting(false)
+                )
+                .shadow(color: IMColors.cardShadow.opacity(shadowOpacity), radius: shadowRadius, y: shadowYOffset)
+        }
     }
 
-    private var borderOpacity: Double { prominence == .prominent ? 0.95 : 0.72 }
-    private var shadowOpacity: Double { prominence == .prominent ? 0.95 : 0.72 }
-    private var shadowRadius: CGFloat { prominence == .prominent ? 18 : 12 }
-    private var shadowYOffset: CGFloat { prominence == .prominent ? 10 : 6 }
+    private var borderOpacity: Double { prominence == .prominent ? 0.82 : 0.64 }
+    private var shadowOpacity: Double { prominence == .prominent ? 0.72 : 0.52 }
+    private var shadowRadius: CGFloat { prominence == .prominent ? 16 : 10 }
+    private var shadowYOffset: CGFloat { prominence == .prominent ? 8 : 4 }
 }
 
 private struct IMCapsuleGlassModifier: ViewModifier {
@@ -936,19 +1023,56 @@ private struct IMCapsuleGlassModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         let shape = Capsule()
-        content
-            .background(.ultraThinMaterial, in: shape)
-            .background(shape.fill(fallbackFill.opacity(prominence == .prominent ? 0.88 : 0.80)))
-            .overlay(
-                shape
-                    .fill(tint.opacity(prominence == .prominent ? 0.20 : 0.12))
-                    .allowsHitTesting(false)
-            )
-            .overlay(
-                shape
-                    .stroke(IMColors.headerTabBorder.opacity(prominence == .prominent ? 0.9 : 0.7), lineWidth: 1)
-                    .allowsHitTesting(false)
-            )
+        if #available(macOS 26.0, iOS 26.0, *) {
+            let style = interactive
+                ? Glass.regular.tint(tint).interactive()
+                : Glass.clear.tint(tint.opacity(prominence == .prominent ? 0.58 : 0.40))
+
+            content
+                .background(shape.fill(fallbackFill.opacity(prominence == .prominent ? 0.90 : 0.82)))
+                .overlay(
+                    shape
+                        .fill(
+                            LinearGradient(
+                                colors: [IMColors.glassHighlightStrong.opacity(0.34), Color.clear],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .allowsHitTesting(false)
+                )
+                .overlay(
+                    shape
+                        .stroke(IMColors.glassStrokeStrong.opacity(prominence == .prominent ? 0.92 : 0.74), lineWidth: 1)
+                        .allowsHitTesting(false)
+                )
+                .glassEffect(style, in: shape)
+        } else {
+            content
+                .background(.thinMaterial, in: shape)
+                .background(shape.fill(fallbackFill.opacity(prominence == .prominent ? 0.96 : 0.92)))
+                .overlay(
+                    shape
+                        .fill(tint.opacity(prominence == .prominent ? 0.08 : 0.05))
+                        .allowsHitTesting(false)
+                )
+                .overlay(
+                    shape
+                        .fill(
+                            LinearGradient(
+                                colors: [IMColors.glassHighlight.opacity(0.24), Color.clear],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .allowsHitTesting(false)
+                )
+                .overlay(
+                    shape
+                        .stroke(IMColors.headerTabBorder.opacity(prominence == .prominent ? 0.9 : 0.7), lineWidth: 1)
+                        .allowsHitTesting(false)
+                )
+        }
     }
 }
 
@@ -960,20 +1084,58 @@ private struct IMCircleGlassModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         let shape = Circle()
-        content
-            .background(.ultraThinMaterial, in: shape)
-            .background(shape.fill(fallbackFill.opacity(prominence == .prominent ? 0.88 : 0.80)))
-            .overlay(
-                shape
-                    .fill(tint.opacity(prominence == .prominent ? 0.20 : 0.12))
-                    .allowsHitTesting(false)
-            )
-            .overlay(
-                shape
-                    .stroke(IMColors.headerTabBorder.opacity(prominence == .prominent ? 0.9 : 0.7), lineWidth: 1)
-                    .allowsHitTesting(false)
-            )
-            .shadow(color: IMColors.cardShadow.opacity(0.6), radius: 8, y: 4)
+        if #available(macOS 26.0, iOS 26.0, *) {
+            let style = interactive
+                ? Glass.regular.tint(tint).interactive()
+                : Glass.clear.tint(tint.opacity(prominence == .prominent ? 0.58 : 0.40))
+
+            content
+                .background(shape.fill(fallbackFill.opacity(prominence == .prominent ? 0.88 : 0.82)))
+                .overlay(
+                    shape
+                        .fill(
+                            LinearGradient(
+                                colors: [IMColors.glassHighlightStrong.opacity(0.30), Color.clear],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .allowsHitTesting(false)
+                )
+                .overlay(
+                    shape
+                        .stroke(IMColors.glassStrokeStrong.opacity(prominence == .prominent ? 0.92 : 0.74), lineWidth: 1)
+                        .allowsHitTesting(false)
+                )
+                .glassEffect(style, in: shape)
+                .shadow(color: IMColors.cardShadow.opacity(0.44), radius: 8, y: 3)
+        } else {
+            content
+                .background(.thinMaterial, in: shape)
+                .background(shape.fill(fallbackFill.opacity(prominence == .prominent ? 0.96 : 0.92)))
+                .overlay(
+                    shape
+                        .fill(tint.opacity(prominence == .prominent ? 0.08 : 0.05))
+                        .allowsHitTesting(false)
+                )
+                .overlay(
+                    shape
+                        .fill(
+                            LinearGradient(
+                                colors: [IMColors.glassHighlight.opacity(0.22), Color.clear],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .allowsHitTesting(false)
+                )
+                .overlay(
+                    shape
+                        .stroke(IMColors.headerTabBorder.opacity(prominence == .prominent ? 0.9 : 0.7), lineWidth: 1)
+                        .allowsHitTesting(false)
+                )
+                .shadow(color: IMColors.cardShadow.opacity(0.40), radius: 6, y: 3)
+        }
     }
 }
 

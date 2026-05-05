@@ -76,9 +76,11 @@ public struct RootView: View {
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 12)
-                .background(IMColors.dangerBg)
-                .clipShape(Capsule())
-                .shadow(color: .black.opacity(0.12), radius: 16, y: 8)
+                .appCapsuleGlass(
+                    prominence: .prominent,
+                    tint: IMColors.danger.opacity(0.22),
+                    fallbackFill: IMColors.dangerBg
+                )
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .task {
                     let snapshot = store.errorText
@@ -109,71 +111,74 @@ public struct RootView: View {
         let settingsButtonSize: CGFloat = 30
         #endif
 
-        return HStack(alignment: .center, spacing: outerSpacing) {
-            HStack(spacing: brandSpacing) {
-                ZStack {
-                    Circle()
-                        .fill(IMColors.logoBgTop)
-                        .frame(width: logoSize, height: logoSize)
-                        .overlay(
-                            Circle()
-                                .stroke(IMColors.logoBorder, lineWidth: 1)
+        return AppGlassGroup(spacing: 12) {
+            HStack(alignment: .center, spacing: outerSpacing) {
+                HStack(spacing: brandSpacing) {
+                    ZStack {
+                        Circle()
+                            .fill(IMColors.logoBgTop)
+                            .frame(width: logoSize, height: logoSize)
+                            .overlay(
+                                Circle()
+                                    .stroke(IMColors.logoBorder, lineWidth: 1)
+                            )
+                        Image(systemName: "list.bullet.rectangle.portrait")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(IMColors.navText)
+                    }
+                    .shadow(color: IMColors.cardShadow.opacity(0.18), radius: 10, y: 4)
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("BillLens")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(IMColors.textTitle)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                        Text("账单助手")
+                            .font(.system(size: 10, weight: .regular))
+                            .foregroundStyle(IMColors.textLabel)
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                }
+                .layoutPriority(2)
+
+                Spacer(minLength: 8)
+
+                mergedNavBar
+                    .layoutPriority(1)
+
+                Spacer(minLength: 8)
+
+                if showsHeaderStats {
+                    headerStatusPanel
+                }
+
+                Button {
+                    showSettings = true
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(IMColors.textLabel)
+                        .frame(width: settingsButtonSize, height: settingsButtonSize)
+                        .appCircleGlass(
+                            prominence: .regular,
+                            interactive: true,
+                            tint: IMColors.glassCoolTint,
+                            fallbackFill: IMColors.surfaceStrong
                         )
-                    Image(systemName: "list.bullet.rectangle.portrait")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(IMColors.navText)
                 }
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("BillLens")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(IMColors.navText)
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                    Text("账单助手")
-                        .font(.system(size: 10, weight: .regular))
-                        .foregroundStyle(IMColors.navTextSecondary)
+                .buttonStyle(.plain)
+                .sheet(isPresented: $showSettings) {
+                    SettingsShell().environmentObject(store)
                 }
-                .fixedSize(horizontal: true, vertical: false)
-            }
-            .layoutPriority(2)
-
-            Spacer(minLength: 8)
-
-            mergedNavBar
-                .layoutPriority(1)
-
-            Spacer(minLength: 8)
-
-            if showsHeaderStats {
-                headerStatusPanel
-            }
-
-            Button {
-                showSettings = true
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(IMColors.navTextSecondary)
-                    .frame(width: settingsButtonSize, height: settingsButtonSize)
-                    .appCircleGlass(
-                        prominence: .regular,
-                        interactive: true,
-                        tint: IMColors.accentBright.opacity(0.10),
-                        fallbackFill: IMColors.surfaceStrong
-                    )
-            }
-            .buttonStyle(.plain)
-            .sheet(isPresented: $showSettings) {
-                SettingsShell().environmentObject(store)
             }
         }
         .padding(.horizontal, headerHorizontalPadding)
         .padding(.vertical, 8)
         .appRoundedGlass(
-            cornerRadius: 18,
+            cornerRadius: LayoutRadii.section,
             prominence: .prominent,
-            tint: IMColors.accentBright.opacity(0.10),
+            tint: IMColors.glassCoolTint,
             fallbackFill: IMColors.navGlass
         )
     }
@@ -201,13 +206,10 @@ public struct RootView: View {
         }
         .padding(.horizontal, compactDock ? 2 : 4)
         .padding(.vertical, 2)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white.opacity(0.24))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(0.40), lineWidth: 1)
+        .appCapsuleGlass(
+            prominence: .regular,
+            tint: IMColors.glassCoolTint.opacity(0.90),
+            fallbackFill: Color.white.opacity(0.22)
         )
     }
 
@@ -220,7 +222,7 @@ public struct RootView: View {
             HStack(spacing: compactDock ? 0 : 8) {
                 Image(systemName: page.icon)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(selectedPage == page ? .white : IMColors.navTextSecondary)
+                    .foregroundStyle(selectedPage == page ? .white : IMColors.textLabel)
                     .frame(width: 26, height: 26)
                     .background(
                         Circle()
@@ -230,30 +232,28 @@ public struct RootView: View {
                 if !compactDock {
                     Text(page.title)
                         .font(.system(size: 12, weight: selectedPage == page ? .semibold : .medium))
-                        .foregroundStyle(selectedPage == page ? IMColors.navText : IMColors.navTextSecondary)
+                        .foregroundStyle(selectedPage == page ? IMColors.textTitle : IMColors.textLabel)
                         .lineLimit(1)
                 }
             }
             .padding(.horizontal, compactDock ? 6 : 10)
             .padding(.vertical, 6)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(selectedPage == page ? Color.white.opacity(0.52) : Color.clear)
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(Color.white.opacity(selectedPage == page ? 0.72 : 0.0), lineWidth: 1)
+            .appCapsuleGlass(
+                prominence: selectedPage == page ? .prominent : .regular,
+                interactive: true,
+                tint: selectedPage == page ? IMColors.accent.opacity(0.34) : IMColors.glassCoolTint.opacity(0.80),
+                fallbackFill: selectedPage == page ? Color.white.opacity(0.42) : Color.clear
             )
             .overlay(alignment: .bottom) {
                 Capsule(style: .continuous)
-                    .fill(selectedPage == page ? IMColors.accent.opacity(0.92) : .clear)
+                    .fill(selectedPage == page ? IMColors.premiumGold : .clear)
                     .frame(width: compactDock ? 16 : 24, height: 3)
                     .offset(y: 6)
             }
-            .scaleEffect(selectedPage == page ? 1.0 : 0.97)
+            .scaleEffect(selectedPage == page ? 1.0 : 0.985)
             .shadow(
                 color: selectedPage == page
-                    ? IMColors.accent.opacity(0.16)
+                    ? IMColors.accent.opacity(0.18)
                     : .clear,
                 radius: 10,
                 y: 6
@@ -289,7 +289,7 @@ private struct HeaderStatusChip: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(IMColors.textMuted)
+                .foregroundStyle(IMColors.textLabel)
             Text(value)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(highlight)
@@ -297,9 +297,11 @@ private struct HeaderStatusChip: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white.opacity(0.38))
+        .appRoundedGlass(
+            cornerRadius: LayoutRadii.chip,
+            prominence: .regular,
+            tint: IMColors.glassWarmTint.opacity(0.70),
+            fallbackFill: IMColors.surfaceStrong
         )
     }
 }
@@ -313,23 +315,39 @@ private struct AppBackdrop: View {
                 endPoint: .bottomTrailing
             )
 
-            Circle()
-                .fill(IMColors.pageBlobA)
-                .frame(width: 320, height: 320)
-                .blur(radius: 18)
-                .offset(x: -280, y: -220)
+            RadialGradient(
+                colors: [Color.white.opacity(0.88), Color.clear],
+                center: .topLeading,
+                startRadius: 40,
+                endRadius: 560
+            )
 
             Circle()
+                .fill(IMColors.pageBlobA)
+                .frame(width: 420, height: 420)
+                .blur(radius: 42)
+                .offset(x: -320, y: -250)
+
+            Ellipse()
                 .fill(IMColors.pageBlobB)
-                .frame(width: 260, height: 260)
-                .blur(radius: 16)
+                .frame(width: 420, height: 300)
+                .blur(radius: 34)
                 .offset(x: 300, y: -170)
 
             Circle()
-                .fill(IMColors.pageBlobA.opacity(0.45))
-                .frame(width: 360, height: 360)
-                .blur(radius: 20)
+                .fill(IMColors.pageBlobC)
+                .frame(width: 420, height: 420)
+                .blur(radius: 50)
                 .offset(x: 360, y: 300)
+
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.14), Color.clear, Color.white.opacity(0.08)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
         }
     }
 }

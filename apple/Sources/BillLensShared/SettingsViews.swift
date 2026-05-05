@@ -185,9 +185,9 @@ struct SettingsShell: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: 36)
                         .background(Color.clear)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: LayoutRadii.micro, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            RoundedRectangle(cornerRadius: LayoutRadii.micro, style: .continuous)
                                 .stroke(IMColors.accentAlt, lineWidth: 1)
                         )
                 }
@@ -207,7 +207,7 @@ struct SettingsShell: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: 36)
                     .background(IMColors.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: LayoutRadii.micro, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .disabled(isSaving)
@@ -221,7 +221,12 @@ struct SettingsShell: View {
         .presentationDetents(focusedField == nil ? [.height(520)] : [.large])
         .presentationDragIndicator(.visible)
         #endif
-        .background(IMColors.pageBgTop)
+        .appRoundedGlass(
+            cornerRadius: LayoutRadii.shell,
+            prominence: .prominent,
+            tint: IMColors.glassCoolTint,
+            fallbackFill: IMColors.surface
+        )
         .task {
             if store.llmConfig == nil {
                 try? await store.loadLlmConfig()
@@ -351,11 +356,12 @@ struct SettingsShell: View {
                     }
                     .padding(.horizontal, 12)
                     .frame(height: 34)
-                    .background(IMColors.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(IMColors.divider, lineWidth: 1)
+                    .appRoundedGlass(
+                        cornerRadius: LayoutRadii.compactField,
+                        prominence: .regular,
+                        interactive: true,
+                        tint: IMColors.glassCoolTint.opacity(0.72),
+                        fallbackFill: IMColors.surface
                     )
                 }
                 .buttonStyle(.plain)
@@ -374,8 +380,13 @@ struct SettingsShell: View {
                     .foregroundStyle(IMColors.accentAlt)
                     .padding(.horizontal, 12)
                     .frame(height: 34)
-                    .background(IMColors.accent.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .appRoundedGlass(
+                        cornerRadius: LayoutRadii.compactField,
+                        prominence: .regular,
+                        interactive: true,
+                        tint: IMColors.accent.opacity(0.22),
+                        fallbackFill: IMColors.accent.opacity(0.10)
+                    )
                 }
                 .buttonStyle(.plain)
                 .disabled(isLoadingModels || isSaving)
@@ -484,11 +495,11 @@ struct SettingsShell: View {
         VStack(spacing: 0) {
             content()
         }
-        .background(IMColors.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(IMColors.divider, lineWidth: 1)
+        .appRoundedGlass(
+            cornerRadius: LayoutRadii.field,
+            prominence: .regular,
+            tint: IMColors.glassCoolTint.opacity(0.80),
+            fallbackFill: IMColors.surface
         )
     }
 

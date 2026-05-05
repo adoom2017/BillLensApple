@@ -37,22 +37,41 @@ enum LayoutMetrics {
     static let avatarSize: CGFloat = 32
 }
 
+enum LayoutRadii {
+    static let shell: CGFloat = 30
+    static let section: CGFloat = 24
+    static let card: CGFloat = 16
+    static let field: CGFloat = 14
+    static let compactField: CGFloat = 12
+    static let chip: CGFloat = 14
+    static let small: CGFloat = 10
+    static let micro: CGFloat = 8
+    static let tiny: CGFloat = 5
+}
+
 enum IMColors {
     // Text hierarchy
-    static let textPrimary = Color(red: 0.118, green: 0.157, blue: 0.192)
-    static let textSecondary = Color(red: 0.330, green: 0.384, blue: 0.431)
-    static let textMuted = Color(red: 0.486, green: 0.541, blue: 0.588)
-    static let textTertiary = Color(red: 0.566, green: 0.620, blue: 0.663)
-    static let textPlaceholder = Color(red: 0.776, green: 0.816, blue: 0.855)
+    static let textPrimary = Color(red: 0.055, green: 0.086, blue: 0.145)
+    static let textSecondary = Color(red: 0.153, green: 0.212, blue: 0.306)
+    static let textMuted = Color(red: 0.306, green: 0.369, blue: 0.463)
+    static let textTertiary = Color(red: 0.447, green: 0.510, blue: 0.600)
+    static let textPlaceholder = Color(red: 0.612, green: 0.671, blue: 0.749)
+    static let textTitle = textPrimary
+    static let textBody = textSecondary
+    static let textLabel = textMuted
+    static let textMeta = textTertiary
+    static let textHint = textPlaceholder
 
     // Accent / brand
-    static let accent = Color(red: 0.161, green: 0.447, blue: 0.584)
-    static let accentAlt = Color(red: 0.207, green: 0.525, blue: 0.666)
-    static let accentDark = Color(red: 0.120, green: 0.318, blue: 0.412)
-    static let accentBright = Color(red: 0.430, green: 0.784, blue: 0.878)
+    static let accent = Color(red: 0.137, green: 0.357, blue: 0.545)
+    static let accentAlt = Color(red: 0.196, green: 0.467, blue: 0.655)
+    static let accentDark = Color(red: 0.082, green: 0.212, blue: 0.337)
+    static let accentBright = Color(red: 0.560, green: 0.804, blue: 0.910)
+    static let premiumGold = Color(red: 0.741, green: 0.612, blue: 0.243)
+    static let premiumGoldSoft = Color(red: 0.914, green: 0.861, blue: 0.660)
 
     // Semantic
-    static let income = textPrimary
+    static let income = Color(red: 0.102, green: 0.251, blue: 0.216)
     static let danger = Color(red: 0.765, green: 0.286, blue: 0.306)
     static let dangerBg = Color(red: 0.804, green: 0.349, blue: 0.361)
     static let dangerSubtle = Color(red: 0.706, green: 0.235, blue: 0.259)
@@ -61,45 +80,52 @@ enum IMColors {
     static let warningText = textSecondary
 
     // Chat
-    static let chatBg = Color(red: 0.950, green: 0.956, blue: 0.964)
-    static let userBubble = Color(red: 0.930, green: 0.951, blue: 0.970)
-    static let botBubble = Color(red: 0.989, green: 0.992, blue: 0.996)
+    static let chatBg = Color.white.opacity(0.70)
+    static let userBubble = Color(red: 0.899, green: 0.947, blue: 0.981).opacity(0.82)
+    static let botBubble = Color.white.opacity(0.76)
     static let sendButton = accent
     static let sendButtonDark = accentAlt
-    static let systemMsgBg = Color(red: 0.938, green: 0.949, blue: 0.959)
+    static let systemMsgBg = Color.white.opacity(0.78)
 
     // Surfaces & borders
-    static let divider = Color(red: 0.803, green: 0.850, blue: 0.886).opacity(0.72)
-    static let panelBg = Color(red: 0.948, green: 0.955, blue: 0.964).opacity(0.94)
-    static let controlBg = Color(red: 0.969, green: 0.977, blue: 0.984)
-    static let statBg = Color(red: 0.982, green: 0.986, blue: 0.990)
-    static let surface = Color(red: 0.992, green: 0.994, blue: 0.998).opacity(0.96)
-    static let surfaceStrong = Color(red: 0.985, green: 0.989, blue: 0.994)
+    static let divider = Color.white.opacity(0.44)
+    static let panelBg = Color.white.opacity(0.62)
+    static let controlBg = Color.white.opacity(0.78)
+    static let statBg = Color.white.opacity(0.66)
+    static let surface = Color.white.opacity(0.82)
+    static let surfaceStrong = Color.white.opacity(0.92)
     static let darkSurface = Color(red: 0.153, green: 0.153, blue: 0.161)
-    static let navGlass = Color(red: 0.985, green: 0.990, blue: 0.995).opacity(0.82)
+    static let navGlass = Color.white.opacity(0.68)
     static let navText = textPrimary
-    static let navTextSecondary = textMuted
-    static let cardShadow = Color(red: 0.227, green: 0.364, blue: 0.455).opacity(0.12)
+    static let navTextSecondary = textSecondary
+    static let cardShadow = accentDark.opacity(0.18)
+    static let glassStroke = Color.white.opacity(0.44)
+    static let glassStrokeStrong = Color.white.opacity(0.70)
+    static let glassHighlight = Color.white.opacity(0.10)
+    static let glassHighlightStrong = Color.white.opacity(0.18)
+    static let glassCoolTint = accentBright.opacity(0.10)
+    static let glassWarmTint = premiumGoldSoft.opacity(0.12)
 
     // Tag backgrounds
-    static let accentBgLight = Color(red: 0.895, green: 0.951, blue: 0.977)
-    static let accentBgActive = Color(red: 0.862, green: 0.930, blue: 0.965)
-    static let incomeBgLight = Color(red: 0.930, green: 0.951, blue: 0.970)
-    static let warningBg = Color(red: 0.953, green: 0.956, blue: 0.965)
+    static let accentBgLight = Color(red: 0.884, green: 0.942, blue: 0.974).opacity(0.82)
+    static let accentBgActive = Color(red: 0.848, green: 0.917, blue: 0.965).opacity(0.88)
+    static let incomeBgLight = Color(red: 0.925, green: 0.951, blue: 0.972).opacity(0.82)
+    static let warningBg = premiumGoldSoft.opacity(0.42)
 
     // Global background
-    static let pageBgTop = Color(red: 0.976, green: 0.979, blue: 0.971)
-    static let pageBgMid = Color(red: 0.946, green: 0.954, blue: 0.962)
-    static let pageBgBottom = Color(red: 0.935, green: 0.944, blue: 0.955)
-    static let pageBlobA = Color(red: 0.859, green: 0.928, blue: 0.950).opacity(0.65)
-    static let pageBlobB = Color(red: 0.951, green: 0.944, blue: 0.892).opacity(0.62)
+    static let pageBgTop = Color(red: 0.979, green: 0.988, blue: 0.998)
+    static let pageBgMid = Color(red: 0.922, green: 0.948, blue: 0.975)
+    static let pageBgBottom = Color(red: 0.872, green: 0.909, blue: 0.956)
+    static let pageBlobA = Color(red: 0.706, green: 0.878, blue: 0.948).opacity(0.56)
+    static let pageBlobB = Color(red: 0.954, green: 0.878, blue: 0.702).opacity(0.42)
+    static let pageBlobC = Color(red: 0.745, green: 0.816, blue: 0.980).opacity(0.34)
 
     // Header / logo
-    static let logoBgTop = Color.white.opacity(0.82)
-    static let logoBorder = Color.white.opacity(0.56)
-    static let headerTabBorder = Color(red: 0.788, green: 0.848, blue: 0.892).opacity(0.68)
-    static let headerShadow = Color(red: 0.337, green: 0.447, blue: 0.525)
-    static let ghostBorder = Color(red: 0.764, green: 0.830, blue: 0.878).opacity(0.74)
+    static let logoBgTop = Color.white.opacity(0.66)
+    static let logoBorder = Color.white.opacity(0.72)
+    static let headerTabBorder = Color.white.opacity(0.58)
+    static let headerShadow = accentDark.opacity(0.28)
+    static let ghostBorder = Color.white.opacity(0.66)
 
     // Avatars
     static let assistantAvatarTop = darkSurface
@@ -120,5 +146,5 @@ enum IMColors {
 
     // Ledger special stat colors
     static let ledgerStatGoldBold = textPrimary
-    static let ledgerStatGold = textSecondary
+    static let ledgerStatGold = Color(red: 0.431, green: 0.337, blue: 0.118)
 }

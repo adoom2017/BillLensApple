@@ -9,6 +9,7 @@ struct SubscriptionShell: View {
     @State private var isEditing = false
     @State private var editForm = SubscriptionEditFormState()
     @State private var isDetailPresented = false
+    private let shellCornerRadius: CGFloat = LayoutRadii.shell
 
     var body: some View {
         Group {
@@ -18,6 +19,13 @@ struct SubscriptionShell: View {
                 splitBody
             }
         }
+        .clipShape(RoundedRectangle(cornerRadius: shellCornerRadius, style: .continuous))
+        .appRoundedGlass(
+            cornerRadius: shellCornerRadius,
+            prominence: .prominent,
+            tint: IMColors.glassCoolTint,
+            fallbackFill: IMColors.surface
+        )
         .onAppear {
             Task { try? await store.loadSubscriptions() }
         }
@@ -84,12 +92,7 @@ struct SubscriptionShell: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(IMColors.panelBg)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(IMColors.divider, lineWidth: 1)
-        )
+        .background(IMColors.panelBg.opacity(0.74))
         .sheet(isPresented: $isDetailPresented, onDismiss: { store.selectedSubscriptionId = nil }) {
             compactDetailSheet
         }
@@ -179,7 +182,7 @@ struct SubscriptionShell: View {
             }
             .frame(width: 420)
             .frame(maxHeight: .infinity)
-            .background(IMColors.panelBg)
+            .background(IMColors.panelBg.opacity(0.74))
 
             // Divider
             ZStack {
@@ -237,13 +240,8 @@ struct SubscriptionShell: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(IMColors.surface)
+            .background(IMColors.surface.opacity(0.74))
         }
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(IMColors.divider, lineWidth: 1)
-        )
     }
 
     private var subscriptionEmptyState: some View {
@@ -308,7 +306,7 @@ struct SubscriptionCard: View {
                 HStack(alignment: .top) {
                     // Icon
                     ZStack {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        RoundedRectangle(cornerRadius: LayoutRadii.micro, style: .continuous)
                             .fill(subscription.isActive ? IMColors.accentBgLight : IMColors.controlBg)
                             .frame(width: 36, height: 36)
                         Image(systemName: "repeat.circle.fill")
@@ -319,11 +317,11 @@ struct SubscriptionCard: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(subscription.merchant ?? subscription.category)
                             .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(IMColors.textPrimary)
+                            .foregroundStyle(IMColors.textTitle)
                             .lineLimit(1)
                         Text("\(subscription.cycleDisplayText) · \(subscription.category)")
                             .font(.system(size: 11))
-                            .foregroundStyle(IMColors.textMuted)
+                            .foregroundStyle(IMColors.textLabel)
                     }
 
                     Spacer()
@@ -331,14 +329,14 @@ struct SubscriptionCard: View {
                     VStack(alignment: .trailing, spacing: 3) {
                         Text(BillLensFormatters.currencyString(subscription.amount, currencyCode: subscription.currency))
                             .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(IMColors.textPrimary)
+                            .foregroundStyle(IMColors.textTitle)
                         HStack(spacing: 4) {
                             Circle()
                                 .fill(subscription.isActive ? IMColors.textPrimary : IMColors.textPlaceholder)
                                 .frame(width: 6, height: 6)
                             Text(subscription.statusDisplayText)
                                 .font(.system(size: 10))
-                                .foregroundStyle(IMColors.textMuted)
+                                .foregroundStyle(IMColors.textLabel)
                         }
                     }
                 }
@@ -346,7 +344,7 @@ struct SubscriptionCard: View {
                 HStack(spacing: 6) {
                     Label("下次: \(subscription.nextDueAt)", systemImage: "calendar")
                         .font(.system(size: 11))
-                        .foregroundStyle(IMColors.textTertiary)
+                        .foregroundStyle(IMColors.textMeta)
 
                     Spacer()
 
@@ -361,13 +359,13 @@ struct SubscriptionCard: View {
             }
             .padding(12)
             .appRoundedGlass(
-                cornerRadius: 16,
+                cornerRadius: LayoutRadii.card,
                 prominence: isSelected ? .prominent : .regular,
                 tint: isSelected ? IMColors.accentBright.opacity(0.18) : IMColors.accentBright.opacity(0.08),
                 fallbackFill: isSelected ? IMColors.accentBgActive : IMColors.surfaceStrong
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: LayoutRadii.small, style: .continuous)
                     .stroke(isSelected ? IMColors.accent.opacity(0.4) : IMColors.divider, lineWidth: 1)
             )
         }
@@ -385,8 +383,11 @@ struct SubscriptionCard: View {
             .foregroundStyle(color)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
-            .background(
-                Capsule().fill(color.opacity(0.08))
+            .appCapsuleGlass(
+                prominence: .regular,
+                interactive: true,
+                tint: color.opacity(0.14),
+                fallbackFill: color.opacity(0.08)
             )
         }
         .buttonStyle(.plain)
@@ -409,7 +410,7 @@ struct SubscriptionDetailPanel: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         ZStack {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            RoundedRectangle(cornerRadius: LayoutRadii.compactField, style: .continuous)
                                 .fill(subscription.isActive ? IMColors.accentBgLight : IMColors.controlBg)
                                 .frame(width: 48, height: 48)
                             Image(systemName: "repeat.circle.fill")
@@ -419,22 +420,28 @@ struct SubscriptionDetailPanel: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(subscription.merchant ?? subscription.category)
                                 .font(.system(size: 18, weight: .bold))
-                                .foregroundStyle(IMColors.textPrimary)
+                                .foregroundStyle(IMColors.textTitle)
                             HStack(spacing: 6) {
                                 Text(subscription.cycleDisplayText)
                                     .font(.system(size: 12, weight: .medium))
                                     .foregroundStyle(IMColors.accent)
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 3)
-                                    .background(IMColors.accentBgLight)
-                                    .clipShape(Capsule())
+                                    .appCapsuleGlass(
+                                        prominence: .regular,
+                                        tint: IMColors.glassCoolTint,
+                                        fallbackFill: IMColors.accentBgLight
+                                    )
                                 Text(subscription.isActive ? "活跃" : "已暂停")
                                     .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(subscription.isActive ? IMColors.textPrimary : IMColors.textMuted)
+                                    .foregroundStyle(subscription.isActive ? IMColors.textTitle : IMColors.textLabel)
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 3)
-                                    .background(IMColors.controlBg)
-                                    .clipShape(Capsule())
+                                    .appCapsuleGlass(
+                                        prominence: .regular,
+                                        tint: IMColors.glassWarmTint.opacity(0.48),
+                                        fallbackFill: IMColors.controlBg
+                                    )
                             }
                         }
                         Spacer()
@@ -443,7 +450,7 @@ struct SubscriptionDetailPanel: View {
                     // Amount display
                     Text(BillLensFormatters.currencyString(subscription.amount, currencyCode: subscription.currency))
                         .font(.system(size: 32, weight: .bold, design: .rounded))
-                        .foregroundStyle(IMColors.textPrimary)
+                        .foregroundStyle(IMColors.textTitle)
                         .padding(.top, 4)
                 }
                 .padding(20)
@@ -493,11 +500,11 @@ struct SubscriptionDetailPanel: View {
         HStack {
             Text(label)
                 .font(.system(size: 13))
-                .foregroundStyle(IMColors.textMuted)
+                .foregroundStyle(IMColors.textLabel)
                 .frame(width: 72, alignment: .leading)
             Text(value)
                 .font(.system(size: 13))
-                .foregroundStyle(IMColors.textPrimary)
+                .foregroundStyle(IMColors.textBody)
             Spacer()
         }
         .padding(.horizontal, 20)

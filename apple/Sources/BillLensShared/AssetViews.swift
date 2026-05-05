@@ -12,6 +12,7 @@ struct AssetShell: View {
     @State private var isEditing = false
     @State private var editForm = AssetEditFormState()
     @State private var isDetailPresented = false
+    private let shellCornerRadius: CGFloat = LayoutRadii.shell
 
     var body: some View {
         Group {
@@ -21,6 +22,13 @@ struct AssetShell: View {
                 splitBody
             }
         }
+        .clipShape(RoundedRectangle(cornerRadius: shellCornerRadius, style: .continuous))
+        .appRoundedGlass(
+            cornerRadius: shellCornerRadius,
+            prominence: .prominent,
+            tint: IMColors.glassCoolTint,
+            fallbackFill: IMColors.surface
+        )
         .onAppear {
             Task { try? await store.loadAssets() }
         }
@@ -88,12 +96,7 @@ struct AssetShell: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(IMColors.panelBg)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(IMColors.divider, lineWidth: 1)
-        )
+        .background(IMColors.panelBg.opacity(0.74))
         .sheet(isPresented: $isDetailPresented, onDismiss: { store.selectedAssetId = nil }) {
             compactDetailSheet
         }
@@ -180,7 +183,7 @@ struct AssetShell: View {
             }
             .frame(width: 420)
             .frame(maxHeight: .infinity)
-            .background(IMColors.panelBg)
+            .background(IMColors.panelBg.opacity(0.74))
 
             // Divider
             ZStack {
@@ -237,13 +240,8 @@ struct AssetShell: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(IMColors.surface)
+            .background(IMColors.surface.opacity(0.74))
         }
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(IMColors.divider, lineWidth: 1)
-        )
     }
 
     private var assetEmptyState: some View {
@@ -286,7 +284,7 @@ struct AssetCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top) {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        RoundedRectangle(cornerRadius: LayoutRadii.micro, style: .continuous)
                             .fill(IMColors.accentBgLight)
                             .frame(width: 36, height: 36)
                         Image(systemName: assetIcon(for: asset.category))
@@ -297,11 +295,11 @@ struct AssetCard: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(asset.name)
                             .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(IMColors.textPrimary)
+                            .foregroundStyle(IMColors.textTitle)
                             .lineLimit(1)
                         Text("\(asset.category) · \(asset.snapshots.count) 条记录")
                             .font(.system(size: 11))
-                            .foregroundStyle(IMColors.textMuted)
+                            .foregroundStyle(IMColors.textLabel)
                     }
 
                     Spacer()
@@ -310,16 +308,16 @@ struct AssetCard: View {
                         if let amount = asset.latestAmount {
                             Text(BillLensFormatters.currencyString(amount, currencyCode: asset.currency))
                                 .font(.system(size: 14, weight: .bold, design: .rounded))
-                                .foregroundStyle(IMColors.textPrimary)
+                                .foregroundStyle(IMColors.textTitle)
                         } else {
                             Text("—")
                                 .font(.system(size: 14))
-                                .foregroundStyle(IMColors.textMuted)
+                                .foregroundStyle(IMColors.textLabel)
                         }
                         if let day = asset.latestRecordedOn {
                             Text(BillLensFormatters.displayDay(day))
                                 .font(.system(size: 10))
-                                .foregroundStyle(IMColors.textTertiary)
+                                .foregroundStyle(IMColors.textMeta)
                         }
                     }
                 }
@@ -327,20 +325,20 @@ struct AssetCard: View {
                 HStack(spacing: 6) {
                     Label(asset.currency, systemImage: "banknote")
                         .font(.system(size: 11))
-                        .foregroundStyle(IMColors.textTertiary)
+                        .foregroundStyle(IMColors.textMeta)
                     Spacer()
                     smallDeleteButton(action: onDelete)
                 }
             }
             .padding(12)
             .appRoundedGlass(
-                cornerRadius: 16,
+                cornerRadius: LayoutRadii.card,
                 prominence: isSelected ? .prominent : .regular,
                 tint: isSelected ? IMColors.accentBright.opacity(0.18) : IMColors.accentBright.opacity(0.08),
                 fallbackFill: isSelected ? IMColors.accentBgActive : IMColors.surfaceStrong
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: LayoutRadii.small, style: .continuous)
                     .stroke(isSelected ? IMColors.accent.opacity(0.4) : IMColors.divider, lineWidth: 1)
             )
         }
@@ -358,7 +356,12 @@ struct AssetCard: View {
             .foregroundStyle(IMColors.dangerSubtle)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
-            .background(Capsule().fill(IMColors.dangerSubtle.opacity(0.08)))
+            .appCapsuleGlass(
+                prominence: .regular,
+                interactive: true,
+                tint: IMColors.danger.opacity(0.12),
+                fallbackFill: IMColors.dangerSubtle.opacity(0.08)
+            )
         }
         .buttonStyle(.plain)
     }
@@ -396,7 +399,7 @@ struct AssetDetailPanel: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         ZStack {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            RoundedRectangle(cornerRadius: LayoutRadii.compactField, style: .continuous)
                                 .fill(IMColors.accentBgLight)
                                 .frame(width: 48, height: 48)
                             Image(systemName: assetIcon(for: asset.category))
@@ -406,7 +409,7 @@ struct AssetDetailPanel: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(asset.name)
                                 .font(.system(size: 18, weight: .bold))
-                                .foregroundStyle(IMColors.textPrimary)
+                                .foregroundStyle(IMColors.textTitle)
                             HStack(spacing: 6) {
                                 categoryPill(asset.category)
                                 categoryPill(asset.currency)
@@ -418,12 +421,12 @@ struct AssetDetailPanel: View {
                     if let amount = asset.latestAmount {
                         Text(BillLensFormatters.currencyString(amount, currencyCode: asset.currency))
                             .font(.system(size: 32, weight: .bold, design: .rounded))
-                            .foregroundStyle(IMColors.textPrimary)
+                            .foregroundStyle(IMColors.textTitle)
                             .padding(.top, 4)
                         if let day = asset.latestRecordedOn {
                             Text("截至 \(BillLensFormatters.displayDay(day))")
                                 .font(.system(size: 12))
-                                .foregroundStyle(IMColors.textMuted)
+                                .foregroundStyle(IMColors.textLabel)
                         }
                     }
                 }
@@ -435,14 +438,14 @@ struct AssetDetailPanel: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("余额趋势")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(IMColors.textSecondary)
+                        .foregroundStyle(IMColors.textTitle)
                         .padding(.horizontal, 20)
                         .padding(.top, 16)
 
                     if sortedSnapshots.isEmpty {
                         Text("暂无快照数据")
                             .font(.system(size: 13))
-                            .foregroundStyle(IMColors.textMuted)
+                            .foregroundStyle(IMColors.textBody)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 40)
                     } else if sortedSnapshots.count == 1 {
@@ -453,10 +456,10 @@ struct AssetDetailPanel: View {
                                 .foregroundStyle(IMColors.accent)
                             Text(BillLensFormatters.currencyString(snap.amount, currencyCode: asset.currency))
                                 .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(IMColors.textPrimary)
+                                .foregroundStyle(IMColors.textBody)
                             Text(BillLensFormatters.displayDay(snap.recordedOn))
                                 .font(.system(size: 11))
-                                .foregroundStyle(IMColors.textMuted)
+                                .foregroundStyle(IMColors.textLabel)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 24)
@@ -516,7 +519,7 @@ struct AssetDetailPanel: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("历史记录")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(IMColors.textSecondary)
+                        .foregroundStyle(IMColors.textTitle)
                         .padding(.horizontal, 20)
                         .padding(.top, 16)
                         .padding(.bottom, 8)
@@ -560,17 +563,17 @@ struct AssetDetailPanel: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(BillLensFormatters.displayDay(snap.recordedOn))
                     .font(.system(size: 13))
-                    .foregroundStyle(IMColors.textPrimary)
+                    .foregroundStyle(IMColors.textBody)
                 if let note = snap.note, !note.isEmpty {
                     Text(note)
                         .font(.system(size: 11))
-                        .foregroundStyle(IMColors.textMuted)
+                        .foregroundStyle(IMColors.textLabel)
                 }
             }
             Spacer()
             Text(BillLensFormatters.currencyString(snap.amount, currencyCode: asset.currency))
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(IMColors.textPrimary)
+                .foregroundStyle(IMColors.textTitle)
             Button {
                 snapshotToDelete = snap
             } label: {
@@ -591,8 +594,11 @@ struct AssetDetailPanel: View {
             .foregroundStyle(IMColors.accent)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(IMColors.accentBgLight)
-            .clipShape(Capsule())
+            .appCapsuleGlass(
+                prominence: .regular,
+                tint: IMColors.glassCoolTint,
+                fallbackFill: IMColors.accentBgLight
+            )
     }
 }
 
