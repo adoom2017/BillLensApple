@@ -40,6 +40,8 @@ public struct DraftInput: Codable {
     public var merchant: String?
     public var transactionAt: String?
     public var note: String?
+    public var subscriptionCycle: String? = nil
+    public var assetInfo: ParsedAssetInfo? = nil
 
     enum CodingKeys: String, CodingKey {
         case direction
@@ -49,6 +51,8 @@ public struct DraftInput: Codable {
         case merchant
         case transactionAt = "transaction_at"
         case note
+        case subscriptionCycle = "subscription_cycle"
+        case assetInfo = "asset_info"
     }
 }
 
@@ -74,9 +78,13 @@ public struct ConversationMessage: Codable, Identifiable {
 
 public struct RecordDraft: Codable, Identifiable {
     public let id: String
+    public let batchId: String
     public let profileId: String
     public let content: String
     public let autoConfirm: Bool
+    public let kind: String
+    public let parserSource: String
+    public let fallbackReason: String?
     public let status: String
     public let confirmedRecordId: String?
     public var direction: String?
@@ -86,14 +94,20 @@ public struct RecordDraft: Codable, Identifiable {
     public var merchant: String?
     public var transactionAt: String?
     public var note: String?
+    public let subscriptionCycle: String?
+    public var assetInfo: ParsedAssetInfo?
     public let createdAt: String
     public let updatedAt: String
 
     enum CodingKeys: String, CodingKey {
         case id
+        case batchId = "batch_id"
         case profileId = "profile_id"
         case content
         case autoConfirm = "auto_confirm"
+        case kind
+        case parserSource = "parser_source"
+        case fallbackReason = "fallback_reason"
         case status
         case confirmedRecordId = "confirmed_record_id"
         case direction
@@ -103,6 +117,8 @@ public struct RecordDraft: Codable, Identifiable {
         case merchant
         case transactionAt = "transaction_at"
         case note
+        case subscriptionCycle = "subscription_cycle"
+        case assetInfo = "asset_info"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -164,6 +180,8 @@ public struct ParsedRecordPayload: Codable {
     public let merchant: String?
     public let transactionAt: String?
     public let note: String?
+    public let subscriptionCycle: String?
+    public let assetInfo: ParsedAssetInfo?
 
     enum CodingKeys: String, CodingKey {
         case direction
@@ -173,7 +191,32 @@ public struct ParsedRecordPayload: Codable {
         case merchant
         case transactionAt = "transaction_at"
         case note
+        case subscriptionCycle = "subscription_cycle"
+        case assetInfo = "asset_info"
     }
+}
+
+public struct ParsedAssetInfo: Codable {
+    public var name: String
+    public var category: String?
+    public var amount: Double
+    public var currency: String?
+    public var recordedOn: String?
+    public var note: String?
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case category
+        case amount
+        case currency
+        case recordedOn = "recorded_on"
+        case note
+    }
+}
+
+public struct LocalFailureInfo: Codable {
+    public let code: String
+    public let message: String
 }
 
 public struct SubmitTextResult: Codable {
@@ -182,6 +225,9 @@ public struct SubmitTextResult: Codable {
     public let parsed: [ParsedRecordPayload]
     public let subscriptionCreated: Bool
     public let assetAcks: [AssetAck]?
+    public let parserSource: String
+    public let localModelId: String?
+    public let localFailure: LocalFailureInfo?
 
     enum CodingKeys: String, CodingKey {
         case home
@@ -189,6 +235,9 @@ public struct SubmitTextResult: Codable {
         case parsed
         case subscriptionCreated = "subscription_created"
         case assetAcks = "asset_acks"
+        case parserSource = "parser_source"
+        case localModelId = "local_model_id"
+        case localFailure = "local_failure"
     }
 }
 

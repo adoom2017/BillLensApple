@@ -14,6 +14,7 @@ public func billlens_swift_stt_start() -> Int32 {
                 try SpeechCaptureService.shared.start()
             }
         } catch {
+            AppLogger.log("speech.ffi.start.failure", error.localizedDescription)
             code = -1
         }
     }
@@ -22,11 +23,23 @@ public func billlens_swift_stt_start() -> Int32 {
 
 @_cdecl("billlens_swift_stt_stop")
 public func billlens_swift_stt_stop() -> UnsafeMutablePointer<CChar>? {
-    var transcript: String = ""
+    var transcript: String?
+    var stopError: Error?
     DispatchQueue.main.sync {
-        MainActor.assumeIsolated {
-            transcript = (try? SpeechCaptureService.shared.stop()) ?? ""
+        do {
+            transcript = try MainActor.assumeIsolated {
+                try SpeechCaptureService.shared.stop()
+            }
+        } catch {
+            stopError = error
         }
+    }
+    if let stopError {
+        AppLogger.log("speech.ffi.stop.failure", stopError.localizedDescription)
+        return nil
+    }
+    guard let transcript else {
+        preconditionFailure("语音停止未返回结果，也未返回错误。")
     }
     return strdup(transcript)
 }

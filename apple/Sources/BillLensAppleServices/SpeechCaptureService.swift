@@ -103,7 +103,11 @@ private final class AudioCaptureEngine: @unchecked Sendable {
         recognitionTask = nil
         recognitionRequest = nil
         #if os(iOS)
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        do {
+            try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        } catch {
+            preconditionFailure("停用录音会话失败：\(error.localizedDescription)")
+        }
         #endif
     }
 }

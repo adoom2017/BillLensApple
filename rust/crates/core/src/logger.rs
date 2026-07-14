@@ -31,7 +31,9 @@ pub fn initialize(path: Option<&str>) -> Result<()> {
         None
     };
 
-    let _ = LOG_FILE.set(file);
+    LOG_FILE
+        .set(file)
+        .map_err(|_| anyhow::anyhow!("logger was initialized concurrently"))?;
     info("logger", "initialized");
     Ok(())
 }
@@ -54,8 +56,10 @@ fn write_line(level: &str, stage: &str, message: &str) {
     );
     eprintln!("{line}");
     if let Some(Some(file)) = LOG_FILE.get().map(|file| file.as_ref()) {
-        if let Ok(mut file) = file.lock() {
-            let _ = writeln!(file, "{line}");
-        }
+        let mut file = file
+            .lock()
+            .unwrap_or_else(|error| panic!("logger file lock is poisoned: {error}"));
+        writeln!(file, "{line}")
+            .unwrap_or_else(|error| panic!("failed to write Rust log file: {error}"));
     }
 }

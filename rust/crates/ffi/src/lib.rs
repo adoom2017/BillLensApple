@@ -1,10 +1,13 @@
 use anyhow::{Context, Result, anyhow};
+use billlens_apple_core::local_llm::{
+    self, LocalLlmBackend, LocalLlmCancelFn, LocalLlmFreeStringFn, LocalLlmRunFn, LocalLlmUnloadFn,
+};
 use billlens_apple_core::stt::{
     self, SttBackend, SttCancelFn, SttFreeStringFn, SttStartFn, SttStopFn,
 };
 use billlens_apple_core::{
     AppService, AssetUpdateInput, DraftInput, EngineBootstrap, EntityKind, EntrySource, LlmConfig,
-    SubscriptionUpdate, SyncMarkSyncedEntry, SyncRemoteEntry,
+    LocalRoutingRequest, SubscriptionUpdate, SyncMarkSyncedEntry, SyncRemoteEntry,
 };
 use billlens_apple_db::BillRepository;
 use chrono::{DateTime, FixedOffset};
@@ -27,7 +30,7 @@ struct Envelope<T> {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "action", rename_all = "snake_case")]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 enum EngineRequest {
     Bootstrap {
         database_path: String,
@@ -43,7 +46,8 @@ enum EngineRequest {
         profile_id: String,
         content: String,
         auto_confirm: bool,
-        source: Option<EntrySource>,
+        source: EntrySource,
+        local_routing: LocalRoutingRequest,
     },
     SaveDraft {
         profile_id: String,
@@ -73,6 +77,8 @@ enum EngineRequest {
     SttCancel {
         profile_id: String,
     },
+    LocalLlmCancel,
+    LocalLlmUnload,
     ConfirmAllDrafts {
         profile_id: String,
     },
@@ -190,10 +196,11 @@ fn encode_error(message: String) -> *mut c_char {
 }
 
 fn encode_envelope<T: Serialize>(payload: Envelope<T>) -> *mut c_char {
-    let json = serde_json::to_string(&payload).unwrap_or_else(|error| {
-        format!(r#"{{"ok":false,"data":null,"error":"failed to encode response: {error}"}}"#)
-    });
-    CString::new(json).unwrap().into_raw()
+    let json =
+        serde_json::to_string(&payload).expect("FFI response envelope serialization must not fail");
+    CString::new(json)
+        .expect("serialized FFI response must not contain NUL")
+        .into_raw()
 }
 
 #[unsafe(no_mangle)]
@@ -234,7 +241,9 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
             let db_llm_json = runtime().block_on(repo.get_setting("llm_config"))?;
             let db_llm: Option<LlmConfig> = db_llm_json
                 .as_deref()
-                .and_then(|s| serde_json::from_str(s).ok());
+                .map(serde_json::from_str)
+                .transpose()
+                .context("stored LLM configuration is invalid")?;
             let resolved_llm = if let Some(db_cfg) = db_llm {
                 Some(db_cfg)
             } else if let Some(env_cfg) = llm {
@@ -271,12 +280,14 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
             content,
             auto_confirm,
             source,
+            local_routing,
         } => with_app(|app| {
             let result = runtime().block_on(app.submit_text(
                 &profile_id,
                 content,
                 auto_confirm,
-                source.unwrap_or(EntrySource::Text),
+                source,
+                local_routing,
             ))?;
             Ok(encode_ok(result))
         }),
@@ -335,6 +346,14 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
         }
         EngineRequest::SttCancel { profile_id } => {
             stt::cancel(&profile_id)?;
+            Ok(encode_ok(serde_json::json!({})))
+        }
+        EngineRequest::LocalLlmCancel => {
+            local_llm::cancel()?;
+            Ok(encode_ok(serde_json::json!({})))
+        }
+        EngineRequest::LocalLlmUnload => {
+            local_llm::unload()?;
             Ok(encode_ok(serde_json::json!({})))
         }
         EngineRequest::ConfirmAllDrafts { profile_id } => with_app(|app| {
@@ -531,7 +550,28 @@ pub extern "C" fn billlens_register_stt_backend(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn billlens_free_string(value: *mut c_char) {
+pub extern "C" fn billlens_register_local_llm_backend(
+    run_fn: LocalLlmRunFn,
+    cancel_fn: LocalLlmCancelFn,
+    unload_fn: LocalLlmUnloadFn,
+    free_fn: LocalLlmFreeStringFn,
+) -> i32 {
+    match local_llm::register(LocalLlmBackend {
+        run: run_fn,
+        cancel: cancel_fn,
+        unload: unload_fn,
+        free_string: free_fn,
+    }) {
+        Ok(()) => 0,
+        Err(_) => -1,
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `value` must be null or a pointer returned by a BillLens FFI function that
+/// transfers ownership of a `CString` to the caller. It must be freed once.
+pub unsafe extern "C" fn billlens_free_string(value: *mut c_char) {
     if value.is_null() {
         return;
     }

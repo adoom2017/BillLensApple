@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "models": [
+    {
+      "model_id": "qwen3.5-0.8b-q4_k_m",
+      "display_name": "极速本地模型 0.8B",
+      "revision": "22647cee2d3dc59bcb19be067983e7d2f9ad4595",
+      "file_name": "Qwen_Qwen3.5-0.8B-Q4_K_M.gguf",
+      "download_url": "https://huggingface.co/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/22647cee2d3dc59bcb19be067983e7d2f9ad4595/Qwen_Qwen3.5-0.8B-Q4_K_M.gguf",
+      "byte_count": 549916416,
+      "sha256": "7403b7bc6e6a47ab3fd95621de5e9ccd7c849abdcd880dcbe2cb37ce3a08b6a1",
+      "license": "Apache-2.0",
+      "context_tokens": 8192,
+      "max_output_tokens": 2048,
+      "minimum_available_memory": 1800000000,
+      "experimental_on_iphone": false
+    },
+    {
+      "model_id": "qwen3.5-2b-q4_k_m",
+      "display_name": "本地模型 2B",
+      "revision": "915a52556175c333102d04f996380950d35155d9",
+      "file_name": "Qwen_Qwen3.5-2B-Q4_K_M.gguf",
+      "download_url": "https://huggingface.co/bartowski/Qwen_Qwen3.5-2B-GGUF/resolve/915a52556175c333102d04f996380950d35155d9/Qwen_Qwen3.5-2B-Q4_K_M.gguf",
+      "byte_count": 1329766560,
+      "sha256": "84aeb7fe40e7b833d71303d7f1b9f9c1991b931b5dbd214e0aa48d56a0af1f85",
+      "license": "Apache-2.0",
+      "context_tokens": 8192,
+      "max_output_tokens": 2048,
+      "minimum_available_memory": 3200000000,
+      "experimental_on_iphone": true
+    }
+  ]
+}

@@ -40,6 +40,8 @@ target/
 **/target/
 Cargo.lock
 .cargo/
+!rust/.cargo/
+!rust/.cargo/config.toml
 
 # macOS
 *.DS_Store

@@ -29,12 +29,16 @@ enum BillLensFormatters {
         return formatter
     }()
 
-    private static let dayInputParser: DateFormatter = {
+    static let dateOnly: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()
+
+    static func parseDate(_ value: String) -> Date? {
+        dateOnly.date(from: value)
+    }
 
     static func parseISO(_ value: String?) -> Date? {
         guard let value else { return nil }
@@ -47,7 +51,7 @@ enum BillLensFormatters {
     }
 
     static func displayDay(_ value: String) -> String {
-        guard let date = dayInputParser.date(from: value) else { return value }
+        guard let date = dateOnly.date(from: value) else { return value }
         return day.string(from: date)
     }
 
@@ -79,6 +83,11 @@ enum BillLensFormatters {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        return trimmed.uppercased()
+        let upper = trimmed.uppercased()
+        guard upper.unicodeScalars.count == 3,
+              upper.unicodeScalars.allSatisfy({ CharacterSet.uppercaseLetters.contains($0) && $0.isASCII }) else {
+            return nil
+        }
+        return upper
     }
 }

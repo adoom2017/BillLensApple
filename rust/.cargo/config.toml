@@ -1,0 +1,6 @@
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-mmacosx-version-min=14.0"]
+
+[env]
+MACOSX_DEPLOYMENT_TARGET = "14.0"
+IPHONEOS_DEPLOYMENT_TARGET = "17.0"

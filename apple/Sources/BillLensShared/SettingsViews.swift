@@ -1,4 +1,8 @@
 import SwiftUI
+import BillLensAppleServices
+#if os(iOS)
+import UIKit
+#endif
 
 private let openAICompatibleProviderID = "openai_compatible"
 
@@ -43,6 +47,9 @@ struct SettingsShell: View {
     @State private var isLoadingModels = false
     @State private var modelLoadError: String?
     @State private var hasLoadedModels = false
+    @ObservedObject private var localModels = LocalModelManager.shared
+    @State private var localModelError: String?
+    @State private var cellularDownloadModel: LocalModelDescriptor?
 
     #if os(iOS)
     @FocusState private var focusedField: Field?
@@ -85,7 +92,7 @@ struct SettingsShell: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("LLM 连接配置")
+                Text("模型与解析设置")
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(IMColors.textPrimary)
                 Spacer()
@@ -106,6 +113,29 @@ struct SettingsShell: View {
 
             ScrollView {
                 VStack(spacing: 16) {
+                    settingsCard {
+                        localModeRow
+                        ForEach(localModels.models) { descriptor in
+                            Divider().opacity(0.25)
+                            localModelRow(descriptor)
+                        }
+                        Divider().opacity(0.25)
+                        Text("模型来源：Hugging Face 固定 revision（Apache-2.0）· 推理运行时：llama.cpp b9632（MIT）")
+                            .font(.system(size: 10))
+                            .foregroundStyle(IMColors.textMuted)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    if let error = localModelError ?? localModels.lastError {
+                        statusRow(
+                            icon: "exclamationmark.triangle.fill",
+                            color: IMColors.danger,
+                            message: error
+                        )
+                    }
+
                     settingsCard {
                         providerPickerRow
                         Divider().opacity(0.25)
@@ -228,13 +258,226 @@ struct SettingsShell: View {
             fallbackFill: IMColors.surface
         )
         .task {
-            if store.llmConfig == nil {
-                try? await store.loadLlmConfig()
-            }
-            if let cfg = store.llmConfig {
-                populate(cfg)
+            do {
+                if store.llmConfig == nil {
+                    try await store.loadLlmConfig()
+                }
+                if let cfg = store.llmConfig {
+                    populate(cfg)
+                }
+            } catch {
+                saveError = error.localizedDescription
             }
         }
+        .alert("允许蜂窝网络下载？", isPresented: Binding(
+            get: { cellularDownloadModel != nil },
+            set: { if !$0 { cellularDownloadModel = nil } }
+        )) {
+            Button("取消", role: .cancel) {
+                cellularDownloadModel = nil
+            }
+            Button("仅本次允许") {
+                guard let descriptor = cellularDownloadModel else { return }
+                cellularDownloadModel = nil
+                startLocalDownload(descriptor, allowCellular: true)
+            }
+        } message: {
+            Text("本次将下载 \(formattedBytes(cellularDownloadModel?.byteCount ?? 0))。授权只对当前下载任务有效。")
+        }
+    }
+
+    private var localModeRow: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("解析模式")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(IMColors.textPrimary)
+                Text(localModels.mode == .localFirst ? "优先使用已选择的本地模型" : "不加载或调用本地模型")
+                    .font(.system(size: 11))
+                    .foregroundStyle(IMColors.textMuted)
+            }
+            Spacer()
+            Picker("解析模式", selection: Binding(
+                get: { localModels.mode },
+                set: { mode in
+                    do {
+                        try localModels.setMode(mode)
+                        localModelError = nil
+                    } catch {
+                        localModelError = error.localizedDescription
+                    }
+                }
+            )) {
+                Text("本地优先").tag(LocalModelMode.localFirst)
+                Text("仅云端").tag(LocalModelMode.cloudOnly)
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 220)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    private func localModelRow(_ descriptor: LocalModelDescriptor) -> some View {
+        let download = localModels.downloads[descriptor.modelId] ?? .idle
+        let installedState = localModels.installed[descriptor.modelId]
+        let isInstalled = installedState != nil
+        let isUpdate = isInstalled && installedState?.revision != descriptor.revision
+        let isSelected = localModels.selectedModelId == descriptor.modelId
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(descriptor.displayName)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(IMColors.textPrimary)
+                        #if os(iOS)
+                        if descriptor.experimentalOnIPhone && UIDevice.current.userInterfaceIdiom == .phone {
+                            Text("实验性")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(IMColors.danger)
+                        }
+                        #endif
+                    }
+                    Text("\(formattedBytes(descriptor.byteCount)) · \(descriptor.license) · \(descriptor.revision.prefix(8))")
+                        .font(.system(size: 10))
+                        .foregroundStyle(IMColors.textMuted)
+                    Text("加载要求：当前可用内存至少 \(formattedBytes(Int64(descriptor.minimumAvailableMemory)))")
+                        .font(.system(size: 10))
+                        .foregroundStyle(IMColors.textMuted)
+                    if let installedState, isUpdate {
+                        Text("已安装版本 \(installedState.revision.prefix(8))，可手动更新")
+                            .font(.system(size: 10))
+                            .foregroundStyle(IMColors.warningText)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                Spacer()
+                if isSelected {
+                    Text("当前")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(IMColors.accent)
+                }
+            }
+
+            if download.phase.isActive {
+                if download.phase == .waitingForWiFi {
+                    ProgressView()
+                        .accessibilityLabel("等待 Wi-Fi 或非低数据模式网络")
+                } else {
+                    ProgressView(
+                        value: Double(download.receivedBytes),
+                        total: Double(max(download.expectedBytes, descriptor.byteCount))
+                    )
+                    .accessibilityLabel("模型下载进度")
+                    .accessibilityValue(
+                        "已下载 \(formattedBytes(download.receivedBytes))，共 \(formattedBytes(max(download.expectedBytes, descriptor.byteCount)))"
+                    )
+                }
+                Text(downloadStatusText(download))
+                    .font(.system(size: 10))
+                    .foregroundStyle(IMColors.textMuted)
+            }
+
+            HStack(spacing: 8) {
+                if download.phase.isActive {
+                    Button("取消下载") {
+                        Task {
+                            do {
+                                try await localModels.cancelDownload(modelId: descriptor.modelId)
+                                localModelError = nil
+                            } catch {
+                                localModelError = error.localizedDescription
+                            }
+                        }
+                    }
+                } else {
+                    if isInstalled {
+                        if !isSelected {
+                            Button("选择") { selectLocalModel(descriptor) }
+                        }
+                        Button("删除", role: .destructive) { deleteLocalModel(descriptor) }
+                    }
+                    if !isInstalled || isUpdate {
+                        #if os(iOS)
+                        Button(isUpdate ? "Wi-Fi 更新" : "Wi-Fi 下载") {
+                            startLocalDownload(descriptor, allowCellular: false)
+                        }
+                        Button(isUpdate ? "蜂窝更新" : "使用蜂窝") {
+                            cellularDownloadModel = descriptor
+                        }
+                        #else
+                        Button(isUpdate ? "更新" : "下载") {
+                            startLocalDownload(descriptor, allowCellular: false)
+                        }
+                        #endif
+                    }
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            if let error = download.error {
+                Text(error)
+                    .font(.system(size: 10))
+                    .foregroundStyle(IMColors.danger)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(descriptor.displayName)
+    }
+
+    private func downloadStatusText(_ download: LocalModelDownloadState) -> String {
+        switch download.phase {
+        case .waitingForWiFi:
+            "等待 Wi-Fi；低数据模式下不会下载。"
+        case .downloading:
+            "已下载 \(formattedBytes(download.receivedBytes))"
+        case .verifying:
+            "正在校验 SHA-256…"
+        case .idle, .installed, .failed:
+            preconditionFailure("非活动下载状态不应生成进度文案：\(download.phase.rawValue)")
+        }
+    }
+
+    private func startLocalDownload(_ descriptor: LocalModelDescriptor, allowCellular: Bool) {
+        do {
+            try localModels.startDownload(
+                modelId: descriptor.modelId,
+                allowCellularOnce: allowCellular
+            )
+            localModelError = nil
+        } catch {
+            localModelError = error.localizedDescription
+        }
+    }
+
+    private func selectLocalModel(_ descriptor: LocalModelDescriptor) {
+        Task {
+            do {
+                try localModels.selectModel(descriptor.modelId)
+                localModelError = nil
+            } catch {
+                localModelError = error.localizedDescription
+            }
+        }
+    }
+
+    private func deleteLocalModel(_ descriptor: LocalModelDescriptor) {
+        Task {
+            do {
+                try localModels.deleteModel(modelId: descriptor.modelId)
+                localModelError = nil
+            } catch {
+                localModelError = error.localizedDescription
+            }
+        }
+    }
+
+    private func formattedBytes(_ value: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: value, countStyle: .file)
     }
 
     private var providerPickerRow: some View {
@@ -470,7 +713,6 @@ struct SettingsShell: View {
                 try await store.updateLlmConfig(cfg)
                 saveSuccess = true
                 isSaving = false
-                try? await Task.sleep(nanoseconds: 800_000_000)
                 dismiss()
             } catch {
                 saveError = error.localizedDescription

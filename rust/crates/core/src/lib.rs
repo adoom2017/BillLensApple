@@ -1,24 +1,29 @@
 mod fx;
 mod llm;
+pub mod local_llm;
 mod logger;
 pub mod stt;
 
 use anyhow::{Result, anyhow};
 pub use billlens_apple_db::{
-    ALL_RECORD_CATEGORIES, ASSET_CATEGORIES, AppSetting, Asset, AssetAck, AssetSnapshot,
-    AssetUpdateInput, AssetWithSnapshots, BillRepository, CategoryStatsItem, ConversationMessage,
-    ConversationRole, DirectionStatsItem, EXPENSE_CATEGORIES, EntityKind, INCOME_CATEGORIES,
-    ParsedAssetInfo, ParsedRecordPayload, Record, RecordCreate, RecordDirection, RecordDraft,
+    ALL_RECORD_CATEGORIES, ASSET_CATEGORIES, AppSetting, Asset, AssetAck, AssetConfirmationCreate,
+    AssetSnapshot, AssetUpdateInput, AssetWithSnapshots, BillRepository, CategoryStatsItem,
+    ConversationMessage, ConversationRole, DirectionStatsItem, EXPENSE_CATEGORIES, EntityKind,
+    INCOME_CATEGORIES, ParsedAssetInfo, ParsedDraftConfirmationAction, ParsedDraftKind,
+    ParsedRecordPayload, ParserSource, Record, RecordCreate, RecordDirection, RecordDraft,
     RecordDraftStatus, RecordDraftUpdate, RecordsStatsRange, RecordsStatsResponse, RecordsSummary,
     Subscription, SubscriptionCreate, SubscriptionCycle, SubscriptionUpdate, advance_next_due,
     is_valid_asset_category, is_valid_record_category, is_valid_record_category_for_direction,
 };
 use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, TimeZone, Utc};
 use fx::{FxClient, resolve_fx_rate};
+use llm::{
+    CloudLlmClient, build_record_prompt, normalize_currency_code, parse_record_payloads_strict,
+};
 pub use llm::{LlmConfig, LlmModelItem};
-use llm::{LlmClient, clean_asset_name, normalize_currency_code};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::future::Future;
 use uuid::Uuid;
 
 const STATS_CURRENCY: &str = "CNY";
@@ -51,6 +56,133 @@ pub struct SubmitTextResult {
     pub parsed: Vec<ParsedRecordPayload>,
     pub subscription_created: bool,
     pub asset_acks: Vec<AssetAck>,
+    pub parser_source: ParserSource,
+    pub local_model_id: Option<String>,
+    pub local_failure: Option<LocalFailureInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalFailureInfo {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalRoutingMode {
+    LocalFirst,
+    CloudOnly,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalRoutingRequest {
+    pub mode: LocalRoutingMode,
+    pub model_id: Option<String>,
+}
+
+#[derive(Debug)]
+struct RoutedParseResult {
+    payloads: Vec<ParsedRecordPayload>,
+    parser_source: ParserSource,
+    local_model_id: Option<String>,
+    local_failure: Option<LocalFailureInfo>,
+}
+
+struct ParseRouter;
+
+impl ParseRouter {
+    async fn route<LocalCall, LocalFuture, CloudCall, CloudFuture>(
+        routing: LocalRoutingRequest,
+        mut local_call: LocalCall,
+        mut cloud_call: CloudCall,
+    ) -> Result<RoutedParseResult, CoreError>
+    where
+        LocalCall: FnMut(&str) -> LocalFuture,
+        LocalFuture: Future<Output = Result<(String, String, u64), local_llm::LocalLlmError>>,
+        CloudCall: FnMut() -> CloudFuture,
+        CloudFuture: Future<Output = Result<Vec<ParsedRecordPayload>, CoreError>>,
+    {
+        if routing.mode == LocalRoutingMode::CloudOnly {
+            return Ok(RoutedParseResult {
+                payloads: cloud_call().await?,
+                parser_source: ParserSource::Cloud,
+                local_model_id: None,
+                local_failure: None,
+            });
+        }
+
+        let Some(model_id) = routing
+            .model_id
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+        else {
+            let local_failure = LocalFailureInfo {
+                code: "model_not_selected".to_string(),
+                message: "本地优先模式尚未选择已安装模型".to_string(),
+            };
+            let payloads = cloud_call().await.map_err(|error| {
+                CoreError::Internal(format!("未选择本地模型；云端模型也失败（{error}）"))
+            })?;
+            return Ok(RoutedParseResult {
+                payloads,
+                parser_source: ParserSource::CloudAfterLocalFailure,
+                local_model_id: None,
+                local_failure: Some(local_failure),
+            });
+        };
+
+        let local_failure = match local_call(&model_id).await {
+            Ok((raw_content, returned_model_id, elapsed_ms)) => {
+                logger::info(
+                    "llm.local.response",
+                    format!("model_id={returned_model_id} elapsed_ms={elapsed_ms}"),
+                );
+                match parse_record_payloads_strict(&raw_content) {
+                    Ok(payloads) => {
+                        return Ok(RoutedParseResult {
+                            payloads,
+                            parser_source: ParserSource::Local,
+                            local_model_id: Some(returned_model_id),
+                            local_failure: None,
+                        });
+                    }
+                    Err(error) => LocalFailureInfo {
+                        code: "output_contract_failed".to_string(),
+                        message: error.to_string(),
+                    },
+                }
+            }
+            Err(error) => {
+                if !error.code.allows_cloud_fallback() {
+                    return Err(CoreError::Internal(error.to_string()));
+                }
+                LocalFailureInfo {
+                    code: error.code.as_str().to_string(),
+                    message: error.message,
+                }
+            }
+        };
+
+        logger::error(
+            "llm.local.fallback",
+            format!(
+                "model_id={model_id} code={} message={}",
+                local_failure.code, local_failure.message
+            ),
+        );
+        let payloads = cloud_call().await.map_err(|error| {
+            CoreError::Internal(format!(
+                "本地模型解析失败（{}: {}）；云端模型也失败（{}）",
+                local_failure.code, local_failure.message, error
+            ))
+        })?;
+        Ok(RoutedParseResult {
+            payloads,
+            parser_source: ParserSource::CloudAfterLocalFailure,
+            local_model_id: Some(model_id),
+            local_failure: Some(local_failure),
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,6 +226,8 @@ pub struct DraftInput {
     pub merchant: Option<String>,
     pub transaction_at: Option<DateTime<Utc>>,
     pub note: Option<String>,
+    pub subscription_cycle: Option<SubscriptionCycle>,
+    pub asset_info: Option<ParsedAssetInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,14 +330,14 @@ pub struct SyncStatus {
 pub struct AppService {
     repo: BillRepository,
     device_id: String,
-    llm: Option<LlmClient>,
+    llm: Option<CloudLlmClient>,
     fx: FxClient,
 }
 
 impl AppService {
     pub fn new(repo: BillRepository, bootstrap: EngineBootstrap) -> Result<Self> {
         logger::initialize(bootstrap.log_file_path.as_deref())?;
-        let llm = bootstrap.llm.map(LlmClient::from_config).transpose()?;
+        let llm = bootstrap.llm.map(CloudLlmClient::from_config).transpose()?;
         Ok(Self {
             repo,
             device_id: bootstrap.device_id,
@@ -237,20 +371,15 @@ impl AppService {
         content: String,
         auto_confirm: bool,
         source: EntrySource,
+        routing: LocalRoutingRequest,
     ) -> Result<SubmitTextResult, CoreError> {
         let content = trim_required(content, "content is required")?;
-        let sanitized_content = if content.len() > 80 {
-            format!(
-                "{}…({}字符)",
-                &content[..content.floor_char_boundary(80)],
-                content.chars().count()
-            )
-        } else {
-            content.clone()
-        };
         logger::info(
             "submit_text",
-            format!("source={source:?} auto_confirm={auto_confirm} content={sanitized_content}"),
+            format!(
+                "source={source:?} auto_confirm={auto_confirm} characters={}",
+                content.chars().count()
+            ),
         );
         let user_visible_content = match source {
             EntrySource::Text => content.clone(),
@@ -268,58 +397,72 @@ impl AppService {
             .await
             .map_err(map_internal)?;
 
-        let llm = self
-            .llm
-            .as_ref()
-            .ok_or_else(|| CoreError::bad_request("LLM parser is not configured"))?;
-        // P1: both text and OCR go through the multi-parser so the array-format
-        // prompt is decoded correctly regardless of source. Text keeps the raw
-        // input as a note fallback; OCR skips it (cleaner output).
-        let payloads = match source {
-            EntrySource::Text => llm.parse_record_text_multi(content.clone()).await,
-            EntrySource::Ocr => llm.parse_record_ocr_text_multi(content.clone()).await,
-        }
-        .map_err(map_internal)?;
+        let routed = self.parse_with_routing(&content, &source, routing).await?;
+        let payloads = routed.payloads;
 
-        // P2: treat an empty parse result as a failure rather than silent success.
         if payloads.is_empty() {
             return Err(CoreError::bad_request(
                 "未能从输入中识别出任何账单记录，请检查图片或文字内容后重试。",
             ));
         }
 
-        logger::info(
-            "submit_text",
-            format!(
-                "parsed_payloads={}",
-                serde_json::to_string(&payloads)
-                    .unwrap_or_else(|_| "<serialize failed>".to_string())
-            ),
-        );
+        logger::info("submit_text", format!("parsed_count={}", payloads.len()));
+
+        if routed.parser_source == ParserSource::Local {
+            let drafts = self
+                .repo
+                .create_parsed_drafts_batch(
+                    profile_id,
+                    &content,
+                    &payloads,
+                    ParserSource::Local,
+                    None,
+                )
+                .await
+                .map_err(map_internal)?;
+            self.repo
+                .create_conversation_message(
+                    Uuid::new_v4(),
+                    profile_id,
+                    ConversationRole::Assistant,
+                    &format!("本地模型已生成 {} 项待确认结果。", drafts.len()),
+                    drafts.first().map(|draft| draft.id),
+                    None,
+                )
+                .await
+                .map_err(map_internal)?;
+            let home = self.home(profile_id).await.map_err(map_internal)?;
+            return Ok(SubmitTextResult {
+                home,
+                auto_confirmed: false,
+                parsed: payloads,
+                subscription_created: false,
+                asset_acks: Vec::new(),
+                parser_source: routed.parser_source,
+                local_model_id: routed.local_model_id,
+                local_failure: routed.local_failure,
+            });
+        }
 
         // Process asset payloads first; they do not become bills or subscriptions.
         let mut asset_acks: Vec<AssetAck> = Vec::new();
         let mut bill_payloads: Vec<ParsedRecordPayload> = Vec::with_capacity(payloads.len());
         for payload in payloads.iter() {
             if let Some(ref asset_info) = payload.asset_info {
-                match self.upsert_asset_from_payload(profile_id, asset_info).await {
-                    Ok(ack) => {
-                        logger::info(
-                            "submit_text.asset",
-                            format!(
-                                "{} asset={} amount={} recorded_on={}",
-                                if ack.created { "created" } else { "updated" },
-                                ack.name,
-                                ack.amount,
-                                ack.recorded_on
-                            ),
-                        );
-                        asset_acks.push(ack);
-                    }
-                    Err(e) => {
-                        logger::error("submit_text.asset", e.to_string());
-                    }
-                }
+                let ack = self
+                    .upsert_asset_from_payload(profile_id, asset_info)
+                    .await?;
+                logger::info(
+                    "submit_text.asset",
+                    format!(
+                        "{} asset={} amount={} recorded_on={}",
+                        if ack.created { "created" } else { "updated" },
+                        ack.name,
+                        ack.amount,
+                        ack.recorded_on
+                    ),
+                );
+                asset_acks.push(ack);
             } else {
                 bill_payloads.push(payload.clone());
             }
@@ -346,6 +489,9 @@ impl AppService {
                 parsed: payloads,
                 subscription_created: false,
                 asset_acks,
+                parser_source: routed.parser_source,
+                local_model_id: routed.local_model_id,
+                local_failure: routed.local_failure,
             });
         }
 
@@ -360,33 +506,33 @@ impl AppService {
         let mut subscription_created = false;
         for payload in &bill_payloads {
             if let Some(ref cycle) = payload.subscription_cycle {
-                if let (Some(direction), Some(amount), Some(currency)) =
-                    (&payload.direction, payload.amount, &payload.currency)
                 {
-                    let now = Utc::now().with_timezone(&shanghai_offset());
-                    let today = now.date_naive();
-                    let anchor_day = payload
-                        .transaction_at
-                        .map(|t| t.with_timezone(&shanghai_offset()).day() as i32)
-                        .unwrap_or(today.day() as i32);
+                    let direction = payload.direction.as_ref().ok_or_else(|| {
+                        CoreError::bad_request("subscription direction is required")
+                    })?;
+                    let amount = payload.amount.filter(|value| *value > 0.0).ok_or_else(|| {
+                        CoreError::bad_request("subscription amount must be greater than 0")
+                    })?;
+                    let currency = validate_required_currency(payload.currency.as_deref())?;
+                    let transaction_at = payload.transaction_at.ok_or_else(|| {
+                        CoreError::bad_request("subscription transaction_at is required")
+                    })?;
+                    let category = payload.category.as_deref().ok_or_else(|| {
+                        CoreError::bad_request("subscription category is required")
+                    })?;
+                    let local_time = transaction_at.with_timezone(&shanghai_offset());
+                    let today = local_time.date_naive();
+                    let anchor_day = local_time.day() as i32;
                     let anchor_month = match cycle {
-                        SubscriptionCycle::Yearly => Some(
-                            payload
-                                .transaction_at
-                                .map(|t| t.with_timezone(&shanghai_offset()).month() as i32)
-                                .unwrap_or(today.month() as i32),
-                        ),
+                        SubscriptionCycle::Yearly => Some(local_time.month() as i32),
                         SubscriptionCycle::Monthly => None,
                     };
                     let next_due = advance_next_due(cycle, anchor_day, anchor_month, today);
                     let sub_create = SubscriptionCreate {
                         direction: direction.clone(),
                         amount,
-                        currency: currency.clone(),
-                        category: payload
-                            .category
-                            .clone()
-                            .unwrap_or_else(|| "订阅".to_string()),
+                        currency,
+                        category: validate_category_for_direction(category, Some(direction))?,
                         merchant: payload.merchant.clone(),
                         note: payload.note.clone(),
                         cycle: cycle.clone(),
@@ -394,8 +540,7 @@ impl AppService {
                         anchor_month,
                         next_due_at: next_due,
                     };
-                    if let Err(e) = self
-                        .repo
+                    self.repo
                         .create_subscription(
                             Uuid::new_v4(),
                             profile_id,
@@ -403,15 +548,12 @@ impl AppService {
                             sub_create,
                         )
                         .await
-                    {
-                        logger::error("submit_text.subscription", e.to_string());
-                    } else {
-                        subscription_created = true;
-                        logger::info(
-                            "submit_text.subscription",
-                            format!("created subscription cycle={}", cycle.as_str()),
-                        );
-                    }
+                        .map_err(map_internal)?;
+                    subscription_created = true;
+                    logger::info(
+                        "submit_text.subscription",
+                        format!("created subscription cycle={}", cycle.as_str()),
+                    );
                 }
             }
         }
@@ -453,13 +595,25 @@ impl AppService {
                 parsed: payloads,
                 subscription_created,
                 asset_acks,
+                parser_source: routed.parser_source,
+                local_model_id: routed.local_model_id,
+                local_failure: routed.local_failure,
             });
         }
 
-        // Draft path — insert all rows atomically via the batch method.
+        let fallback_reason = routed
+            .local_failure
+            .as_ref()
+            .map(|failure| format!("{}: {}", failure.code, failure.message));
         let drafts = self
             .repo
-            .create_record_drafts_batch(profile_id, &content, &bill_payloads)
+            .create_parsed_drafts_batch(
+                profile_id,
+                &content,
+                &bill_payloads,
+                routed.parser_source,
+                fallback_reason.as_deref(),
+            )
             .await
             .map_err(map_internal)?;
         let first_draft_id = drafts.first().map(|d| d.id);
@@ -485,7 +639,51 @@ impl AppService {
             parsed: payloads,
             subscription_created,
             asset_acks,
+            parser_source: routed.parser_source,
+            local_model_id: routed.local_model_id,
+            local_failure: routed.local_failure,
         })
+    }
+
+    async fn parse_with_routing(
+        &self,
+        content: &str,
+        source: &EntrySource,
+        routing: LocalRoutingRequest,
+    ) -> Result<RoutedParseResult, CoreError> {
+        ParseRouter::route(
+            routing,
+            |model_id| {
+                local_llm::run(local_llm::LocalLlmRequest {
+                    schema_version: 1,
+                    model_id: model_id.to_string(),
+                    system_prompt: build_record_prompt(),
+                    user_text: content.to_string(),
+                    grammar: local_llm::RECORD_JSON_GRAMMAR.to_string(),
+                    context_tokens: 8192,
+                    max_output_tokens: 2048,
+                    deadline_ms: 45_000,
+                })
+            },
+            || self.parse_with_cloud(content, source),
+        )
+        .await
+    }
+
+    async fn parse_with_cloud(
+        &self,
+        content: &str,
+        source: &EntrySource,
+    ) -> Result<Vec<ParsedRecordPayload>, CoreError> {
+        let llm = self
+            .llm
+            .as_ref()
+            .ok_or_else(|| CoreError::bad_request("未配置可用的云端模型"))?;
+        match source {
+            EntrySource::Text => llm.parse_record_text_multi(content.to_string()).await,
+            EntrySource::Ocr => llm.parse_record_ocr_text_multi(content.to_string()).await,
+        }
+        .map_err(map_internal)
     }
 
     async fn upsert_asset_from_payload(
@@ -504,43 +702,30 @@ impl AppService {
         }
         let category = info
             .category
-            .clone()
-            .filter(|c| is_valid_asset_category(c))
-            .unwrap_or_else(|| "存款".to_string());
-        let currency = info.currency.clone().unwrap_or_else(|| "CNY".to_string());
-        let recorded_on = match info.recorded_on.as_deref() {
-            Some(day) if NaiveDate::parse_from_str(day, "%Y-%m-%d").is_ok() => day.to_string(),
-            _ => Utc::now()
-                .with_timezone(&shanghai_offset())
-                .date_naive()
-                .format("%Y-%m-%d")
-                .to_string(),
-        };
-        // Try to match an existing asset whose cleaned name equals the incoming cleaned name,
-        // so "东方财富股票账号" and "东方财富" are treated as the same asset.
-        let existing_assets = self
+            .as_deref()
+            .filter(|value| is_valid_asset_category(value))
+            .ok_or_else(|| {
+                CoreError::bad_request("asset category is required and must be valid")
+            })?;
+        let currency = validate_required_currency(info.currency.as_deref())?;
+        let recorded_on = info
+            .recorded_on
+            .as_deref()
+            .ok_or_else(|| CoreError::bad_request("asset recorded_on is required"))?;
+        NaiveDate::parse_from_str(recorded_on, "%Y-%m-%d")
+            .map_err(|_| CoreError::bad_request("asset recorded_on must be YYYY-MM-DD"))?;
+        let asset = self
             .repo
-            .list_assets(profile_id)
+            .find_or_create_asset(profile_id, &self.device_id, name, category, &currency)
             .await
             .map_err(map_internal)?;
-        let matched = existing_assets
-            .into_iter()
-            .find(|a| clean_asset_name(&a.name) == name);
-        let asset = if let Some(existing) = matched {
-            existing
-        } else {
-            self.repo
-                .find_or_create_asset(profile_id, &self.device_id, name, &category, &currency)
-                .await
-                .map_err(map_internal)?
-        };
         let (_snapshot, created) = self
             .repo
             .upsert_asset_snapshot(
                 asset.id,
                 profile_id,
                 &self.device_id,
-                &recorded_on,
+                recorded_on,
                 info.amount,
                 info.note.as_deref(),
             )
@@ -552,7 +737,7 @@ impl AppService {
             category: asset.category,
             amount: info.amount,
             currency: asset.currency,
-            recorded_on,
+            recorded_on: recorded_on.to_string(),
             created,
         })
     }
@@ -568,13 +753,16 @@ impl AppService {
             .get_record_draft(draft_id)
             .await
             .map_err(map_internal)?;
+        if existing.profile_id != profile_id {
+            return Err(CoreError::bad_request("draft does not belong to profile"));
+        }
         if existing.status != RecordDraftStatus::Parsed {
             return Err(CoreError::bad_request("only parsed drafts can be edited"));
         }
 
-        let update = merge_draft_input(&existing, input)?;
+        let payload = merge_draft_input(&existing, input)?;
         self.repo
-            .update_record_draft(draft_id, update)
+            .update_parsed_draft_payload(draft_id, &payload)
             .await
             .map_err(map_internal)?;
         let home = self.home(profile_id).await.map_err(map_internal)?;
@@ -591,37 +779,27 @@ impl AppService {
             .get_record_draft(draft_id)
             .await
             .map_err(map_internal)?;
+        if draft.profile_id != profile_id {
+            return Err(CoreError::bad_request("draft does not belong to profile"));
+        }
         if draft.status != RecordDraftStatus::Parsed {
             return Err(CoreError::bad_request("draft is not confirmable"));
         }
 
-        let create = record_create_from_draft(&draft)?;
+        let action = confirmation_action_from_draft(&draft)?;
         let record = self
             .repo
-            .create_record(Uuid::new_v4(), profile_id, &self.device_id, create)
-            .await
-            .map_err(map_internal)?;
-        self.repo
-            .mark_record_draft_confirmed(draft_id, record.id)
-            .await
-            .map_err(map_internal)?;
-        self.repo
-            .create_conversation_message(
-                Uuid::new_v4(),
+            .confirm_parsed_drafts(
                 profile_id,
-                ConversationRole::Assistant,
-                "账单已确认入库。",
-                Some(draft_id),
-                Some(record.id),
+                &self.device_id,
+                vec![(draft_id, action)],
+                confirmation_message(draft.kind, 1),
             )
             .await
             .map_err(map_internal)?;
 
         let home = self.home(profile_id).await.map_err(map_internal)?;
-        Ok(SaveDraftResult {
-            home,
-            record: Some(record),
-        })
+        Ok(SaveDraftResult { home, record })
     }
 
     pub async fn discard_draft(
@@ -634,6 +812,9 @@ impl AppService {
             .get_record_draft(draft_id)
             .await
             .map_err(map_internal)?;
+        if draft.profile_id != profile_id {
+            return Err(CoreError::bad_request("draft does not belong to profile"));
+        }
         if draft.status != RecordDraftStatus::Parsed {
             return Err(CoreError::bad_request("draft is not discardable"));
         }
@@ -664,26 +845,18 @@ impl AppService {
         if drafts.is_empty() {
             return Err(CoreError::bad_request("no active drafts to confirm"));
         }
-        // Validate all drafts before any DB write so a single bad draft
-        // cannot leave earlier ones committed.  The batch method is transactional.
-        let creates: Vec<(Uuid, RecordCreate)> = drafts
+        let actions: Vec<(Uuid, ParsedDraftConfirmationAction)> = drafts
             .iter()
             .filter(|d| d.status == RecordDraftStatus::Parsed)
-            .map(|d| record_create_from_draft(d).map(|c| (d.id, c)))
+            .map(|draft| confirmation_action_from_draft(draft).map(|action| (draft.id, action)))
             .collect::<Result<_, _>>()?;
         let last_record = self
             .repo
-            .confirm_record_drafts_batch(profile_id, &self.device_id, creates)
-            .await
-            .map_err(map_internal)?;
-        self.repo
-            .create_conversation_message(
-                Uuid::new_v4(),
+            .confirm_parsed_drafts(
                 profile_id,
-                ConversationRole::Assistant,
-                &format!("已批量确认 {} 笔账单入库。", drafts.len()),
-                None,
-                last_record.as_ref().map(|r| r.id),
+                &self.device_id,
+                actions,
+                &format!("已批量确认 {} 项解析结果。", drafts.len()),
             )
             .await
             .map_err(map_internal)?;
@@ -855,24 +1028,24 @@ impl AppService {
 
     // ── LLM config management ────────────────────────────────────────────
 
-    pub async fn get_llm_config(&self) -> Result<LlmConfig, CoreError> {
+    pub async fn get_llm_config(&self) -> Result<Option<LlmConfig>, CoreError> {
         if let Some(json) = self
             .repo
             .get_setting("llm_config")
             .await
             .map_err(map_internal)?
         {
-            if let Ok(cfg) = serde_json::from_str::<LlmConfig>(&json) {
-                return Ok(cfg);
-            }
+            let cfg = serde_json::from_str::<LlmConfig>(&json).map_err(|error| {
+                CoreError::Internal(format!("stored LLM configuration is invalid: {error}"))
+            })?;
+            cfg.validate().map_err(map_internal)?;
+            return Ok(Some(cfg));
         }
-        Ok(LlmConfig::from_env_optional()
-            .map_err(map_internal)?
-            .unwrap())
+        LlmConfig::from_env_optional().map_err(map_internal)
     }
 
     pub async fn update_llm_config(&mut self, cfg: LlmConfig) -> Result<(), CoreError> {
-        let new_client = LlmClient::from_config(cfg.clone()).map_err(map_internal)?;
+        let new_client = CloudLlmClient::from_config(cfg.clone()).map_err(map_internal)?;
         let json = serde_json::to_string(&cfg).map_err(|e| CoreError::Internal(e.to_string()))?;
         self.repo
             .set_setting_with_device("llm_config", &json, &self.device_id)
@@ -883,7 +1056,7 @@ impl AppService {
     }
 
     pub async fn list_llm_models(&self, cfg: LlmConfig) -> Result<Vec<LlmModelItem>, CoreError> {
-        let client = LlmClient::from_config(cfg).map_err(map_internal)?;
+        let client = CloudLlmClient::from_config(cfg).map_err(map_internal)?;
         client.list_models().await.map_err(map_internal)
     }
 
@@ -1514,7 +1687,48 @@ fn validate_category_for_direction(
 fn merge_draft_input(
     existing: &RecordDraft,
     input: DraftInput,
-) -> Result<RecordDraftUpdate, CoreError> {
+) -> Result<ParsedRecordPayload, CoreError> {
+    if existing.kind == ParsedDraftKind::Asset {
+        let asset = input
+            .asset_info
+            .ok_or_else(|| CoreError::bad_request("asset_info is required for an asset draft"))?;
+        if asset.name.trim().is_empty() {
+            return Err(CoreError::bad_request("asset name is required"));
+        }
+        if !asset.amount.is_finite() || asset.amount <= 0.0 {
+            return Err(CoreError::bad_request(
+                "asset amount must be a finite positive number",
+            ));
+        }
+        if let Some(category) = asset.category.as_deref() {
+            if !is_valid_asset_category(category) {
+                return Err(CoreError::bad_request("asset category is invalid"));
+            }
+        }
+        if let Some(currency) = asset.currency.as_deref() {
+            validate_required_currency(Some(currency))?;
+        }
+        if let Some(recorded_on) = asset.recorded_on.as_deref() {
+            NaiveDate::parse_from_str(recorded_on, "%Y-%m-%d")
+                .map_err(|_| CoreError::bad_request("asset recorded_on must be YYYY-MM-DD"))?;
+        }
+        return Ok(ParsedRecordPayload {
+            direction: None,
+            amount: None,
+            currency: None,
+            category: None,
+            merchant: None,
+            transaction_at: None,
+            note: None,
+            subscription_cycle: None,
+            asset_info: Some(asset),
+        });
+    }
+    if input.asset_info.is_some() {
+        return Err(CoreError::bad_request(
+            "asset_info cannot update a record or subscription draft",
+        ));
+    }
     let direction = input.direction.or_else(|| existing.direction.clone());
     let amount = input.amount.or(existing.amount);
     if let Some(amount) = amount {
@@ -1528,7 +1742,25 @@ fn merge_draft_input(
         .map(|value| validate_category_for_direction(&value, direction.as_ref()))
         .transpose()?;
 
-    Ok(RecordDraftUpdate {
+    let subscription_cycle = match existing.kind {
+        ParsedDraftKind::Subscription => Some(
+            input
+                .subscription_cycle
+                .or_else(|| existing.subscription_cycle.clone())
+                .ok_or_else(|| CoreError::bad_request("subscription cycle is required"))?,
+        ),
+        ParsedDraftKind::Record => {
+            if input.subscription_cycle.is_some() {
+                return Err(CoreError::bad_request(
+                    "subscription_cycle cannot update a record draft",
+                ));
+            }
+            None
+        }
+        ParsedDraftKind::Asset => unreachable!("asset draft returned above"),
+    };
+
+    Ok(ParsedRecordPayload {
         direction,
         amount,
         currency: normalize_optional_currency(input.currency)?
@@ -1537,6 +1769,8 @@ fn merge_draft_input(
         merchant: trim_optional(input.merchant).or_else(|| existing.merchant.clone()),
         transaction_at: input.transaction_at.or(existing.transaction_at),
         note: trim_optional(input.note).or_else(|| existing.note.clone()),
+        subscription_cycle,
+        asset_info: None,
     })
 }
 
@@ -1564,7 +1798,7 @@ fn record_create_from_draft(payload: &RecordDraft) -> Result<RecordCreate, CoreE
     Ok(RecordCreate {
         direction,
         amount,
-        currency: validate_or_default_currency(payload.currency.as_deref())?,
+        currency: validate_required_currency(payload.currency.as_deref())?,
         category,
         merchant: trim_optional(payload.merchant.clone()),
         transaction_at,
@@ -1589,17 +1823,114 @@ fn record_create_from_parsed(payload: &ParsedRecordPayload) -> Result<RecordCrea
         .ok_or_else(|| CoreError::bad_request("parsed category is required"))?
         .to_string();
     let category = validate_category_for_direction(&category, Some(&direction))?;
-    let transaction_at = payload.transaction_at.unwrap_or_else(Utc::now);
+    let transaction_at = payload
+        .transaction_at
+        .ok_or_else(|| CoreError::bad_request("parsed transaction_at is required"))?;
 
     Ok(RecordCreate {
         direction,
         amount,
-        currency: validate_or_default_currency(payload.currency.as_deref())?,
+        currency: validate_required_currency(payload.currency.as_deref())?,
         category,
         merchant: trim_optional(payload.merchant.clone()),
         transaction_at,
         note: trim_optional(payload.note.clone()),
     })
+}
+
+fn confirmation_action_from_draft(
+    draft: &RecordDraft,
+) -> Result<ParsedDraftConfirmationAction, CoreError> {
+    match draft.kind {
+        ParsedDraftKind::Record => Ok(ParsedDraftConfirmationAction::Record(
+            record_create_from_draft(draft)?,
+        )),
+        ParsedDraftKind::Asset => {
+            let info = draft
+                .asset_info
+                .as_ref()
+                .ok_or_else(|| CoreError::bad_request("asset draft payload is missing"))?;
+            let name = info.name.trim();
+            if name.is_empty() {
+                return Err(CoreError::bad_request("asset name is required"));
+            }
+            let amount = (info.amount > 0.0)
+                .then_some(info.amount)
+                .ok_or_else(|| CoreError::bad_request("asset amount must be greater than 0"))?;
+            let category = info
+                .category
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| CoreError::bad_request("asset category is required"))?;
+            if !is_valid_asset_category(category) {
+                return Err(CoreError::bad_request(format!(
+                    "asset category must be one of: {}",
+                    ASSET_CATEGORIES.join("、")
+                )));
+            }
+            let recorded_on = info
+                .recorded_on
+                .as_deref()
+                .ok_or_else(|| CoreError::bad_request("asset recorded_on is required"))
+                .and_then(|value| {
+                    NaiveDate::parse_from_str(value, "%Y-%m-%d")
+                        .map_err(|_| CoreError::bad_request("asset recorded_on must be YYYY-MM-DD"))
+                })?;
+            Ok(ParsedDraftConfirmationAction::Asset(
+                AssetConfirmationCreate {
+                    name: name.to_string(),
+                    category: category.to_string(),
+                    amount,
+                    currency: validate_required_currency(info.currency.as_deref())?,
+                    recorded_on,
+                    note: trim_optional(info.note.clone()),
+                },
+            ))
+        }
+        ParsedDraftKind::Subscription => {
+            let record = record_create_from_draft(draft)?;
+            let cycle = draft
+                .subscription_cycle
+                .clone()
+                .ok_or_else(|| CoreError::bad_request("subscription cycle is required"))?;
+            let local_date = record.transaction_at.with_timezone(&shanghai_offset());
+            let anchor_day = local_date.day() as i32;
+            let anchor_month = match cycle {
+                SubscriptionCycle::Yearly => Some(local_date.month() as i32),
+                SubscriptionCycle::Monthly => None,
+            };
+            let next_due_at =
+                advance_next_due(&cycle, anchor_day, anchor_month, local_date.date_naive());
+            let subscription = SubscriptionCreate {
+                direction: record.direction.clone(),
+                amount: record.amount,
+                currency: record.currency.clone(),
+                category: record.category.clone(),
+                merchant: record.merchant.clone(),
+                note: record.note.clone(),
+                cycle,
+                anchor_day,
+                anchor_month,
+                next_due_at,
+            };
+            Ok(ParsedDraftConfirmationAction::Subscription {
+                record,
+                subscription,
+            })
+        }
+    }
+}
+
+fn confirmation_message(kind: ParsedDraftKind, count: usize) -> &'static str {
+    if count != 1 {
+        return "已确认解析结果。";
+    }
+    match kind {
+        ParsedDraftKind::Record => "账单已确认入库。",
+        ParsedDraftKind::Asset => "资产已确认入库。",
+        ParsedDraftKind::Subscription => "订阅已确认入库。",
+    }
 }
 
 fn format_parsed_summary(payload: &ParsedRecordPayload) -> String {
@@ -1683,8 +2014,9 @@ fn format_asset_acks_summary(acks: &[AssetAck]) -> String {
 }
 
 fn map_internal(error: anyhow::Error) -> CoreError {
-    logger::error("core", error.to_string());
-    CoreError::Internal(error.to_string())
+    let message = format!("{error:#}");
+    logger::error("core", &message);
+    CoreError::Internal(message)
 }
 
 fn normalize_optional_currency(value: Option<String>) -> Result<Option<String>, CoreError> {
@@ -1696,18 +2028,18 @@ fn normalize_optional_currency(value: Option<String>) -> Result<Option<String>, 
     }
 }
 
-fn validate_or_default_currency(value: Option<&str>) -> Result<String, CoreError> {
+fn validate_required_currency(value: Option<&str>) -> Result<String, CoreError> {
     match value.map(str::trim).filter(|value| !value.is_empty()) {
         Some(value) => normalize_currency_code(value)
             .ok_or_else(|| CoreError::bad_request("invalid currency code")),
-        None => Ok("CNY".to_string()),
+        None => Err(CoreError::bad_request("currency is required")),
     }
 }
 
 fn format_amount_with_currency(amount: f64, currency: Option<&str>) -> String {
-    let currency = currency
-        .and_then(normalize_currency_code)
-        .unwrap_or_else(|| "CNY".to_string());
+    let Some(currency) = currency.and_then(normalize_currency_code) else {
+        return format!("未设置币种 {amount:.2}");
+    };
     let symbol = match currency.as_str() {
         "CNY" => "¥".to_string(),
         "USD" => "$".to_string(),
@@ -1731,6 +2063,172 @@ fn format_amount_with_currency(amount: f64, currency: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    const VALID_LOCAL_RESPONSE: &str = r#"[{"direction":"expense","amount":12,"currency":"CNY","category":"其他","merchant":null,"transaction_at":"2026-07-14T12:00:00Z","note":null,"subscription_cycle":null,"asset_info":null}]"#;
+
+    fn routed_payload() -> ParsedRecordPayload {
+        parse_record_payloads_strict(VALID_LOCAL_RESPONSE)
+            .unwrap()
+            .remove(0)
+    }
+
+    fn local_error(code: local_llm::LocalLlmErrorCode) -> local_llm::LocalLlmError {
+        local_llm::LocalLlmError {
+            code,
+            message: format!("{} failure", code.as_str()),
+        }
+    }
+
+    #[tokio::test]
+    async fn cloud_only_calls_cloud_once_and_never_calls_local() {
+        let local_calls = AtomicUsize::new(0);
+        let cloud_calls = AtomicUsize::new(0);
+        let result = ParseRouter::route(
+            LocalRoutingRequest {
+                mode: LocalRoutingMode::CloudOnly,
+                model_id: Some("ignored-model".to_string()),
+            },
+            |_| {
+                local_calls.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Err(local_error(
+                    local_llm::LocalLlmErrorCode::InferenceFailed,
+                )))
+            },
+            || {
+                cloud_calls.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Ok(vec![routed_payload()]))
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(local_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(cloud_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(result.parser_source, ParserSource::Cloud);
+    }
+
+    #[tokio::test]
+    async fn valid_local_contract_never_calls_cloud() {
+        let local_calls = AtomicUsize::new(0);
+        let cloud_calls = AtomicUsize::new(0);
+        let result = ParseRouter::route(
+            LocalRoutingRequest {
+                mode: LocalRoutingMode::LocalFirst,
+                model_id: Some("test-model".to_string()),
+            },
+            |_| {
+                local_calls.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Ok((
+                    VALID_LOCAL_RESPONSE.to_string(),
+                    "test-model".to_string(),
+                    10,
+                )))
+            },
+            || {
+                cloud_calls.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Ok(vec![routed_payload()]))
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(local_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(cloud_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(result.parser_source, ParserSource::Local);
+    }
+
+    #[tokio::test]
+    async fn allowed_local_failure_calls_cloud_exactly_once() {
+        let cloud_calls = AtomicUsize::new(0);
+        let result = ParseRouter::route(
+            LocalRoutingRequest {
+                mode: LocalRoutingMode::LocalFirst,
+                model_id: Some("test-model".to_string()),
+            },
+            |_| std::future::ready(Err(local_error(local_llm::LocalLlmErrorCode::OutOfMemory))),
+            || {
+                cloud_calls.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Ok(vec![routed_payload()]))
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(cloud_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(result.parser_source, ParserSource::CloudAfterLocalFailure);
+        assert_eq!(result.local_failure.unwrap().code, "out_of_memory");
+    }
+
+    #[tokio::test]
+    async fn invalid_local_output_contract_calls_cloud_exactly_once() {
+        let cloud_calls = AtomicUsize::new(0);
+        let result = ParseRouter::route(
+            LocalRoutingRequest {
+                mode: LocalRoutingMode::LocalFirst,
+                model_id: Some("test-model".to_string()),
+            },
+            |_| {
+                std::future::ready(Ok((
+                    "```json\n[]\n```".to_string(),
+                    "test-model".to_string(),
+                    10,
+                )))
+            },
+            || {
+                cloud_calls.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Ok(vec![routed_payload()]))
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(cloud_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(result.local_failure.unwrap().code, "output_contract_failed");
+    }
+
+    #[tokio::test]
+    async fn cancellation_does_not_call_cloud() {
+        let cloud_calls = AtomicUsize::new(0);
+        let error = ParseRouter::route(
+            LocalRoutingRequest {
+                mode: LocalRoutingMode::LocalFirst,
+                model_id: Some("test-model".to_string()),
+            },
+            |_| std::future::ready(Err(local_error(local_llm::LocalLlmErrorCode::Cancelled))),
+            || {
+                cloud_calls.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Ok(vec![routed_payload()]))
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(cloud_calls.load(Ordering::SeqCst), 0);
+        assert!(error.to_string().contains("cancelled"));
+    }
+
+    #[tokio::test]
+    async fn local_and_cloud_failures_are_both_preserved() {
+        let cloud_calls = AtomicUsize::new(0);
+        let error = ParseRouter::route(
+            LocalRoutingRequest {
+                mode: LocalRoutingMode::LocalFirst,
+                model_id: Some("test-model".to_string()),
+            },
+            |_| std::future::ready(Err(local_error(local_llm::LocalLlmErrorCode::Timeout))),
+            || {
+                cloud_calls.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Err(CoreError::Internal("cloud failed".to_string())))
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(cloud_calls.load(Ordering::SeqCst), 1);
+        assert!(error.to_string().contains("timeout failure"));
+        assert!(error.to_string().contains("cloud failed"));
+    }
 
     #[test]
     fn build_custom_range_rejects_inverted_range() {

@@ -6,16 +6,11 @@ public actor AppLogger {
     private let fileURL: URL
 
     private init() {
-        let supportURL = try? FileManager.default.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )
-        let directory = (supportURL ?? URL(fileURLWithPath: NSTemporaryDirectory()))
-            .appendingPathComponent("BillLensApple", isDirectory: true)
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        fileURL = directory.appendingPathComponent("billlens.log")
+        do {
+            fileURL = try Self.resolveLogFileURL()
+        } catch {
+            preconditionFailure("初始化日志目录失败：\(error.localizedDescription)")
+        }
     }
 
     public func log(_ stage: String, _ message: String) {
@@ -31,21 +26,33 @@ public actor AppLogger {
     }
 
     public nonisolated static var defaultLogFilePath: String {
-        let supportURL = try? FileManager.default.url(
+        do {
+            return try resolveLogFileURL().path
+        } catch {
+            preconditionFailure("解析日志文件路径失败：\(error.localizedDescription)")
+        }
+    }
+
+    private nonisolated static func resolveLogFileURL() throws -> URL {
+        let supportURL = try FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
             create: true
         )
-        let directory = (supportURL ?? URL(fileURLWithPath: NSTemporaryDirectory()))
+        let directory = supportURL
             .appendingPathComponent("BillLensApple", isDirectory: true)
-        return directory.appendingPathComponent("billlens.log").path
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent("billlens.log")
     }
 
     private func append(_ line: String) {
         let data = Data((line + "\n").utf8)
         if FileManager.default.fileExists(atPath: fileURL.path) == false {
-            FileManager.default.createFile(atPath: fileURL.path, contents: data)
+            precondition(
+                FileManager.default.createFile(atPath: fileURL.path, contents: data),
+                "创建日志文件失败：\(fileURL.path)"
+            )
             return
         }
 
@@ -55,7 +62,7 @@ public actor AppLogger {
             try handle.write(contentsOf: data)
             try handle.close()
         } catch {
-            print("failed to append log file: \(error.localizedDescription)")
+            preconditionFailure("写入日志文件失败：\(error.localizedDescription)")
         }
     }
 

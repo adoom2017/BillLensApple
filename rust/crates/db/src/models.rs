@@ -135,6 +135,68 @@ pub enum RecordDraftStatus {
     Discarded,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ParsedDraftKind {
+    Record,
+    Asset,
+    Subscription,
+}
+
+impl ParsedDraftKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Record => "record",
+            Self::Asset => "asset",
+            Self::Subscription => "subscription",
+        }
+    }
+}
+
+impl TryFrom<&str> for ParsedDraftKind {
+    type Error = &'static str;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "record" => Ok(Self::Record),
+            "asset" => Ok(Self::Asset),
+            "subscription" => Ok(Self::Subscription),
+            _ => Err("invalid parsed draft kind"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ParserSource {
+    Local,
+    Cloud,
+    CloudAfterLocalFailure,
+}
+
+impl ParserSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Cloud => "cloud",
+            Self::CloudAfterLocalFailure => "cloud_after_local_failure",
+        }
+    }
+}
+
+impl TryFrom<&str> for ParserSource {
+    type Error = &'static str;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "local" => Ok(Self::Local),
+            "cloud" => Ok(Self::Cloud),
+            "cloud_after_local_failure" => Ok(Self::CloudAfterLocalFailure),
+            _ => Err("invalid parser source"),
+        }
+    }
+}
+
 impl RecordDraftStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -208,9 +270,13 @@ pub struct Record {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordDraft {
     pub id: Uuid,
+    pub batch_id: Uuid,
     pub profile_id: String,
     pub content: String,
     pub auto_confirm: bool,
+    pub kind: ParsedDraftKind,
+    pub parser_source: ParserSource,
+    pub fallback_reason: Option<String>,
     pub status: RecordDraftStatus,
     pub confirmed_record_id: Option<Uuid>,
     pub direction: Option<RecordDirection>,
@@ -220,8 +286,36 @@ pub struct RecordDraft {
     pub merchant: Option<String>,
     pub transaction_at: Option<DateTime<Utc>>,
     pub note: Option<String>,
+    pub subscription_cycle: Option<SubscriptionCycle>,
+    pub asset_info: Option<ParsedAssetInfo>,
+    pub confirmation: Option<ParsedDraftConfirmation>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl RecordDraft {
+    pub fn payload(&self) -> ParsedRecordPayload {
+        ParsedRecordPayload {
+            direction: self.direction.clone(),
+            amount: self.amount,
+            currency: self.currency.clone(),
+            category: self.category.clone(),
+            merchant: self.merchant.clone(),
+            transaction_at: self.transaction_at,
+            note: self.note.clone(),
+            subscription_cycle: self.subscription_cycle.clone(),
+            asset_info: self.asset_info.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct ParsedDraftConfirmation {
+    pub record_id: Option<Uuid>,
+    pub asset_id: Option<Uuid>,
+    pub asset_snapshot_id: Option<Uuid>,
+    pub subscription_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -269,6 +363,7 @@ pub struct RecordDraftUpdate {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ParsedRecordPayload {
     pub direction: Option<RecordDirection>,
     pub amount: Option<f64>,
@@ -282,6 +377,7 @@ pub struct ParsedRecordPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ParsedAssetInfo {
     pub name: String,
     pub category: Option<String>,
@@ -289,6 +385,36 @@ pub struct ParsedAssetInfo {
     pub currency: Option<String>,
     pub recorded_on: Option<String>,
     pub note: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AssetConfirmationCreate {
+    pub name: String,
+    pub category: String,
+    pub amount: f64,
+    pub currency: String,
+    pub recorded_on: NaiveDate,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ParsedDraftConfirmationAction {
+    Record(RecordCreate),
+    Asset(AssetConfirmationCreate),
+    Subscription {
+        record: RecordCreate,
+        subscription: SubscriptionCreate,
+    },
+}
+
+impl ParsedDraftConfirmationAction {
+    pub fn kind(&self) -> ParsedDraftKind {
+        match self {
+            Self::Record(_) => ParsedDraftKind::Record,
+            Self::Asset(_) => ParsedDraftKind::Asset,
+            Self::Subscription { .. } => ParsedDraftKind::Subscription,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

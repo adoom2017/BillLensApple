@@ -54,6 +54,16 @@ public struct RustBridge: Sendable {
         )
     }
 
+    public static func registerLocalLlmBackend() {
+        let result = billlens_register_local_llm_backend(
+            billlens_swift_local_llm_run,
+            billlens_swift_local_llm_cancel,
+            billlens_swift_local_llm_unload,
+            billlens_swift_local_llm_free_string
+        )
+        precondition(result == 0, "本地 LLM FFI 后端注册失败。")
+    }
+
     public func send<Response: Decodable>(_ payload: [String: Any]) throws -> Response {
         let jsonString = try encodePayload(payload)
         let responseString = try executeEncoded(jsonString)

@@ -60,8 +60,12 @@ public final class ReceiptOCRService: ReceiptTextRecognizing, @unchecked Sendabl
                     continuation.resume(throwing: OCRServiceError.noTextRecognized)
                     return
                 }
-                AppLogger.log("ocr.output", lines.joined(separator: "\n"))
-                continuation.resume(returning: lines.joined(separator: "\n"))
+                let recognizedText = lines.joined(separator: "\n")
+                AppLogger.log(
+                    "ocr.output",
+                    "lines=\(lines.count) characters=\(recognizedText.count)"
+                )
+                continuation.resume(returning: recognizedText)
             }
             request.recognitionLevel = .accurate
             request.usesLanguageCorrection = true

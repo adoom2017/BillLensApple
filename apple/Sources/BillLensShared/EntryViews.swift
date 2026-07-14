@@ -338,7 +338,7 @@ struct ReviewPanel: View {
             Text("草稿编辑")
                 .font(.system(size: 22, weight: .bold))
                 .foregroundStyle(IMColors.textTitle)
-            Text("先看识别结果，再改字段；确认后会直接写入账单。")
+            Text("先检查识别结果，再修改字段；确认前不会写入业务数据。")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(IMColors.textBody)
         }
@@ -350,14 +350,23 @@ struct ReviewPanel: View {
     private var reviewSummaryMeta: String {
         if let draft = store.currentDraft {
             let indexLabel = store.drafts.count > 1 ? "第 \(store.activeDraftIndex + 1)/\(store.drafts.count) 笔 · " : ""
+            if draft.kind == "asset", let asset = draft.assetInfo {
+                return "\(indexLabel)资产 · \(asset.name) · \(asset.category ?? "未分类")"
+            }
+            if draft.kind == "subscription" {
+                return "\(indexLabel)订阅 · \(draft.merchant ?? "未填写商户") · \(draft.subscriptionCycle ?? "未设置周期")"
+            }
             return
                 "\(indexLabel)\(draft.category ?? "未分类") · \(draft.merchant ?? "未填写商户") · \(BillLensFormatters.displayDateTime(draft.transactionAt))"
         }
         return "等待新的账单解析结果"
     }
 
-    private var reviewFields: some View {
-        VStack(spacing: 12) {
+    @ViewBuilder private var reviewFields: some View {
+        if store.currentDraft?.kind == "asset" {
+            assetReviewFields
+        } else {
+            VStack(spacing: 12) {
             ReviewFieldGroup(
                 title: "核心字段",
                 subtitle: "把金额、方向、分类先修准。"
@@ -413,15 +422,110 @@ struct ReviewPanel: View {
                 }
 
                 ReviewField(title: "时间") {
-                    DatePicker("", selection: $store.draftForm.transactionAt)
+                    if store.draftForm.transactionAt != nil {
+                        DatePicker(
+                            "",
+                            selection: Binding(
+                                get: {
+                                    guard let value = store.draftForm.transactionAt else {
+                                        preconditionFailure("transactionAt changed while DatePicker is visible")
+                                    }
+                                    return value
+                                },
+                                set: { store.draftForm.transactionAt = $0 }
+                            )
+                        )
                         .labelsHidden()
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        Button("设置当前时间") {
+                            store.draftForm.transactionAt = .now
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(IMColors.accent)
+                    }
                 }
 
                 ReviewField(title: "备注", minimumHeight: LayoutMetrics.noteHeight, alignTop: true) {
                     TextEditor(text: $store.draftForm.note)
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(IMColors.textBody)
+                        .scrollContentBackground(.hidden)
+                        .frame(minHeight: 44, maxHeight: 60)
+                }
+            }
+
+            if store.currentDraft?.kind == "subscription" {
+                ReviewFieldGroup(
+                    title: "订阅周期",
+                    subtitle: "确认后将同时创建订阅和对应账单。"
+                ) {
+                    ReviewField(title: "周期") {
+                        Picker("", selection: $store.subscriptionCycle) {
+                            Text("每月").tag("monthly")
+                            Text("每年").tag("yearly")
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                }
+            }
+            }
+        }
+    }
+
+    private var assetReviewFields: some View {
+        VStack(spacing: 12) {
+            ReviewFieldGroup(
+                title: "资产字段",
+                subtitle: "确认后才会新增或更新资产快照。"
+            ) {
+                ReviewField(title: "名称") {
+                    TextField("机构或资产名称", text: $store.assetDraftForm.name)
+                        .textFieldStyle(.plain)
+                }
+                ReviewField(title: "金额") {
+                    TextField("0.00", text: $store.assetDraftForm.amount)
+                        .textFieldStyle(.plain)
+                }
+                ReviewField(title: "币种") {
+                    TextField("CNY", text: $store.assetDraftForm.currency)
+                        .textFieldStyle(.plain)
+                }
+                ReviewField(title: "分类") {
+                    Picker("", selection: $store.assetDraftForm.category) {
+                        ForEach(["存款", "现金", "股票", "基金", "加密货币", "房产", "其他"], id: \.self) {
+                            Text($0).tag($0)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+                ReviewField(title: "记录日期") {
+                    if store.assetDraftForm.recordedOn != nil {
+                        DatePicker(
+                            "",
+                            selection: Binding(
+                                get: {
+                                    guard let value = store.assetDraftForm.recordedOn else {
+                                        preconditionFailure("recordedOn changed while DatePicker is visible")
+                                    }
+                                    return value
+                                },
+                                set: { store.assetDraftForm.recordedOn = $0 }
+                            ),
+                            displayedComponents: .date
+                        )
+                        .labelsHidden()
+                    } else {
+                        Button("设置今天") {
+                            store.assetDraftForm.recordedOn = .now
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(IMColors.accent)
+                    }
+                }
+                ReviewField(title: "备注", minimumHeight: LayoutMetrics.noteHeight, alignTop: true) {
+                    TextEditor(text: $store.assetDraftForm.note)
+                        .font(.system(size: 14, weight: .medium))
                         .scrollContentBackground(.hidden)
                         .frame(minHeight: 44, maxHeight: 60)
                 }
@@ -435,7 +539,7 @@ struct ReviewPanel: View {
                 reviewNavigator
             }
 
-            Text("确认后会写入数据库，并出现在账单一览里。")
+            Text("确认动作由 Rust 单事务写入；失败时草稿和业务数据保持原状。")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(IMColors.textBody)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -473,7 +577,7 @@ struct ReviewPanel: View {
                 AssistantAvatar()
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("识别草稿")
+                    Text(draftSourceLabel)
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(IMColors.textLabel)
                     Text(draftSourceText)
@@ -502,6 +606,21 @@ struct ReviewPanel: View {
             return content
         }
         return "等待新的账单输入。"
+    }
+
+    private var draftSourceLabel: String {
+        guard let draft = store.currentDraft else { return "识别草稿" }
+        let type = switch draft.kind {
+        case "asset": "资产"
+        case "subscription": "订阅"
+        default: "账单"
+        }
+        let source = switch draft.parserSource {
+        case "local": "本地模型"
+        case "cloud_after_local_failure": "本地失败后云端"
+        default: "云端模型"
+        }
+        return "\(type)草稿 · \(source)"
     }
 
     private var reviewNavigator: some View {

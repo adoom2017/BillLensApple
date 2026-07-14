@@ -151,40 +151,41 @@ impl BillRepository {
         auto_confirm: bool,
         parsed: &ParsedRecordPayload,
     ) -> Result<RecordDraft> {
+        if auto_confirm {
+            return Err(anyhow!("auto-confirmed payloads must not create drafts"));
+        }
+        let kind = parsed_draft_kind(parsed)?;
+        let payload_json =
+            serde_json::to_string(parsed).context("failed to encode draft payload")?;
         let row = sqlx::query_as::<_, RecordDraftRow>(
             r#"
-            INSERT INTO record_drafts (
-                id, profile_id, content, auto_confirm, status, direction, amount, currency, category, merchant, transaction_at, note
+            INSERT INTO parsed_drafts (
+                id, batch_id, profile_id, kind, parser_source, original_content,
+                payload_json, status
             )
-            VALUES (?1, ?2, ?3, ?4, 'parsed', ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            VALUES (?1, ?1, ?2, ?3, 'cloud', ?4, ?5, 'parsed')
             RETURNING *
             "#,
         )
         .bind(id.to_string())
         .bind(profile_id)
+        .bind(kind.as_str())
         .bind(content)
-        .bind(auto_confirm)
-        .bind(parsed.direction.as_ref().map(|value| value.as_str()))
-        .bind(parsed.amount)
-        .bind(parsed.currency.clone())
-        .bind(parsed.category.clone())
-        .bind(parsed.merchant.clone())
-        .bind(parsed.transaction_at)
-        .bind(parsed.note.clone())
+        .bind(payload_json)
         .fetch_one(&self.pool)
         .await
-        .context("failed to insert record draft")?;
+        .context("failed to insert parsed draft")?;
 
         row.try_into()
     }
 
     pub async fn get_record_draft(&self, id: Uuid) -> Result<RecordDraft> {
-        let row = sqlx::query_as::<_, RecordDraftRow>("SELECT * FROM record_drafts WHERE id = ?1")
+        let row = sqlx::query_as::<_, RecordDraftRow>("SELECT * FROM parsed_drafts WHERE id = ?1")
             .bind(id.to_string())
             .fetch_optional(&self.pool)
             .await
-            .context("failed to load record draft")?
-            .ok_or_else(|| anyhow!("record draft not found"))?;
+            .context("failed to load parsed draft")?
+            .ok_or_else(|| anyhow!("parsed draft not found"))?;
 
         row.try_into()
     }
@@ -194,32 +195,53 @@ impl BillRepository {
         id: Uuid,
         update: RecordDraftUpdate,
     ) -> Result<RecordDraft> {
+        let existing = self.get_record_draft(id).await?;
+        if existing.kind != ParsedDraftKind::Record {
+            return Err(anyhow!("record fields cannot update a non-record draft"));
+        }
+        if existing.status != RecordDraftStatus::Parsed {
+            return Err(anyhow!("only parsed drafts can be updated"));
+        }
+        let mut payload = existing.payload();
+        payload.direction = update.direction;
+        payload.amount = update.amount;
+        payload.currency = update.currency;
+        payload.category = update.category;
+        payload.merchant = update.merchant;
+        payload.transaction_at = update.transaction_at;
+        payload.note = update.note;
+        self.update_parsed_draft_payload(id, &payload).await
+    }
+
+    pub async fn update_parsed_draft_payload(
+        &self,
+        id: Uuid,
+        payload: &ParsedRecordPayload,
+    ) -> Result<RecordDraft> {
+        let existing = self.get_record_draft(id).await?;
+        if existing.status != RecordDraftStatus::Parsed {
+            return Err(anyhow!("only parsed drafts can be updated"));
+        }
+        let kind = parsed_draft_kind(payload)?;
+        if existing.kind != kind {
+            return Err(anyhow!("parsed draft kind cannot be changed"));
+        }
+        let payload_json =
+            serde_json::to_string(payload).context("failed to encode updated draft payload")?;
         let row = sqlx::query_as::<_, RecordDraftRow>(
             r#"
-            UPDATE record_drafts
-            SET direction = ?2,
-                amount = ?3,
-                currency = ?4,
-                category = ?5,
-                merchant = ?6,
-                transaction_at = ?7,
-                note = ?8,
+            UPDATE parsed_drafts
+            SET payload_json = ?2,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?1
+            WHERE id = ?1 AND status = 'parsed'
             RETURNING *
             "#,
         )
         .bind(id.to_string())
-        .bind(update.direction.as_ref().map(|value| value.as_str()))
-        .bind(update.amount)
-        .bind(update.currency)
-        .bind(update.category)
-        .bind(update.merchant)
-        .bind(update.transaction_at)
-        .bind(update.note)
+        .bind(payload_json)
         .fetch_one(&self.pool)
         .await
-        .context("failed to update record draft")?;
+        .context("failed to update parsed draft")?;
 
         row.try_into()
     }
@@ -230,7 +252,7 @@ impl BillRepository {
     ) -> Result<Option<RecordDraft>> {
         let row = sqlx::query_as::<_, RecordDraftRow>(
             r#"
-            SELECT * FROM record_drafts
+            SELECT * FROM parsed_drafts
             WHERE profile_id = ?1 AND status = 'parsed'
             ORDER BY updated_at DESC
             LIMIT 1
@@ -239,7 +261,7 @@ impl BillRepository {
         .bind(profile_id)
         .fetch_optional(&self.pool)
         .await
-        .context("failed to load latest active record draft")?;
+        .context("failed to load latest active parsed draft")?;
 
         row.map(TryInto::try_into).transpose()
     }
@@ -247,7 +269,7 @@ impl BillRepository {
     pub async fn list_active_record_drafts(&self, profile_id: &str) -> Result<Vec<RecordDraft>> {
         let rows = sqlx::query_as::<_, RecordDraftRow>(
             r#"
-            SELECT * FROM record_drafts
+            SELECT * FROM parsed_drafts
             WHERE profile_id = ?1 AND status = 'parsed'
             ORDER BY created_at ASC, rowid ASC
             "#,
@@ -255,7 +277,7 @@ impl BillRepository {
         .bind(profile_id)
         .fetch_all(&self.pool)
         .await
-        .context("failed to list active record drafts")?;
+        .context("failed to list active parsed drafts")?;
 
         rows.into_iter().map(TryInto::try_into).collect()
     }
@@ -268,36 +290,54 @@ impl BillRepository {
         content: &str,
         payloads: &[ParsedRecordPayload],
     ) -> Result<Vec<RecordDraft>> {
+        self.create_parsed_drafts_batch(profile_id, content, payloads, ParserSource::Cloud, None)
+            .await
+    }
+
+    pub async fn create_parsed_drafts_batch(
+        &self,
+        profile_id: &str,
+        content: &str,
+        payloads: &[ParsedRecordPayload],
+        parser_source: ParserSource,
+        fallback_reason: Option<&str>,
+    ) -> Result<Vec<RecordDraft>> {
+        if payloads.is_empty() {
+            return Err(anyhow!("cannot create an empty parsed draft batch"));
+        }
         let mut tx = self
             .pool
             .begin()
             .await
             .context("failed to begin draft batch transaction")?;
+        let batch_id = Uuid::new_v4();
         let mut drafts = Vec::with_capacity(payloads.len());
         for parsed in payloads {
             let id = Uuid::new_v4();
+            let kind = parsed_draft_kind(parsed)?;
+            let payload_json =
+                serde_json::to_string(parsed).context("failed to encode parsed draft payload")?;
             let row = sqlx::query_as::<_, RecordDraftRow>(
                 r#"
-                INSERT INTO record_drafts (
-                    id, profile_id, content, auto_confirm, status, direction, amount, currency, category, merchant, transaction_at, note
+                INSERT INTO parsed_drafts (
+                    id, batch_id, profile_id, kind, parser_source, original_content,
+                    payload_json, fallback_reason, status
                 )
-                VALUES (?1, ?2, ?3, false, 'parsed', ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'parsed')
                 RETURNING *
                 "#,
             )
             .bind(id.to_string())
+            .bind(batch_id.to_string())
             .bind(profile_id)
+            .bind(kind.as_str())
+            .bind(parser_source.as_str())
             .bind(content)
-            .bind(parsed.direction.as_ref().map(|v| v.as_str()))
-            .bind(parsed.amount)
-            .bind(parsed.currency.clone())
-            .bind(parsed.category.clone())
-            .bind(parsed.merchant.clone())
-            .bind(parsed.transaction_at)
-            .bind(parsed.note.clone())
+            .bind(payload_json)
+            .bind(fallback_reason)
             .fetch_one(&mut *tx)
             .await
-            .context("failed to insert record draft in batch")?;
+            .context("failed to insert parsed draft in batch")?;
             drafts.push(row.try_into()?);
         }
         tx.commit()
@@ -306,63 +346,163 @@ impl BillRepository {
         Ok(drafts)
     }
 
-    /// Confirm multiple drafts and insert their records in a single transaction.
+    /// Compatibility wrapper for record-only callers. New code should call
+    /// `confirm_parsed_drafts` so all draft kinds share the same transaction.
     pub async fn confirm_record_drafts_batch(
         &self,
         profile_id: &str,
         device_id: &str,
         draft_creates: Vec<(Uuid, RecordCreate)>,
     ) -> Result<Option<Record>> {
+        let actions = draft_creates
+            .into_iter()
+            .map(|(id, create)| (id, ParsedDraftConfirmationAction::Record(create)))
+            .collect();
+        self.confirm_parsed_drafts(profile_id, device_id, actions, "已批量确认账单入库。")
+            .await
+    }
+
+    pub async fn confirm_parsed_drafts(
+        &self,
+        profile_id: &str,
+        device_id: &str,
+        actions: Vec<(Uuid, ParsedDraftConfirmationAction)>,
+        assistant_message: &str,
+    ) -> Result<Option<Record>> {
+        if actions.is_empty() {
+            return Err(anyhow!("no parsed drafts supplied for confirmation"));
+        }
         let mut tx = self
             .pool
             .begin()
             .await
-            .context("failed to begin confirm batch transaction")?;
+            .context("failed to begin parsed draft confirmation transaction")?;
         let mut last_record: Option<Record> = None;
-        for (draft_id, create) in draft_creates {
-            let record_id = Uuid::new_v4();
-            let record_row = sqlx::query_as::<_, RecordRow>(
-                r#"
-                INSERT INTO records (
-                    id, profile_id, direction, amount, currency, category, merchant, transaction_at, note, device_id
-                )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-                RETURNING *
-                "#,
+        let single_draft_id = (actions.len() == 1).then(|| actions[0].0);
+
+        for (draft_id, action) in actions {
+            let draft_row = sqlx::query_as::<_, RecordDraftRow>(
+                "SELECT * FROM parsed_drafts WHERE id = ?1 AND profile_id = ?2",
             )
-            .bind(record_id.to_string())
+            .bind(draft_id.to_string())
             .bind(profile_id)
-            .bind(create.direction.as_str())
-            .bind(create.amount)
-            .bind(create.currency)
-            .bind(create.category)
-            .bind(create.merchant)
-            .bind(create.transaction_at)
-            .bind(create.note)
-            .bind(device_id)
-            .fetch_one(&mut *tx)
+            .fetch_optional(&mut *tx)
             .await
-            .context("failed to insert record in confirm batch")?;
-            let record: Record = record_row.try_into()?;
-            sqlx::query(
+            .context("failed to load parsed draft for confirmation")?
+            .ok_or_else(|| anyhow!("parsed draft not found for profile"))?;
+            let draft: RecordDraft = draft_row.try_into()?;
+            if draft.status != RecordDraftStatus::Parsed {
+                return Err(anyhow!("parsed draft is not confirmable"));
+            }
+            if draft.kind != action.kind() {
+                return Err(anyhow!(
+                    "parsed draft kind does not match confirmation action"
+                ));
+            }
+
+            let confirmation = match action {
+                ParsedDraftConfirmationAction::Record(create) => {
+                    let record =
+                        insert_record_in_transaction(&mut tx, profile_id, device_id, create)
+                            .await?;
+                    let confirmation = ParsedDraftConfirmation {
+                        record_id: Some(record.id),
+                        ..Default::default()
+                    };
+                    last_record = Some(record);
+                    confirmation
+                }
+                ParsedDraftConfirmationAction::Asset(create) => {
+                    confirm_asset_in_transaction(&mut tx, profile_id, device_id, create).await?
+                }
+                ParsedDraftConfirmationAction::Subscription {
+                    record,
+                    subscription,
+                } => {
+                    let subscription_id = Uuid::new_v4();
+                    sqlx::query(
+                        r#"
+                        INSERT INTO subscriptions (
+                            id, profile_id, direction, amount, currency, category,
+                            merchant, note, cycle, anchor_day, anchor_month,
+                            next_due_at, device_id
+                        )
+                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                        "#,
+                    )
+                    .bind(subscription_id.to_string())
+                    .bind(profile_id)
+                    .bind(subscription.direction.as_str())
+                    .bind(subscription.amount)
+                    .bind(subscription.currency)
+                    .bind(subscription.category)
+                    .bind(subscription.merchant)
+                    .bind(subscription.note)
+                    .bind(subscription.cycle.as_str())
+                    .bind(subscription.anchor_day)
+                    .bind(subscription.anchor_month)
+                    .bind(subscription.next_due_at.to_string())
+                    .bind(device_id)
+                    .execute(&mut *tx)
+                    .await
+                    .context("failed to insert subscription while confirming parsed draft")?;
+
+                    let created_record =
+                        insert_record_in_transaction(&mut tx, profile_id, device_id, record)
+                            .await?;
+                    let confirmation = ParsedDraftConfirmation {
+                        record_id: Some(created_record.id),
+                        subscription_id: Some(subscription_id),
+                        ..Default::default()
+                    };
+                    last_record = Some(created_record);
+                    confirmation
+                }
+            };
+
+            let confirmation_json = serde_json::to_string(&confirmation)
+                .context("failed to encode parsed draft confirmation")?;
+            let result = sqlx::query(
                 r#"
-                UPDATE record_drafts
-                SET status = 'confirmed',
-                    confirmed_record_id = ?2,
+                UPDATE parsed_drafts
+                SET status = 'confirmed', confirmation_json = ?2,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?1
+                WHERE id = ?1 AND profile_id = ?3 AND status = 'parsed'
                 "#,
             )
             .bind(draft_id.to_string())
-            .bind(record_id.to_string())
+            .bind(confirmation_json)
+            .bind(profile_id)
             .execute(&mut *tx)
             .await
-            .context("failed to mark draft confirmed in batch")?;
-            last_record = Some(record);
+            .context("failed to mark parsed draft confirmed")?;
+            if result.rows_affected() != 1 {
+                return Err(anyhow!(
+                    "parsed draft confirmation state changed concurrently"
+                ));
+            }
         }
+
+        sqlx::query(
+            r#"
+            INSERT INTO conversation_messages (
+                id, profile_id, role, content, draft_id, record_id
+            )
+            VALUES (?1, ?2, 'assistant', ?3, ?4, ?5)
+            "#,
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(profile_id)
+        .bind(assistant_message)
+        .bind(single_draft_id.map(|id| id.to_string()))
+        .bind(last_record.as_ref().map(|record| record.id.to_string()))
+        .execute(&mut *tx)
+        .await
+        .context("failed to insert confirmation conversation message")?;
+
         tx.commit()
             .await
-            .context("failed to commit confirm batch transaction")?;
+            .context("failed to commit parsed draft confirmation transaction")?;
         Ok(last_record)
     }
 
@@ -388,18 +528,23 @@ impl BillRepository {
         draft_id: Uuid,
         record_id: Uuid,
     ) -> Result<RecordDraft> {
+        let confirmation_json = serde_json::to_string(&ParsedDraftConfirmation {
+            record_id: Some(record_id),
+            ..Default::default()
+        })
+        .context("failed to encode record confirmation")?;
         let row = sqlx::query_as::<_, RecordDraftRow>(
             r#"
-            UPDATE record_drafts
+            UPDATE parsed_drafts
             SET status = 'confirmed',
-                confirmed_record_id = ?2,
+                confirmation_json = ?2,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?1
+            WHERE id = ?1 AND status = 'parsed'
             RETURNING *
             "#,
         )
         .bind(draft_id.to_string())
-        .bind(record_id.to_string())
+        .bind(confirmation_json)
         .fetch_one(&self.pool)
         .await
         .context("failed to confirm record draft")?;
@@ -410,10 +555,10 @@ impl BillRepository {
     pub async fn discard_record_draft(&self, draft_id: Uuid) -> Result<RecordDraft> {
         let row = sqlx::query_as::<_, RecordDraftRow>(
             r#"
-            UPDATE record_drafts
+            UPDATE parsed_drafts
             SET status = 'discarded',
                 updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?1
+            WHERE id = ?1 AND status = 'parsed'
             RETURNING *
             "#,
         )
@@ -1904,6 +2049,121 @@ impl BillRepository {
     }
 }
 
+fn parsed_draft_kind(payload: &ParsedRecordPayload) -> Result<ParsedDraftKind> {
+    match (
+        payload.asset_info.is_some(),
+        payload.subscription_cycle.is_some(),
+    ) {
+        (true, true) => Err(anyhow!(
+            "parsed payload cannot be both an asset and a subscription"
+        )),
+        (true, false) => Ok(ParsedDraftKind::Asset),
+        (false, true) => Ok(ParsedDraftKind::Subscription),
+        (false, false) => Ok(ParsedDraftKind::Record),
+    }
+}
+
+async fn insert_record_in_transaction(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    profile_id: &str,
+    device_id: &str,
+    create: RecordCreate,
+) -> Result<Record> {
+    let record_id = Uuid::new_v4();
+    let row = sqlx::query_as::<_, RecordRow>(
+        r#"
+        INSERT INTO records (
+            id, profile_id, direction, amount, currency, category,
+            merchant, transaction_at, note, device_id
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        RETURNING *
+        "#,
+    )
+    .bind(record_id.to_string())
+    .bind(profile_id)
+    .bind(create.direction.as_str())
+    .bind(create.amount)
+    .bind(create.currency)
+    .bind(create.category)
+    .bind(create.merchant)
+    .bind(create.transaction_at)
+    .bind(create.note)
+    .bind(device_id)
+    .fetch_one(&mut **tx)
+    .await
+    .context("failed to insert record while confirming parsed draft")?;
+    row.try_into()
+}
+
+async fn confirm_asset_in_transaction(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    profile_id: &str,
+    device_id: &str,
+    create: AssetConfirmationCreate,
+) -> Result<ParsedDraftConfirmation> {
+    let asset_id = Uuid::new_v4();
+    let asset_row = sqlx::query_as::<_, AssetRow>(
+        r#"
+        INSERT INTO assets (id, profile_id, name, category, currency, device_id)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        ON CONFLICT (profile_id, name) WHERE deleted_at IS NULL
+        DO UPDATE SET
+            category = excluded.category,
+            currency = excluded.currency,
+            sync_version = assets.sync_version + 1,
+            device_id = excluded.device_id,
+            updated_at = datetime('now')
+        RETURNING *
+        "#,
+    )
+    .bind(asset_id.to_string())
+    .bind(profile_id)
+    .bind(create.name)
+    .bind(create.category)
+    .bind(create.currency)
+    .bind(device_id)
+    .fetch_one(&mut **tx)
+    .await
+    .context("failed to upsert asset while confirming parsed draft")?;
+    let asset: Asset = asset_row.try_into()?;
+
+    let snapshot_id = Uuid::new_v4();
+    let snapshot_row = sqlx::query_as::<_, AssetSnapshotRow>(
+        r#"
+        INSERT INTO asset_snapshots (
+            id, asset_id, profile_id, amount, recorded_on, note, device_id
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        ON CONFLICT (asset_id, recorded_on) WHERE deleted_at IS NULL
+        DO UPDATE SET
+            amount = excluded.amount,
+            note = excluded.note,
+            sync_version = asset_snapshots.sync_version + 1,
+            device_id = excluded.device_id,
+            updated_at = datetime('now')
+        RETURNING *
+        "#,
+    )
+    .bind(snapshot_id.to_string())
+    .bind(asset.id.to_string())
+    .bind(profile_id)
+    .bind(create.amount)
+    .bind(create.recorded_on.to_string())
+    .bind(create.note)
+    .bind(device_id)
+    .fetch_one(&mut **tx)
+    .await
+    .context("failed to upsert asset snapshot while confirming parsed draft")?;
+    let snapshot: AssetSnapshot = snapshot_row.try_into()?;
+
+    Ok(ParsedDraftConfirmation {
+        asset_id: Some(asset.id),
+        asset_snapshot_id: Some(snapshot.id),
+        ..Default::default()
+    })
+}
+
 #[derive(Debug, FromRow)]
 struct RecordRow {
     id: String,
@@ -1951,18 +2211,15 @@ impl TryFrom<RecordRow> for Record {
 #[derive(Debug, FromRow)]
 struct RecordDraftRow {
     id: String,
+    batch_id: String,
     profile_id: String,
-    content: String,
-    auto_confirm: i64,
+    kind: String,
+    parser_source: String,
+    original_content: String,
+    payload_json: String,
+    fallback_reason: Option<String>,
     status: String,
-    confirmed_record_id: Option<String>,
-    direction: Option<String>,
-    amount: Option<f64>,
-    currency: Option<String>,
-    category: Option<String>,
-    merchant: Option<String>,
-    transaction_at: Option<DateTime<Utc>>,
-    note: Option<String>,
+    confirmation_json: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -1971,26 +2228,36 @@ impl TryFrom<RecordDraftRow> for RecordDraft {
     type Error = anyhow::Error;
 
     fn try_from(row: RecordDraftRow) -> Result<Self> {
+        let payload: ParsedRecordPayload =
+            serde_json::from_str(&row.payload_json).context("invalid parsed draft payload JSON")?;
+        let confirmation: Option<ParsedDraftConfirmation> = row
+            .confirmation_json
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .context("invalid parsed draft confirmation JSON")?;
         Ok(Self {
             id: Uuid::parse_str(&row.id).context("invalid draft id")?,
+            batch_id: Uuid::parse_str(&row.batch_id).context("invalid draft batch id")?,
             profile_id: row.profile_id,
-            content: row.content,
-            auto_confirm: row.auto_confirm != 0,
+            content: row.original_content,
+            auto_confirm: false,
+            kind: ParsedDraftKind::try_from(row.kind.as_str()).map_err(anyhow::Error::msg)?,
+            parser_source: ParserSource::try_from(row.parser_source.as_str())
+                .map_err(anyhow::Error::msg)?,
+            fallback_reason: row.fallback_reason,
             status: RecordDraftStatus::try_from(row.status.as_str()).map_err(anyhow::Error::msg)?,
-            confirmed_record_id: row
-                .confirmed_record_id
-                .map(|value| Uuid::parse_str(&value).context("invalid confirmed record id"))
-                .transpose()?,
-            direction: row
-                .direction
-                .map(|value| RecordDirection::try_from(value.as_str()).map_err(anyhow::Error::msg))
-                .transpose()?,
-            amount: row.amount,
-            currency: row.currency,
-            category: row.category,
-            merchant: row.merchant,
-            transaction_at: row.transaction_at,
-            note: row.note,
+            confirmed_record_id: confirmation.as_ref().and_then(|value| value.record_id),
+            direction: payload.direction,
+            amount: payload.amount,
+            currency: payload.currency,
+            category: payload.category,
+            merchant: payload.merchant,
+            transaction_at: payload.transaction_at,
+            note: payload.note,
+            subscription_cycle: payload.subscription_cycle,
+            asset_info: payload.asset_info,
+            confirmation,
             created_at: row.created_at,
             updated_at: row.updated_at,
         })
@@ -2258,6 +2525,573 @@ impl From<AppSettingRow> for AppSetting {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn record_payload(amount: f64) -> ParsedRecordPayload {
+        ParsedRecordPayload {
+            direction: Some(RecordDirection::Expense),
+            amount: Some(amount),
+            currency: Some("CNY".to_string()),
+            category: Some("餐饮".to_string()),
+            merchant: Some("测试商户".to_string()),
+            transaction_at: Some(Utc::now()),
+            note: None,
+            subscription_cycle: None,
+            asset_info: None,
+        }
+    }
+
+    fn record_create(amount: f64) -> RecordCreate {
+        RecordCreate {
+            direction: RecordDirection::Expense,
+            amount,
+            currency: "CNY".to_string(),
+            category: "餐饮".to_string(),
+            merchant: Some("测试商户".to_string()),
+            transaction_at: Utc::now(),
+            note: None,
+        }
+    }
+
+    fn asset_payload() -> ParsedRecordPayload {
+        ParsedRecordPayload {
+            direction: None,
+            amount: None,
+            currency: None,
+            category: None,
+            merchant: None,
+            transaction_at: None,
+            note: None,
+            subscription_cycle: None,
+            asset_info: Some(ParsedAssetInfo {
+                name: "测试银行".to_string(),
+                category: Some("存款".to_string()),
+                amount: 10_000.0,
+                currency: Some("CNY".to_string()),
+                recorded_on: Some("2026-07-14".to_string()),
+                note: None,
+            }),
+        }
+    }
+
+    fn asset_action() -> ParsedDraftConfirmationAction {
+        ParsedDraftConfirmationAction::Asset(AssetConfirmationCreate {
+            name: "测试银行".to_string(),
+            category: "存款".to_string(),
+            amount: 10_000.0,
+            currency: "CNY".to_string(),
+            recorded_on: NaiveDate::from_ymd_opt(2026, 7, 14).unwrap(),
+            note: None,
+        })
+    }
+
+    fn subscription_payload() -> ParsedRecordPayload {
+        let mut payload = record_payload(28.0);
+        payload.category = Some("订阅".to_string());
+        payload.subscription_cycle = Some(SubscriptionCycle::Monthly);
+        payload
+    }
+
+    fn subscription_action() -> ParsedDraftConfirmationAction {
+        ParsedDraftConfirmationAction::Subscription {
+            record: RecordCreate {
+                category: "订阅".to_string(),
+                ..record_create(28.0)
+            },
+            subscription: SubscriptionCreate {
+                direction: RecordDirection::Expense,
+                amount: 28.0,
+                currency: "CNY".to_string(),
+                category: "订阅".to_string(),
+                merchant: Some("测试商户".to_string()),
+                note: None,
+                cycle: SubscriptionCycle::Monthly,
+                anchor_day: 14,
+                anchor_month: None,
+                next_due_at: NaiveDate::from_ymd_opt(2026, 8, 14).unwrap(),
+            },
+        }
+    }
+
+    async fn assert_injected_confirmation_failure_rolls_back(
+        profile: &str,
+        trigger: &str,
+        payload: ParsedRecordPayload,
+        action: ParsedDraftConfirmationAction,
+    ) {
+        let repo = make_repo().await;
+        let draft = repo
+            .create_parsed_drafts_batch(profile, "故障注入", &[payload], ParserSource::Local, None)
+            .await
+            .unwrap()
+            .remove(0);
+        sqlx::raw_sql(trigger).execute(repo.pool()).await.unwrap();
+
+        let error = repo
+            .confirm_parsed_drafts(profile, "device-test", vec![(draft.id, action)], "不应写入")
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("injected failure"));
+
+        for table in [
+            "records",
+            "assets",
+            "asset_snapshots",
+            "subscriptions",
+            "conversation_messages",
+        ] {
+            let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+                .fetch_one(repo.pool())
+                .await
+                .unwrap();
+            assert_eq!(count, 0, "{table} was not rolled back");
+        }
+        let remaining = repo.list_active_record_drafts(profile).await.unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].status, RecordDraftStatus::Parsed);
+    }
+
+    #[tokio::test]
+    async fn local_drafts_do_not_write_business_tables_before_confirmation() {
+        let repo = make_repo().await;
+        let profile = "local-draft-profile";
+        let mut subscription = record_payload(28.0);
+        subscription.category = Some("订阅".to_string());
+        subscription.subscription_cycle = Some(SubscriptionCycle::Monthly);
+        let asset = ParsedRecordPayload {
+            direction: None,
+            amount: None,
+            currency: None,
+            category: None,
+            merchant: None,
+            transaction_at: None,
+            note: None,
+            subscription_cycle: None,
+            asset_info: Some(ParsedAssetInfo {
+                name: "测试银行".to_string(),
+                category: Some("存款".to_string()),
+                amount: 10_000.0,
+                currency: Some("CNY".to_string()),
+                recorded_on: Some("2026-07-14".to_string()),
+                note: None,
+            }),
+        };
+
+        let drafts = repo
+            .create_parsed_drafts_batch(
+                profile,
+                "原始输入",
+                &[record_payload(18.0), asset, subscription],
+                ParserSource::Local,
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(drafts.len(), 3);
+
+        for table in ["records", "assets", "asset_snapshots", "subscriptions"] {
+            let count: i64 = sqlx::query_scalar(&format!(
+                "SELECT COUNT(*) FROM {table} WHERE profile_id = ?1"
+            ))
+            .bind(profile)
+            .fetch_one(repo.pool())
+            .await
+            .unwrap();
+            assert_eq!(count, 0, "{table} changed before confirmation");
+        }
+    }
+
+    #[tokio::test]
+    async fn confirming_all_draft_kinds_is_atomic() {
+        let repo = make_repo().await;
+        let profile = "confirm-all-kinds";
+        let mut subscription_payload = record_payload(28.0);
+        subscription_payload.category = Some("订阅".to_string());
+        subscription_payload.subscription_cycle = Some(SubscriptionCycle::Monthly);
+        let asset_payload = ParsedRecordPayload {
+            direction: None,
+            amount: None,
+            currency: None,
+            category: None,
+            merchant: None,
+            transaction_at: None,
+            note: None,
+            subscription_cycle: None,
+            asset_info: Some(ParsedAssetInfo {
+                name: "测试银行".to_string(),
+                category: Some("存款".to_string()),
+                amount: 10_000.0,
+                currency: Some("CNY".to_string()),
+                recorded_on: Some("2026-07-14".to_string()),
+                note: Some("月底余额".to_string()),
+            }),
+        };
+        let drafts = repo
+            .create_parsed_drafts_batch(
+                profile,
+                "原始输入",
+                &[record_payload(18.0), asset_payload, subscription_payload],
+                ParserSource::Local,
+                None,
+            )
+            .await
+            .unwrap();
+        let subscription_record = RecordCreate {
+            category: "订阅".to_string(),
+            amount: 28.0,
+            ..record_create(28.0)
+        };
+        repo.confirm_parsed_drafts(
+            profile,
+            "device-test",
+            vec![
+                (
+                    drafts[0].id,
+                    ParsedDraftConfirmationAction::Record(record_create(18.0)),
+                ),
+                (
+                    drafts[1].id,
+                    ParsedDraftConfirmationAction::Asset(AssetConfirmationCreate {
+                        name: "测试银行".to_string(),
+                        category: "存款".to_string(),
+                        amount: 10_000.0,
+                        currency: "CNY".to_string(),
+                        recorded_on: NaiveDate::from_ymd_opt(2026, 7, 14).unwrap(),
+                        note: Some("月底余额".to_string()),
+                    }),
+                ),
+                (
+                    drafts[2].id,
+                    ParsedDraftConfirmationAction::Subscription {
+                        record: subscription_record,
+                        subscription: SubscriptionCreate {
+                            direction: RecordDirection::Expense,
+                            amount: 28.0,
+                            currency: "CNY".to_string(),
+                            category: "订阅".to_string(),
+                            merchant: Some("测试商户".to_string()),
+                            note: None,
+                            cycle: SubscriptionCycle::Monthly,
+                            anchor_day: 14,
+                            anchor_month: None,
+                            next_due_at: NaiveDate::from_ymd_opt(2026, 8, 14).unwrap(),
+                        },
+                    },
+                ),
+            ],
+            "已确认三类草稿。",
+        )
+        .await
+        .unwrap();
+
+        for (table, expected) in [
+            ("records", 2_i64),
+            ("assets", 1),
+            ("asset_snapshots", 1),
+            ("subscriptions", 1),
+        ] {
+            let count: i64 = sqlx::query_scalar(&format!(
+                "SELECT COUNT(*) FROM {table} WHERE profile_id = ?1"
+            ))
+            .bind(profile)
+            .fetch_one(repo.pool())
+            .await
+            .unwrap();
+            assert_eq!(count, expected, "unexpected {table} count");
+        }
+        assert!(
+            repo.list_active_record_drafts(profile)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn confirmation_failure_rolls_back_earlier_actions() {
+        let repo = make_repo().await;
+        let profile = "confirm-rollback";
+        let drafts = repo
+            .create_parsed_drafts_batch(
+                profile,
+                "两笔账单",
+                &[record_payload(10.0), record_payload(20.0)],
+                ParserSource::Local,
+                None,
+            )
+            .await
+            .unwrap();
+        let error = repo
+            .confirm_parsed_drafts(
+                profile,
+                "device-test",
+                vec![
+                    (
+                        drafts[0].id,
+                        ParsedDraftConfirmationAction::Record(record_create(10.0)),
+                    ),
+                    (
+                        drafts[1].id,
+                        ParsedDraftConfirmationAction::Asset(AssetConfirmationCreate {
+                            name: "错误动作".to_string(),
+                            category: "存款".to_string(),
+                            amount: 20.0,
+                            currency: "CNY".to_string(),
+                            recorded_on: NaiveDate::from_ymd_opt(2026, 7, 14).unwrap(),
+                            note: None,
+                        }),
+                    ),
+                ],
+                "不应写入",
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("kind does not match"));
+
+        let record_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM records WHERE profile_id = ?1")
+                .bind(profile)
+                .fetch_one(repo.pool())
+                .await
+                .unwrap();
+        assert_eq!(record_count, 0);
+        assert_eq!(
+            repo.list_active_record_drafts(profile).await.unwrap().len(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn record_insert_failure_rolls_back_confirmation() {
+        assert_injected_confirmation_failure_rolls_back(
+            "record-insert-failure",
+            "CREATE TRIGGER fail_record BEFORE INSERT ON records BEGIN SELECT RAISE(ABORT, 'injected failure: record'); END;",
+            record_payload(10.0),
+            ParsedDraftConfirmationAction::Record(record_create(10.0)),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn asset_snapshot_failure_rolls_back_asset_and_confirmation() {
+        assert_injected_confirmation_failure_rolls_back(
+            "asset-snapshot-failure",
+            "CREATE TRIGGER fail_snapshot BEFORE INSERT ON asset_snapshots BEGIN SELECT RAISE(ABORT, 'injected failure: snapshot'); END;",
+            asset_payload(),
+            asset_action(),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn subscription_record_failure_rolls_back_subscription_and_confirmation() {
+        assert_injected_confirmation_failure_rolls_back(
+            "subscription-record-failure",
+            "CREATE TRIGGER fail_subscription_record BEFORE INSERT ON records BEGIN SELECT RAISE(ABORT, 'injected failure: subscription record'); END;",
+            subscription_payload(),
+            subscription_action(),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn draft_status_failure_rolls_back_business_write_and_confirmation() {
+        assert_injected_confirmation_failure_rolls_back(
+            "draft-status-failure",
+            "CREATE TRIGGER fail_draft_status BEFORE UPDATE OF status ON parsed_drafts WHEN NEW.status = 'confirmed' BEGIN SELECT RAISE(ABORT, 'injected failure: draft status'); END;",
+            record_payload(10.0),
+            ParsedDraftConfirmationAction::Record(record_create(10.0)),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn confirmation_rejects_cross_profile_draft_without_writes() {
+        let repo = make_repo().await;
+        let draft = repo
+            .create_parsed_drafts_batch(
+                "profile-a",
+                "一笔账单",
+                &[record_payload(10.0)],
+                ParserSource::Local,
+                None,
+            )
+            .await
+            .unwrap()
+            .remove(0);
+
+        let error = repo
+            .confirm_parsed_drafts(
+                "profile-b",
+                "device-test",
+                vec![(
+                    draft.id,
+                    ParsedDraftConfirmationAction::Record(record_create(10.0)),
+                )],
+                "不应写入",
+            )
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("not found for profile"));
+        let record_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM records")
+            .fetch_one(repo.pool())
+            .await
+            .unwrap();
+        assert_eq!(record_count, 0);
+        assert_eq!(
+            repo.list_active_record_drafts("profile-a")
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn duplicate_confirmation_action_rolls_back_the_batch() {
+        let repo = make_repo().await;
+        let profile = "duplicate-confirmation";
+        let draft = repo
+            .create_parsed_drafts_batch(
+                profile,
+                "一笔账单",
+                &[record_payload(10.0)],
+                ParserSource::Local,
+                None,
+            )
+            .await
+            .unwrap()
+            .remove(0);
+
+        let error = repo
+            .confirm_parsed_drafts(
+                profile,
+                "device-test",
+                vec![
+                    (
+                        draft.id,
+                        ParsedDraftConfirmationAction::Record(record_create(10.0)),
+                    ),
+                    (
+                        draft.id,
+                        ParsedDraftConfirmationAction::Record(record_create(10.0)),
+                    ),
+                ],
+                "不应写入",
+            )
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("not confirmable"));
+        let record_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM records WHERE profile_id = ?1")
+                .bind(profile)
+                .fetch_one(repo.pool())
+                .await
+                .unwrap();
+        assert_eq!(record_count, 0);
+        assert_eq!(
+            repo.list_active_record_drafts(profile).await.unwrap().len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn parsed_draft_migration_preserves_ids_statuses_and_confirmations() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for migration in [
+            include_str!("../../../migrations/0001_init.sql"),
+            include_str!("../../../migrations/0002_seed_sync_state.sql"),
+            include_str!("../../../migrations/0003_add_fx_rates.sql"),
+            include_str!("../../../migrations/0004_add_subscriptions.sql"),
+            include_str!("../../../migrations/0005_add_assets.sql"),
+            include_str!("../../../migrations/0006_add_app_settings.sql"),
+            include_str!("../../../migrations/0007_sync_scaffolding.sql"),
+            include_str!("../../../migrations/0008_synced_version.sql"),
+            include_str!("../../../migrations/0009_drop_sync_outbox.sql"),
+        ] {
+            sqlx::raw_sql(migration).execute(&pool).await.unwrap();
+        }
+
+        for (id, status, confirmed_record_id) in [
+            ("draft-parsed", "parsed", None),
+            (
+                "draft-confirmed",
+                "confirmed",
+                Some("00000000-0000-0000-0000-000000000001"),
+            ),
+            ("draft-discarded", "discarded", None),
+        ] {
+            sqlx::query(
+                r#"
+                INSERT INTO record_drafts (
+                    id, profile_id, content, status, confirmed_record_id,
+                    direction, amount, currency, category, merchant,
+                    transaction_at, note
+                ) VALUES (?1, 'migration-profile', '原始输入', ?2, ?3,
+                    'expense', 12.5, 'CNY', '餐饮', '测试商户',
+                    '2026-07-14T12:00:00Z', '测试')
+                "#,
+            )
+            .bind(id)
+            .bind(status)
+            .bind(confirmed_record_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO conversation_messages (id, profile_id, role, content, draft_id) VALUES ('message-1', 'migration-profile', 'assistant', '待确认', 'draft-parsed')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut transaction = pool.begin().await.unwrap();
+        sqlx::raw_sql(include_str!(
+            "../../../migrations/0010_generalize_parsed_drafts.sql"
+        ))
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+        transaction.commit().await.unwrap();
+
+        let rows = sqlx::query(
+            "SELECT id, status, parser_source, payload_json, confirmation_json FROM parsed_drafts ORDER BY id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 3);
+        for row in &rows {
+            assert_eq!(row.get::<String, _>("parser_source"), "cloud");
+            let payload: ParsedRecordPayload =
+                serde_json::from_str(&row.get::<String, _>("payload_json")).unwrap();
+            assert_eq!(payload.amount, Some(12.5));
+            assert_eq!(payload.currency.as_deref(), Some("CNY"));
+        }
+        let confirmed = rows
+            .iter()
+            .find(|row| row.get::<String, _>("id") == "draft-confirmed")
+            .unwrap();
+        assert_eq!(confirmed.get::<String, _>("status"), "confirmed");
+        let confirmation: ParsedDraftConfirmation =
+            serde_json::from_str(&confirmed.get::<String, _>("confirmation_json")).unwrap();
+        assert_eq!(
+            confirmation.record_id,
+            Some(Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap())
+        );
+        let linked_draft: String =
+            sqlx::query_scalar("SELECT draft_id FROM conversation_messages WHERE id = 'message-1'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(linked_draft, "draft-parsed");
+    }
 
     #[tokio::test]
     async fn migrations_create_sync_state_without_outbox() {

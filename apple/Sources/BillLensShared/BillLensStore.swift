@@ -10,13 +10,22 @@ public final class BillLensStore: ObservableObject {
     }
 
     public struct DraftFormState {
-        public var direction = "expense"
+        public var direction = ""
         public var amount = ""
-        public var currency = "CNY"
-        public var category = "其他"
+        public var currency = ""
+        public var category = ""
         public var merchant = ""
         public var note = ""
-        public var transactionAt = Date()
+        public var transactionAt: Date?
+    }
+
+    public struct AssetDraftFormState {
+        public var name = ""
+        public var category = ""
+        public var amount = ""
+        public var currency = ""
+        public var recordedOn: Date?
+        public var note = ""
     }
 
     @Published public var messages: [ConversationMessage] = []
@@ -38,6 +47,8 @@ public final class BillLensStore: ObservableObject {
     @Published public var customStart = Calendar.current.date(byAdding: .day, value: -30, to: Date.now) ?? Date.now
     @Published public var customEnd = Date.now
     @Published public var draftForm = DraftFormState()
+    @Published public var assetDraftForm = AssetDraftFormState()
+    @Published public var subscriptionCycle = ""
     @Published public var subscriptions: [SubscriptionItem] = []
     @Published public var selectedSubscriptionId: String?
     @Published public var assets: [AssetItem] = []
@@ -68,7 +79,11 @@ public final class BillLensStore: ObservableObject {
     static var expenseCategories: [String] = ["餐饮", "交通", "日用", "购物", "住房", "医疗", "娱乐", "教育", "通讯", "人情", "订阅", "其他"]
 
     public static func categories(for direction: String) -> [String] {
-        direction == "income" ? incomeCategories : expenseCategories
+        switch direction {
+        case "income": incomeCategories
+        case "expense": expenseCategories
+        default: []
+        }
     }
 
     public var availableCategories: [String] {
@@ -90,12 +105,12 @@ public final class BillLensStore: ObservableObject {
         return assets.first { $0.id == id }
     }
 
-    /// 切换收支方向，并将分类重置为新方向下的第一个合法值
+    /// 切换收支方向；不为缺失分类填入默认值。
     public func setDraftDirection(_ direction: String) {
         draftForm.direction = direction
         let categories = availableCategories
         if !categories.contains(draftForm.category) {
-            draftForm.category = categories.first ?? "其他"
+            draftForm.category = ""
         }
     }
 
@@ -109,7 +124,7 @@ public final class BillLensStore: ObservableObject {
                     "database_path": dbURL.path,
                     "profile_id": profileID,
                     "device_id": deviceID,
-                    "llm": self.llmConfigDictionary,
+                    "llm": try self.llmBootstrapConfig(),
                     "log_file_path": AppLogger.defaultLogFilePath
                 ])
                 statusText = "已连接本地账本"
@@ -124,10 +139,10 @@ public final class BillLensStore: ObservableObject {
 
                 // Pull must succeed before charging to avoid double-charges on multi-device setups.
                 if await pullOK {
-                    let _: [String: Int] = (try? await bridge.sendAsync([
+                    let _: [String: Int] = try await bridge.sendAsync([
                         "action": "process_due_subscriptions",
                         "profile_id": profileID
-                    ])) ?? [:]
+                    ])
                     try await refreshLedger()
                     try await loadSubscriptions()
                 }
@@ -146,7 +161,7 @@ public final class BillLensStore: ObservableObject {
         composerText = ""
         appendLocalUserMessage(content)
         perform("正在解析账单") {
-            AppLogger.log("entry.text", content)
+            AppLogger.log("entry.text", "characters=\(content.count)")
             self.startProgress("已接收文本，准备调用大模型。")
             self.advanceProgress("正在发送文本到 LLM…")
             let result: SubmitTextResult = try await self.bridge.sendAsync([
@@ -154,11 +169,28 @@ public final class BillLensStore: ObservableObject {
                 "profile_id": self.profileID,
                 "content": content,
                 "auto_confirm": self.autoConfirm,
-                "source": "text"
+                "source": "text",
+                "local_routing": try LocalModelManager.shared.routingDictionary()
             ])
             self.advanceProgress("LLM 已返回，正在更新草稿与账本…")
             self.apply(home: result.home)
             self.statusText = result.autoConfirmed ? "已自动入库" : "已生成待确认草稿"
+            if result.parserSource == "local" {
+                self.statusText += "（本地模型）"
+            } else if result.parserSource == "cloud_after_local_failure" {
+                guard let localFailure = result.localFailure else {
+                    throw RustBridgeError.invalidResponse
+                }
+                self.statusText += "（本地失败：\(localFailure.code)，已使用云端）"
+                AppLogger.log(
+                    "entry.local.failure",
+                    "code=\(localFailure.code) message=\(localFailure.message)"
+                )
+            } else if result.parserSource == "cloud" {
+                self.statusText += "（云端模型）"
+            } else {
+                throw RustBridgeError.engineError("未知解析来源：\(result.parserSource)")
+            }
             if result.subscriptionCreated {
                 self.statusText += "（已创建订阅）"
                 try await self.loadSubscriptions()
@@ -166,7 +198,7 @@ public final class BillLensStore: ObservableObject {
             if let acks = result.assetAcks, !acks.isEmpty {
                 try await self.loadAssets()
             }
-            AppLogger.log("entry.text.result", "auto_confirmed=\(result.autoConfirmed) parsed=\(String(describing: result.parsed)) subscription=\(result.subscriptionCreated) asset_acks=\(result.assetAcks?.count ?? 0)")
+            AppLogger.log("entry.text.result", "route=\(result.parserSource) auto_confirmed=\(result.autoConfirmed) count=\(result.parsed.count) subscription=\(result.subscriptionCreated) asset_acks=\(result.assetAcks?.count ?? 0)")
             try await self.refreshLedger()
             self.finishProgress()
             if result.autoConfirmed { CloudKitSyncService.shared.schedulePush() }
@@ -185,12 +217,32 @@ public final class BillLensStore: ObservableObject {
                 "profile_id": self.profileID,
                 "content": text,
                 "auto_confirm": self.autoConfirm,
-                "source": "ocr"
+                "source": "ocr",
+                "local_routing": try LocalModelManager.shared.routingDictionary()
             ])
             self.advanceProgress("大模型已返回，正在整理结构化账单…")
             self.apply(home: result.home)
-            self.statusText = "图片已解析"
-            AppLogger.log("entry.ocr.result", "auto_confirmed=\(result.autoConfirmed) parsed=\(String(describing: result.parsed))")
+            switch result.parserSource {
+            case "local":
+                self.statusText = "图片已由本地模型解析，等待确认"
+            case "cloud":
+                self.statusText = "图片已由云端模型解析"
+            case "cloud_after_local_failure":
+                guard let localFailure = result.localFailure else {
+                    throw RustBridgeError.invalidResponse
+                }
+                self.statusText = "本地失败（\(localFailure.code)），图片已由云端模型解析"
+                AppLogger.log(
+                    "entry.local.failure",
+                    "code=\(localFailure.code) message=\(localFailure.message)"
+                )
+            default:
+                throw RustBridgeError.engineError("未知解析来源：\(result.parserSource)")
+            }
+            AppLogger.log(
+                "entry.ocr.result",
+                "route=\(result.parserSource) auto_confirmed=\(result.autoConfirmed) count=\(result.parsed.count)"
+            )
             try await self.refreshLedger()
             self.finishProgress()
         }
@@ -205,7 +257,10 @@ public final class BillLensStore: ObservableObject {
                         "profile_id": profileID
                     ])
                     composerText = response.transcript
-                    AppLogger.log("speech.transcript", "session=\(response.sessionId) text=\(response.transcript)")
+                    AppLogger.log(
+                        "speech.transcript",
+                        "session=\(response.sessionId) characters=\(response.transcript.count)"
+                    )
                     statusText = "语音已转写，可直接发送"
                 } else {
                     let response: SttStartResponse = try await bridge.sendAsync([
@@ -216,14 +271,18 @@ public final class BillLensStore: ObservableObject {
                     statusText = "录音中..."
                 }
             } catch {
-                AppLogger.log("speech.error", error.localizedDescription)
-                errorText = error.localizedDescription
+                var visibleError = error.localizedDescription
                 statusText = "语音识别失败"
-                // Best-effort cleanup: tell Rust to drop any stale session
-                let _: EmptyResponse? = try? await bridge.sendAsync([
-                    "action": "stt_cancel",
-                    "profile_id": profileID
-                ])
+                do {
+                    let _: EmptyResponse = try await bridge.sendAsync([
+                        "action": "stt_cancel",
+                        "profile_id": profileID
+                    ])
+                } catch let cancelError {
+                    visibleError += "；清理语音会话失败：\(cancelError.localizedDescription)"
+                }
+                AppLogger.log("speech.error", visibleError)
+                errorText = visibleError
             }
         }
     }
@@ -464,7 +523,7 @@ public final class BillLensStore: ObservableObject {
     // ── LLM config ──────────────────────────────────────────────────────
 
     public func loadLlmConfig() async throws {
-        let cfg: LlmConfigItem = try await bridge.sendAsync(["action": "get_llm_config"])
+        let cfg: LlmConfigItem? = try await bridge.sendAsync(["action": "get_llm_config"])
         llmConfig = cfg
     }
 
@@ -583,21 +642,43 @@ public final class BillLensStore: ObservableObject {
     private func hydrateDraftFields() {
         guard let draft = currentDraft else {
             draftForm = DraftFormState()
+            assetDraftForm = AssetDraftFormState()
+            subscriptionCycle = ""
             return
         }
-        let direction = draft.direction ?? "expense"
-        let categories = Self.categories(for: direction)
-        let rawCategory = draft.category ?? "其他"
-        let category = categories.contains(rawCategory) ? rawCategory : categories.last!
+        if draft.kind == "asset" {
+            guard let asset = draft.assetInfo else {
+                errorText = "资产草稿缺少 asset_info。"
+                assetDraftForm = AssetDraftFormState()
+                return
+            }
+            assetDraftForm = AssetDraftFormState(
+                name: asset.name,
+                category: asset.category ?? "",
+                amount: String(format: "%.2f", asset.amount),
+                currency: asset.currency ?? "",
+                recordedOn: asset.recordedOn.flatMap(BillLensFormatters.parseDate),
+                note: asset.note ?? ""
+            )
+            if asset.recordedOn != nil, assetDraftForm.recordedOn == nil {
+                errorText = "资产草稿的 recorded_on 格式无效。"
+            }
+            return
+        }
+        let direction = draft.direction ?? ""
         draftForm = DraftFormState(
             direction: direction,
             amount: draft.amount.map { String(format: "%.2f", $0) } ?? "",
-            currency: BillLensFormatters.normalizedCurrencyCode(draft.currency) ?? "CNY",
-            category: category,
+            currency: draft.currency ?? "",
+            category: draft.category ?? "",
             merchant: draft.merchant ?? "",
             note: draft.note ?? "",
-            transactionAt: BillLensFormatters.parseISO(draft.transactionAt) ?? .now
+            transactionAt: BillLensFormatters.parseISO(draft.transactionAt)
         )
+        if draft.transactionAt != nil, draftForm.transactionAt == nil {
+            errorText = "草稿的 transaction_at 格式无效。"
+        }
+        subscriptionCycle = draft.subscriptionCycle ?? ""
     }
 
     private func perform(_ status: String, operation: @MainActor @escaping () async throws -> Void) {
@@ -634,17 +715,84 @@ public final class BillLensStore: ObservableObject {
     }
 
     private func currentDraftPayload() throws -> [String: Any] {
+        guard let currentDraft else {
+            throw RustBridgeError.engineError("没有可保存的草稿。")
+        }
+        if currentDraft.kind == "asset" {
+            let name = assetDraftForm.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else {
+                throw RustBridgeError.engineError("资产名称不能为空。")
+            }
+            guard let amount = Double(assetDraftForm.amount), amount.isFinite, amount > 0 else {
+                throw RustBridgeError.engineError("资产金额必须是大于 0 的有限数字。")
+            }
+            guard !assetDraftForm.category.isEmpty else {
+                throw RustBridgeError.engineError("资产分类不能为空。")
+            }
+            guard let currency = BillLensFormatters.normalizedCurrencyCode(assetDraftForm.currency) else {
+                throw RustBridgeError.engineError("资产币种必须是有效的 ISO 4217 代码。")
+            }
+            guard let recordedOn = assetDraftForm.recordedOn else {
+                throw RustBridgeError.engineError("资产记录日期不能为空。")
+            }
+            let asset = ParsedAssetInfo(
+                name: name,
+                category: assetDraftForm.category,
+                amount: amount,
+                currency: currency,
+                recordedOn: BillLensFormatters.dateOnly.string(from: recordedOn),
+                note: assetDraftForm.note
+            )
+            let input = DraftInput(
+                direction: nil,
+                amount: nil,
+                currency: nil,
+                category: nil,
+                merchant: nil,
+                transactionAt: nil,
+                note: nil,
+                assetInfo: asset
+            )
+            let data = try JSONEncoder().encode(input)
+            guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw RustBridgeError.invalidResponse
+            }
+            return object
+        }
+        guard draftForm.direction == "expense" || draftForm.direction == "income" else {
+            throw RustBridgeError.engineError("账单收支类型不能为空。")
+        }
+        guard let amount = Double(draftForm.amount), amount.isFinite, amount > 0 else {
+            throw RustBridgeError.engineError("账单金额必须是大于 0 的有限数字。")
+        }
+        guard let currency = BillLensFormatters.normalizedCurrencyCode(draftForm.currency) else {
+            throw RustBridgeError.engineError("账单币种必须是有效的 ISO 4217 代码。")
+        }
+        guard !draftForm.category.isEmpty else {
+            throw RustBridgeError.engineError("账单分类不能为空。")
+        }
+        guard let transactionAt = draftForm.transactionAt else {
+            throw RustBridgeError.engineError("账单时间不能为空。")
+        }
+        if currentDraft.kind == "subscription",
+           subscriptionCycle != "monthly" && subscriptionCycle != "yearly" {
+            throw RustBridgeError.engineError("订阅周期不能为空。")
+        }
         let input = DraftInput(
             direction: draftForm.direction,
-            amount: Double(draftForm.amount),
-            currency: BillLensFormatters.normalizedCurrencyCode(draftForm.currency),
+            amount: amount,
+            currency: currency,
             category: draftForm.category,
             merchant: draftForm.merchant,
-            transactionAt: BillLensFormatters.timestampFallback.string(from: draftForm.transactionAt),
-            note: draftForm.note
+            transactionAt: BillLensFormatters.timestampFallback.string(from: transactionAt),
+            note: draftForm.note,
+            subscriptionCycle: currentDraft.kind == "subscription" ? subscriptionCycle : nil
         )
         let data = try JSONEncoder().encode(input)
-        return try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw RustBridgeError.invalidResponse
+        }
+        return object
     }
 
     private func ledgerPayload() -> [String: Any] {
@@ -695,13 +843,21 @@ public final class BillLensStore: ObservableObject {
         return directory.appendingPathComponent("billlens.sqlite")
     }
 
-    private var llmConfigDictionary: [String: String] {
+    private func llmBootstrapConfig() throws -> Any {
         let env = ProcessInfo.processInfo.environment
+        let keys = ["LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL", "LLM_PROVIDER"]
+        let present = keys.filter { env[$0] != nil }
+        if present.isEmpty { return NSNull() }
+        guard let baseURL = env["LLM_BASE_URL"],
+              let model = env["LLM_MODEL"],
+              let provider = env["LLM_PROVIDER"] else {
+            throw RustBridgeError.engineError("云端模型环境变量配置不完整。")
+        }
         return [
-            "base_url": env["LLM_BASE_URL"] ?? "http://127.0.0.1:8080/v1",
-            "api_key":  env["LLM_API_KEY"]  ?? "",
-            "model":    env["LLM_MODEL"]    ?? "qwen-local",
-            "provider": env["LLM_PROVIDER"] ?? "llamacpp"
+            "base_url": baseURL,
+            "api_key": env["LLM_API_KEY"] ?? "",
+            "model": model,
+            "provider": provider
         ]
     }
 }
