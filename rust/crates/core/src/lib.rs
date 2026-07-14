@@ -146,10 +146,16 @@ impl ParseRouter {
                             local_failure: None,
                         });
                     }
-                    Err(error) => LocalFailureInfo {
-                        code: "output_contract_failed".to_string(),
-                        message: error.to_string(),
-                    },
+                    Err(error) => {
+                        logger::error(
+                            "llm.local.output.raw",
+                            local_output_log_message(&returned_model_id, &raw_content),
+                        );
+                        LocalFailureInfo {
+                            code: "output_contract_failed".to_string(),
+                            message: format!("{error:#}"),
+                        }
+                    }
                 }
             }
             Err(error) => {
@@ -183,6 +189,10 @@ impl ParseRouter {
             local_failure: Some(local_failure),
         })
     }
+}
+
+fn local_output_log_message(model_id: &str, raw_content: &str) -> String {
+    format!("model_id={model_id} content={raw_content}")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2184,7 +2194,23 @@ mod tests {
         .unwrap();
 
         assert_eq!(cloud_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(result.local_failure.unwrap().code, "output_contract_failed");
+        let local_failure = result.local_failure.unwrap();
+        assert_eq!(local_failure.code, "output_contract_failed");
+        assert!(
+            local_failure
+                .message
+                .contains("expected value at line 1 column 1")
+        );
+    }
+
+    #[test]
+    fn local_output_failure_log_preserves_the_complete_raw_response() {
+        let raw_content = "[\n  {\"category\":\"模型自定义分类\"}\n]";
+
+        assert_eq!(
+            local_output_log_message("test-model", raw_content),
+            format!("model_id=test-model content={raw_content}")
+        );
     }
 
     #[tokio::test]

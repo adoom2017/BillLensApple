@@ -6,6 +6,38 @@ import UIKit
 
 private let openAICompatibleProviderID = "openai_compatible"
 
+private enum CloudThinkingMode: String, CaseIterable, Identifiable {
+    case providerDefault = "provider_default"
+    case disabled
+    case enabled
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .providerDefault: "服务商默认"
+        case .disabled: "关闭（结构化解析推荐）"
+        case .enabled: "开启"
+        }
+    }
+
+    var requestValue: Bool? {
+        switch self {
+        case .providerDefault: nil
+        case .disabled: false
+        case .enabled: true
+        }
+    }
+
+    init(requestValue: Bool?) {
+        switch requestValue {
+        case nil: self = .providerDefault
+        case false: self = .disabled
+        case true: self = .enabled
+        }
+    }
+}
+
 // MARK: - Provider definitions
 
 private struct ProviderOption: Identifiable {
@@ -39,6 +71,7 @@ struct SettingsShell: View {
     @State private var apiKey = ""
     @State private var model = ""
     @State private var provider = "openai"
+    @State private var cloudThinkingMode: CloudThinkingMode = .providerDefault
     @State private var showApiKey = false
     @State private var isSaving = false
     @State private var saveSuccess = false
@@ -146,6 +179,8 @@ struct SettingsShell: View {
                         modelFieldRow
                         Divider().opacity(0.25)
                         modelPickerRow
+                        Divider().opacity(0.25)
+                        cloudThinkingModeRow
                     }
 
                     settingsCard {
@@ -563,6 +598,19 @@ struct SettingsShell: View {
         }
     }
 
+    private var cloudThinkingModeRow: some View {
+        fieldRow(label: "思考模式") {
+            Picker("", selection: $cloudThinkingMode) {
+                ForEach(CloudThinkingMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel("云端模型思考模式")
+        }
+    }
+
     private var modelPickerRow: some View {
         fieldRow(label: "模型列表") {
             HStack(spacing: 10) {
@@ -642,6 +690,7 @@ struct SettingsShell: View {
         provider = matched?.id ?? openAICompatibleProviderID
         apiKey = cfg.apiKey
         model = cfg.model
+        cloudThinkingMode = CloudThinkingMode(requestValue: cfg.enableThinking)
         if let fixedUrl = selectedProvider.fixedUrl {
             baseUrl = fixedUrl
         } else {
@@ -703,7 +752,8 @@ struct SettingsShell: View {
             baseUrl: normalizedBaseUrl,
             apiKey: apiKey,
             model: normalizedModel,
-            provider: provider
+            provider: provider,
+            enableThinking: cloudThinkingMode.requestValue
         )
         isSaving = true
         saveError = nil

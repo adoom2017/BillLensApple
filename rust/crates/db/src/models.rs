@@ -1,5 +1,5 @@
-use chrono::{DateTime, Datelike, NaiveDate, Utc};
-use serde::{Deserialize, Serialize};
+use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use serde::{Deserialize, Deserializer, Serialize, de};
 use uuid::Uuid;
 
 pub const EXPENSE_CATEGORIES: &[&str] = &[
@@ -370,10 +370,75 @@ pub struct ParsedRecordPayload {
     pub currency: Option<String>,
     pub category: Option<String>,
     pub merchant: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_transaction_at")]
     pub transaction_at: Option<DateTime<Utc>>,
     pub note: Option<String>,
     pub subscription_cycle: Option<SubscriptionCycle>,
     pub asset_info: Option<ParsedAssetInfo>,
+}
+
+const LOCAL_TRANSACTION_OFFSET_SECONDS: i32 = 8 * 60 * 60;
+
+fn deserialize_optional_transaction_at<'de, D>(
+    deserializer: D,
+) -> Result<Option<DateTime<Utc>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer)?
+        .map(|value| parse_transaction_at(&value).map_err(de::Error::custom))
+        .transpose()
+}
+
+fn parse_transaction_at(value: &str) -> Result<DateTime<Utc>, &'static str> {
+    if let Ok(parsed) = DateTime::parse_from_rfc3339(value) {
+        return Ok(parsed.with_timezone(&Utc));
+    }
+
+    for format in [
+        "%Y-%m-%dT%H:%M:%S%.f%z",
+        "%Y-%m-%dT%H:%M%z",
+        "%Y-%m-%d %H:%M:%S%.f%:z",
+        "%Y-%m-%d %H:%M:%S%.f%z",
+        "%Y-%m-%d %H:%M%:z",
+        "%Y-%m-%d %H:%M%z",
+    ] {
+        if let Ok(parsed) = DateTime::parse_from_str(value, format) {
+            return Ok(parsed.with_timezone(&Utc));
+        }
+    }
+
+    for format in [
+        "%Y-%m-%dT%H:%M:%S%.f",
+        "%Y-%m-%d %H:%M:%S%.f",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d %H:%M",
+    ] {
+        if let Ok(parsed) = NaiveDateTime::parse_from_str(value, format) {
+            return local_transaction_time_to_utc(parsed);
+        }
+    }
+
+    if let Ok(date) = NaiveDate::parse_from_str(value, "%Y-%m-%d") {
+        let midnight = date
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight must be valid for a parsed date");
+        return local_transaction_time_to_utc(midnight);
+    }
+
+    Err(
+        "transaction_at must be RFC3339, YYYY-MM-DD[ T]HH:MM[:SS[.fraction]][offset], or YYYY-MM-DD; timezone-free values use UTC+08:00",
+    )
+}
+
+fn local_transaction_time_to_utc(value: NaiveDateTime) -> Result<DateTime<Utc>, &'static str> {
+    let offset = FixedOffset::east_opt(LOCAL_TRANSACTION_OFFSET_SECONDS)
+        .expect("UTC+08:00 must be a valid fixed offset");
+    offset
+        .from_local_datetime(&value)
+        .single()
+        .map(|value| value.with_timezone(&Utc))
+        .ok_or("transaction_at is not representable in UTC+08:00")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -648,6 +713,45 @@ fn last_day_of_month(year: i32, month: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_transaction_at_accepts_explicit_and_local_allowlisted_formats() {
+        let cases = [
+            ("2026-07-14T14:38:45+08:00", "2026-07-14T06:38:45+00:00"),
+            ("2026-07-14T06:38:45Z", "2026-07-14T06:38:45+00:00"),
+            ("2026-07-14T14:38:45+0800", "2026-07-14T06:38:45+00:00"),
+            ("2026-07-14 14:38:45+08:00", "2026-07-14T06:38:45+00:00"),
+            ("2026-07-14T14:38:45", "2026-07-14T06:38:45+00:00"),
+            ("2026-07-14 14:38:45", "2026-07-14T06:38:45+00:00"),
+            ("2026-07-14T14:38", "2026-07-14T06:38:00+00:00"),
+            ("2026-07-14 14:38", "2026-07-14T06:38:00+00:00"),
+            ("2026-07-14", "2026-07-13T16:00:00+00:00"),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(parse_transaction_at(input).unwrap().to_rfc3339(), expected);
+        }
+    }
+
+    #[test]
+    fn parse_transaction_at_accepts_fractional_seconds() {
+        let parsed = parse_transaction_at("2026-07-14T14:38:45.123456").unwrap();
+        assert_eq!(parsed.to_rfc3339(), "2026-07-14T06:38:45.123456+00:00");
+    }
+
+    #[test]
+    fn parse_transaction_at_rejects_formats_outside_the_allowlist() {
+        for value in [
+            "2026/07/14 14:38:45",
+            "14 Jul 2026 14:38:45",
+            "2026-02-30T14:38:45",
+            "2026-07-14T14:38:45 ",
+            "",
+        ] {
+            let error = parse_transaction_at(value).unwrap_err();
+            assert!(error.contains("transaction_at must be"));
+        }
+    }
 
     #[test]
     fn advance_next_due_monthly_normal() {

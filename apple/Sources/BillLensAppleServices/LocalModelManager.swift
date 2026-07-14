@@ -139,11 +139,8 @@ public enum LocalModelManagerError: LocalizedError {
 public final class LocalModelManager: NSObject, ObservableObject, @unchecked Sendable {
     public static let shared = LocalModelManager()
     #if os(iOS)
-    public static let backgroundSessionIdentifier =
+    nonisolated public static let backgroundSessionIdentifier =
         "com.shendongchun.BillLensApple.ios.local-model-downloads"
-    #else
-    public static let backgroundSessionIdentifier =
-        "com.shendongchun.BillLensApple.macos.local-model-downloads"
     #endif
 
     @Published public private(set) var models: [LocalModelDescriptor] = []
@@ -164,17 +161,7 @@ public final class LocalModelManager: NSObject, ObservableObject, @unchecked Sen
     private var userCancelledModelIds: Set<String> = []
 
     private lazy var session: URLSession = {
-        let configuration = URLSessionConfiguration.background(
-            withIdentifier: Self.backgroundSessionIdentifier
-        )
-        configuration.waitsForConnectivity = true
-        #if os(iOS)
-        configuration.allowsExpensiveNetworkAccess = false
-        configuration.allowsConstrainedNetworkAccess = false
-        #else
-        configuration.allowsExpensiveNetworkAccess = true
-        configuration.allowsConstrainedNetworkAccess = true
-        #endif
+        let configuration = Self.makeDownloadSessionConfiguration()
         return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
     }()
 
@@ -398,6 +385,46 @@ public final class LocalModelManager: NSObject, ObservableObject, @unchecked Sen
         let availablePages = UInt64(statistics.free_count) + UInt64(statistics.inactive_count)
         return availablePages * UInt64(pageSize)
         #endif
+    }
+
+    nonisolated static func makeDownloadSessionConfiguration() -> URLSessionConfiguration {
+        #if os(iOS)
+        let configuration = URLSessionConfiguration.background(
+            withIdentifier: backgroundSessionIdentifier
+        )
+        configuration.allowsExpensiveNetworkAccess = false
+        configuration.allowsConstrainedNetworkAccess = false
+        #else
+        // The macOS target is a Swift Package executable. A background session requires
+        // an application-bundle host, so retain a regular session at app scope instead.
+        let configuration = URLSessionConfiguration.default
+        configuration.allowsExpensiveNetworkAccess = true
+        configuration.allowsConstrainedNetworkAccess = true
+        #endif
+        configuration.waitsForConnectivity = true
+        return configuration
+    }
+
+    nonisolated static func diagnosticDescription(_ error: Error) -> String {
+        diagnosticDescription(error as NSError, depth: 0)
+    }
+
+    nonisolated private static func diagnosticDescription(
+        _ error: NSError,
+        depth: Int
+    ) -> String {
+        var fields = [
+            "domain=\(error.domain)",
+            "code=\(error.code)",
+            "description=\(error.localizedDescription)",
+        ]
+        if let failureReason = error.localizedFailureReason, !failureReason.isEmpty {
+            fields.append("reason=\(failureReason)")
+        }
+        if depth == 0, let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            fields.append("underlying={\(diagnosticDescription(underlying, depth: depth + 1))}")
+        }
+        return fields.joined(separator: " ")
     }
 
     nonisolated public static func resolvedSelectedModel() throws -> (LocalModelDescriptor, URL) {
@@ -816,7 +843,7 @@ public final class LocalModelManager: NSObject, ObservableObject, @unchecked Sen
         receivedBytes: Int64,
         removeArtifacts: Bool
     ) {
-        var visibleError = error.localizedDescription
+        var visibleError = Self.diagnosticDescription(error)
         if removeArtifacts {
             do {
                 try removeDownloadArtifacts(modelId: modelId)
@@ -1013,7 +1040,7 @@ extension LocalModelManager: URLSessionDownloadDelegate, URLSessionTaskDelegate 
         guard let error else { return }
         guard let modelId = task.taskDescription else {
             Task { @MainActor in
-                self.lastError = "后台下载失败，且任务缺少 model_id：\(error.localizedDescription)"
+                self.lastError = "后台下载失败，且任务缺少 model_id：\(Self.diagnosticDescription(error))"
             }
             return
         }
@@ -1022,7 +1049,7 @@ extension LocalModelManager: URLSessionDownloadDelegate, URLSessionTaskDelegate 
                 return
             }
             guard self.persistent.downloads[modelId]?.phase.isActive == true else {
-                self.lastError = "模型 \(modelId) 下载失败，但没有活动下载状态：\(error.localizedDescription)"
+                self.lastError = "模型 \(modelId) 下载失败，但没有活动下载状态：\(Self.diagnosticDescription(error))"
                 return
             }
             let nsError = error as NSError
@@ -1033,7 +1060,7 @@ extension LocalModelManager: URLSessionDownloadDelegate, URLSessionTaskDelegate 
                     self.recordDownloadFailure(
                         modelId: modelId,
                         error: LocalModelManagerError.taskStateMismatch(
-                            "下载失败：\(error.localizedDescription)；保存恢复数据失败：\(resumeError.localizedDescription)"
+                            "下载失败：\(Self.diagnosticDescription(error))；保存恢复数据失败：\(Self.diagnosticDescription(resumeError))"
                         ),
                         receivedBytes: task.countOfBytesReceived,
                         removeArtifacts: true

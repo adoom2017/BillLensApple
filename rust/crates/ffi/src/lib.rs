@@ -134,6 +134,7 @@ enum EngineRequest {
         api_key: String,
         model: String,
         provider: String,
+        enable_thinking: Option<bool>,
     },
     SyncListDirty {
         profile_id: String,
@@ -469,6 +470,7 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
                 api_key,
                 model: String::new(),
                 provider,
+                enable_thinking: None,
             }))?;
             Ok(encode_ok(models))
         }),
@@ -477,12 +479,14 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
             api_key,
             model,
             provider,
+            enable_thinking,
         } => {
             let cfg = LlmConfig {
                 base_url,
                 api_key,
                 model,
                 provider,
+                enable_thinking,
             };
             let mut guard = app_slot().write();
             let app = guard

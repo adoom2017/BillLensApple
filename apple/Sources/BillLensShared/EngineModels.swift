@@ -5,12 +5,14 @@ public struct LlmConfigItem: Codable, Sendable {
     public var apiKey: String
     public var model: String
     public var provider: String
+    public var enableThinking: Bool?
 
     enum CodingKeys: String, CodingKey {
         case baseUrl = "base_url"
         case apiKey = "api_key"
         case model
         case provider
+        case enableThinking = "enable_thinking"
     }
 }
 

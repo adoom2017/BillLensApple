@@ -5,7 +5,7 @@ use billlens_apple_db::{
     ASSET_CATEGORIES, EXPENSE_CATEGORIES, INCOME_CATEGORIES, ParsedRecordPayload,
     is_valid_asset_category, is_valid_record_category, is_valid_record_category_for_direction,
 };
-use chrono::{Local, NaiveDate, Utc};
+use chrono::{DateTime, FixedOffset, Local, NaiveDate, SecondsFormat};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -14,7 +14,7 @@ use crate::logger;
 
 const RECORD_PROMPT_TEMPLATE: &str = r#"你是一个消费记录结构化助手。请将用户输入解析为 JSON。
 今天的日期是：{today}
-当前的时间是：{current_time}
+当前完整时间（含设备时区偏移）是：{current_time}
 必须严格返回 JSON，不要输出解释文字，不要输出 markdown。
 如果输入包含多条交易记录（如账单列表、银行流水、多笔消费），请返回 JSON 数组，每条记录一个对象。如果只有一条记录，也返回包含一个元素的数组。
 category 只能从以下固定分类中选择：
@@ -25,7 +25,7 @@ category 只能从以下固定分类中选择：
 如果文本明确出现”退款””退回””退费””退款成功”等语义，应判断为收入，分类优先使用”其他”。
 amount 必须始终返回正数，不要返回负数；收支方向只放在 direction 字段里表达。
 只有当原始输入中明确出现时间线索时，才填写 transaction_at；如果原始输入没有体现任何时间信息，transaction_at 必须直接使用当前完整时间，精确到秒，不要只返回日期，不要返回当天 0 点，不要猜测、不要编造。
-如果时间缺少时区，不要臆造 Z 或 UTC；优先返回原始本地时间字符串。
+transaction_at 必须是包含时区偏移的 RFC3339 时间。原始时间没有时区、且语义明确是设备本地时间时，使用上方当前时间中的设备时区偏移；不要臆造 Z 或 UTC。原文明确属于其他时区但无法确定偏移时，transaction_at 返回 null。
 note 只保留与交易本身直接相关的简短备注；忽略积分、贴纸、奖励、营销文案、活动提示；如果没有合适备注，返回 null。
 如果用户描述的是订阅/会员/周期性付费服务，额外返回 "subscription_cycle" 字段：
 - "monthly" 表示每月付费
@@ -71,6 +71,8 @@ pub struct LlmConfig {
     pub api_key: String,
     pub model: String,
     pub provider: String,
+    #[serde(default)]
+    pub enable_thinking: Option<bool>,
 }
 
 impl LlmConfig {
@@ -96,6 +98,7 @@ impl LlmConfig {
             api_key: api_key.unwrap_or_default(),
             model: model.ok_or_else(|| anyhow!("LLM_MODEL is required"))?,
             provider: provider.ok_or_else(|| anyhow!("LLM_PROVIDER is required"))?,
+            enable_thinking: None,
         };
         config.validate()?;
         Ok(Some(config))
@@ -163,6 +166,7 @@ pub struct CloudLlmClient {
     model: String,
     provider: LlmProvider,
     provider_id: String,
+    enable_thinking: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -184,6 +188,7 @@ impl CloudLlmClient {
             config.model,
             provider,
             provider_id,
+            config.enable_thinking,
         ))
     }
 
@@ -193,6 +198,7 @@ impl CloudLlmClient {
         model: String,
         provider: LlmProvider,
         provider_id: String,
+        enable_thinking: Option<bool>,
     ) -> Self {
         Self {
             http: reqwest::Client::builder()
@@ -204,6 +210,7 @@ impl CloudLlmClient {
             model,
             provider,
             provider_id,
+            enable_thinking,
         }
     }
 
@@ -254,18 +261,48 @@ impl CloudLlmClient {
 
     async fn parse_records_multi(&self, text: String) -> Result<Vec<ParsedRecordPayload>> {
         let prompt = build_record_prompt();
+        let thinking_mode = self
+            .enable_thinking
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "provider_default".to_string());
         logger::info(
             "llm.request",
-            format!("provider={} model={} mode=multi", self.provider, self.model,),
+            format!(
+                "provider={} model={} mode=multi enable_thinking={thinking_mode}",
+                self.provider, self.model,
+            ),
         );
         let response = self.send_prompted_request(prompt, text.clone()).await?;
         let raw_response_text = response
             .text()
             .await
             .context("failed to read llm response body")?;
-        let raw_response: Value =
-            serde_json::from_str(&raw_response_text).context("failed to decode llm response")?;
+        let raw_response: Value = serde_json::from_str(&raw_response_text).map_err(|error| {
+            anyhow!(
+                "failed to decode llm response envelope: {}; {}; parser_error={error}",
+                summarize_text_output(&raw_response_text),
+                summarize_json_error_location(&raw_response_text, &error)
+            )
+        })?;
+        logger::info(
+            "llm.cloud.response",
+            format!(
+                "provider={} model={} {}",
+                self.provider_id,
+                self.model,
+                summarize_provider_response(&self.provider, &raw_response)
+            ),
+        );
         let content = extract_message_content(&self.provider, &raw_response)?;
+        logger::info(
+            "llm.cloud.output",
+            format!(
+                "provider={} model={} {}",
+                self.provider_id,
+                self.model,
+                summarize_text_output(&content)
+            ),
+        );
         let payloads = parse_record_payloads_strict(&content)?;
         logger::info(
             "llm.response.parsed_multi",
@@ -282,7 +319,7 @@ impl CloudLlmClient {
         let (path, body) = match self.provider {
             LlmProvider::OpenAi => (
                 "/chat/completions",
-                build_openai_request_body(&self.model, system_prompt, text),
+                build_openai_request_body(&self.model, system_prompt, text, self.enable_thinking),
             ),
             LlmProvider::Anthropic => (
                 "/messages",
@@ -382,27 +419,41 @@ fn parse_llm_model_item(value: &Value) -> Result<LlmModelItem> {
 }
 
 pub(crate) fn build_record_prompt() -> String {
+    build_record_prompt_at(Local::now().fixed_offset())
+}
+
+fn build_record_prompt_at(now: DateTime<FixedOffset>) -> String {
     RECORD_PROMPT_TEMPLATE
-        .replace("{today}", &Utc::now().format("%Y-%m-%d").to_string())
+        .replace("{today}", &now.format("%Y-%m-%d").to_string())
         .replace(
             "{current_time}",
-            &Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            &now.to_rfc3339_opts(SecondsFormat::Secs, false),
         )
         .replace("{expense_categories}", &EXPENSE_CATEGORIES.join("、"))
         .replace("{income_categories}", &INCOME_CATEGORIES.join("、"))
         .replace("{asset_categories_pipe}", &ASSET_CATEGORIES.join("|"))
 }
 
-fn build_openai_request_body(model: &str, system_prompt: String, text: String) -> Value {
-    json!({
+fn build_openai_request_body(
+    model: &str,
+    system_prompt: String,
+    text: String,
+    enable_thinking: Option<bool>,
+) -> Value {
+    let mut body = json!({
         "model": model,
         "stream": false,
         "max_tokens": 2048,
+        "temperature": 0,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": text}
         ]
-    })
+    });
+    if let Some(enable_thinking) = enable_thinking {
+        body["enable_thinking"] = Value::Bool(enable_thinking);
+    }
+    body
 }
 
 fn build_anthropic_request_body(model: &str, system_prompt: String, text: String) -> Value {
@@ -430,6 +481,12 @@ fn extract_message_content(provider: &LlmProvider, raw_response: &Value) -> Resu
 }
 
 fn extract_openai_message_content(raw_response: &Value) -> Result<String> {
+    let response_summary = summarize_openai_response(raw_response);
+    extract_openai_message_content_inner(raw_response)
+        .with_context(|| format!("OpenAI-compatible response contract failed: {response_summary}"))
+}
+
+fn extract_openai_message_content_inner(raw_response: &Value) -> Result<String> {
     let choices = raw_response
         .get("choices")
         .and_then(Value::as_array)
@@ -442,24 +499,34 @@ fn extract_openai_message_content(raw_response: &Value) -> Result<String> {
         .and_then(|message| message.get("content"))
         .ok_or_else(|| anyhow!("llm response missing message content"))?;
 
-    match content {
-        Value::String(text) => Ok(text.clone()),
+    let text = match content {
+        Value::String(text) => text.clone(),
         Value::Array(parts) => {
             let text = parts
                 .iter()
-                .filter_map(|part| part.get("text").and_then(Value::as_str))
+                .filter_map(|part| {
+                    if part.get("type").and_then(Value::as_str) == Some("text") {
+                        part.get("text").and_then(Value::as_str)
+                    } else {
+                        None
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
-            if text.is_empty() {
+            if text.trim().is_empty() {
                 Err(anyhow!(
                     "llm response content array did not contain text parts"
                 ))
             } else {
                 Ok(text)
-            }
+            }?
         }
-        _ => Err(anyhow!("unsupported llm response content shape")),
+        _ => return Err(anyhow!("unsupported llm response content shape")),
+    };
+    if text.trim().is_empty() {
+        return Err(anyhow!("llm response message content is empty"));
     }
+    Ok(text)
 }
 
 fn extract_anthropic_message_content(raw_response: &Value) -> Result<String> {
@@ -487,8 +554,24 @@ fn extract_anthropic_message_content(raw_response: &Value) -> Result<String> {
 }
 
 pub(crate) fn parse_record_payloads_strict(content: &str) -> Result<Vec<ParsedRecordPayload>> {
-    let payloads: Vec<ParsedRecordPayload> = serde_json::from_str(content.trim())
-        .context("LLM response must be a JSON array matching the record contract")?;
+    let trimmed = content.trim();
+    let output_summary = summarize_text_output(content);
+    let value: Value = serde_json::from_str(trimmed).map_err(|error| {
+        anyhow!(
+            "LLM response contains invalid JSON syntax: {}; {}; parser_error={error}",
+            output_summary,
+            summarize_json_error_location(trimmed, &error)
+        )
+    })?;
+    let payloads: Vec<ParsedRecordPayload> =
+        serde_path_to_error::deserialize(value).map_err(|error| {
+        anyhow!(
+            "LLM response JSON does not match the record contract: {}; error_path={}; parser_error={}",
+            output_summary,
+            error.path(),
+            error.inner()
+        )
+    })?;
     if payloads.is_empty() {
         return Err(anyhow!("LLM response contains no parsed records"));
     }
@@ -496,6 +579,138 @@ pub(crate) fn parse_record_payloads_strict(content: &str) -> Result<Vec<ParsedRe
         validate_record_payload_contract(payload)?;
     }
     Ok(payloads)
+}
+
+fn summarize_openai_response(raw_response: &Value) -> String {
+    let Some(choices) = raw_response.get("choices") else {
+        return format!(
+            "choices=missing top_level={}",
+            summarize_json_value(raw_response)
+        );
+    };
+    let Some(choices) = choices.as_array() else {
+        return format!("choices={}", summarize_json_value(choices));
+    };
+    let Some(first) = choices.first() else {
+        return "choices=array(count=0)".to_string();
+    };
+    let finish_reason = first
+        .get("finish_reason")
+        .map(summarize_finish_reason)
+        .unwrap_or_else(|| "missing".to_string());
+    let Some(message) = first.get("message") else {
+        return format!(
+            "choices=array(count={}) finish_reason={finish_reason} message=missing",
+            choices.len()
+        );
+    };
+    let message_keys = message
+        .as_object()
+        .map(|object| {
+            let mut keys = object.keys().map(String::as_str).collect::<Vec<_>>();
+            keys.sort_unstable();
+            keys.join(",")
+        })
+        .unwrap_or_else(|| "not_an_object".to_string());
+    let content = message
+        .get("content")
+        .map(summarize_json_value)
+        .unwrap_or_else(|| "missing".to_string());
+    let reasoning_content = message
+        .get("reasoning_content")
+        .map(summarize_json_value)
+        .unwrap_or_else(|| "missing".to_string());
+    let refusal = message
+        .get("refusal")
+        .map(summarize_json_value)
+        .unwrap_or_else(|| "missing".to_string());
+    format!(
+        "choices=array(count={}) finish_reason={finish_reason} message_keys=[{message_keys}] content={content} reasoning_content={reasoning_content} refusal={refusal}",
+        choices.len()
+    )
+}
+
+fn summarize_provider_response(provider: &LlmProvider, raw_response: &Value) -> String {
+    match provider {
+        LlmProvider::OpenAi => summarize_openai_response(raw_response),
+        LlmProvider::Anthropic => {
+            let content = raw_response
+                .get("content")
+                .map(summarize_json_value)
+                .unwrap_or_else(|| "missing".to_string());
+            let stop_reason = raw_response
+                .get("stop_reason")
+                .map(summarize_finish_reason)
+                .unwrap_or_else(|| "missing".to_string());
+            format!("content={content} stop_reason={stop_reason}")
+        }
+    }
+}
+
+fn summarize_finish_reason(value: &Value) -> String {
+    match value.as_str() {
+        Some(
+            "stop" | "length" | "content_filter" | "tool_calls" | "function_call" | "end_turn"
+            | "max_tokens" | "stop_sequence",
+        ) => value.as_str().expect("matched string").to_string(),
+        _ => summarize_json_value(value),
+    }
+}
+
+fn summarize_json_value(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_string(),
+        Value::Bool(_) => "boolean".to_string(),
+        Value::Number(_) => "number".to_string(),
+        Value::String(text) => format!(
+            "string(bytes={},trimmed_bytes={})",
+            text.len(),
+            text.trim().len()
+        ),
+        Value::Array(items) => format!("array(count={})", items.len()),
+        Value::Object(object) => format!("object(keys={})", object.len()),
+    }
+}
+
+fn summarize_text_output(text: &str) -> String {
+    let trimmed = text.trim();
+    let first = trimmed.chars().next().map(summarize_scalar);
+    let last = trimmed.chars().next_back().map(summarize_scalar);
+    format!(
+        "bytes={} trimmed_bytes={} lines={} first_non_whitespace={} last_non_whitespace={}",
+        text.len(),
+        trimmed.len(),
+        text.lines().count(),
+        first.as_deref().unwrap_or("none"),
+        last.as_deref().unwrap_or("none")
+    )
+}
+
+fn summarize_json_error_location(text: &str, error: &serde_json::Error) -> String {
+    let line = error.line();
+    let column = error.column();
+    let error_line = text.lines().nth(line.saturating_sub(1));
+    let line_bytes = error_line.map(str::len).unwrap_or(0);
+    let line_scalars = error_line.map(|value| value.chars().count()).unwrap_or(0);
+    let scalar_at = error_line
+        .and_then(|value| value.chars().nth(column.saturating_sub(1)))
+        .map(summarize_scalar)
+        .unwrap_or_else(|| "end_of_line".to_string());
+    let previous_scalar = error_line
+        .and_then(|value| {
+            column
+                .checked_sub(2)
+                .and_then(|index| value.chars().nth(index))
+        })
+        .map(summarize_scalar)
+        .unwrap_or_else(|| "none".to_string());
+    format!(
+        "error_line={line} error_column={column} error_line_bytes={line_bytes} error_line_scalars={line_scalars} scalar_at_error={scalar_at} previous_scalar={previous_scalar}"
+    )
+}
+
+fn summarize_scalar(value: char) -> String {
+    format!("U+{:04X}", value as u32)
 }
 
 fn validate_record_payload_contract(payload: &ParsedRecordPayload) -> Result<()> {
@@ -619,7 +834,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        LlmProvider, normalize_currency_code, parse_llm_model_items, parse_record_payloads_strict,
+        LlmConfig, LlmProvider, build_openai_request_body, build_record_prompt_at,
+        extract_openai_message_content, normalize_currency_code, parse_llm_model_items,
+        parse_record_payloads_strict,
     };
 
     #[test]
@@ -652,6 +869,43 @@ mod tests {
             LlmProvider::parse("volcengine_ark").unwrap(),
             LlmProvider::OpenAi
         ));
+    }
+
+    #[test]
+    fn legacy_llm_config_keeps_provider_default_thinking_mode() {
+        let config: LlmConfig = serde_json::from_value(json!({
+            "base_url": "http://127.0.0.1:8081/v1",
+            "api_key": "key",
+            "model": "qwen3.6-flash",
+            "provider": "openai_compatible"
+        }))
+        .unwrap();
+        assert_eq!(config.enable_thinking, None);
+    }
+
+    #[test]
+    fn openai_request_only_sends_thinking_mode_when_explicitly_configured() {
+        let provider_default =
+            build_openai_request_body("model", "system".to_string(), "user".to_string(), None);
+        assert!(provider_default.get("enable_thinking").is_none());
+        assert_eq!(provider_default["temperature"], json!(0));
+
+        let disabled = build_openai_request_body(
+            "model",
+            "system".to_string(),
+            "user".to_string(),
+            Some(false),
+        );
+        assert_eq!(disabled["enable_thinking"], json!(false));
+    }
+
+    #[test]
+    fn record_prompt_provides_an_rfc3339_time_with_explicit_device_offset() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-07-14T14:38:45+08:00").unwrap();
+        let prompt = build_record_prompt_at(now);
+        assert!(prompt.contains("2026-07-14T14:38:45+08:00"));
+        assert!(prompt.contains("transaction_at 必须是包含时区偏移的 RFC3339 时间"));
+        assert!(prompt.contains("不要臆造 Z 或 UTC"));
     }
 
     #[test]
@@ -695,6 +949,85 @@ mod tests {
     fn strict_parser_rejects_markdown_and_nested_string_json() {
         assert!(parse_record_payloads_strict("```json\n[]\n```").is_err());
         assert!(parse_record_payloads_strict(r#""[{\"direction\":null}]""#).is_err());
+    }
+
+    #[test]
+    fn strict_parser_reports_json_syntax_location_without_output_content() {
+        let error =
+            parse_record_payloads_strict("[\n  {\"direction\": \"expense\"\n]").unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("invalid JSON syntax"));
+        assert!(message.contains("error_line="));
+        assert!(message.contains("error_column="));
+        assert!(message.contains("scalar_at_error="));
+        assert!(!message.contains("expense"));
+    }
+
+    #[test]
+    fn strict_parser_distinguishes_valid_json_from_record_contract_failure() {
+        let error = parse_record_payloads_strict(r#"[{"unexpected":true}]"#).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("JSON does not match the record contract"));
+        assert!(message.contains("error_path=[0].unexpected"));
+        assert!(message.contains("unknown field `unexpected`"));
+        assert!(!message.contains(r#"{"unexpected":true}"#));
+    }
+
+    #[test]
+    fn strict_parser_accepts_allowlisted_local_transaction_timestamp() {
+        let payloads = parse_record_payloads_strict(
+            r#"[{"direction":"expense","amount":35,"currency":"CNY","category":"餐饮","merchant":null,"transaction_at":"2026-07-14","note":null,"subscription_cycle":null,"asset_info":null}]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            payloads[0].transaction_at.unwrap().to_rfc3339(),
+            "2026-07-13T16:00:00+00:00"
+        );
+    }
+
+    #[test]
+    fn strict_parser_reports_path_for_transaction_timestamp_outside_allowlist() {
+        let error = parse_record_payloads_strict(
+            r#"[{"direction":"expense","amount":35,"currency":"CNY","category":"餐饮","merchant":null,"transaction_at":"2026/07/14 14:38:45","note":null,"subscription_cycle":null,"asset_info":null}]"#,
+        )
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("error_path=[0].transaction_at"));
+        assert!(message.contains("transaction_at must be"));
+        assert!(!message.contains("2026/07/14"));
+    }
+
+    #[test]
+    fn openai_extractor_reports_empty_content_and_finish_reason() {
+        let response = json!({
+            "choices": [{
+                "finish_reason": "length",
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "internal reasoning"
+                }
+            }]
+        });
+        let error = extract_openai_message_content(&response).unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("message content is empty"));
+        assert!(message.contains("finish_reason=length"));
+        assert!(message.contains("content=string(bytes=0,trimmed_bytes=0)"));
+        assert!(message.contains("reasoning_content=string(bytes=18,trimmed_bytes=18)"));
+        assert!(!message.contains("internal reasoning"));
+    }
+
+    #[test]
+    fn openai_extractor_accepts_non_empty_text_content() {
+        let response = json!({
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {"role": "assistant", "content": "[{\"ok\":true}]"}
+            }]
+        });
+        let content = extract_openai_message_content(&response).unwrap();
+        assert_eq!(content, "[{\"ok\":true}]");
     }
 
     #[test]

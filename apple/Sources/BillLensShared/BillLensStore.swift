@@ -528,15 +528,23 @@ public final class BillLensStore: ObservableObject {
     }
 
     public func updateLlmConfig(_ cfg: LlmConfigItem) async throws {
-        let _: [String: String] = try await bridge.sendAsync([
+        var payload: [String: Any] = [
             "action": "update_llm_config",
             "base_url": cfg.baseUrl,
             "api_key": cfg.apiKey,
             "model": cfg.model,
             "provider": cfg.provider
-        ])
+        ]
+        if let enableThinking = cfg.enableThinking {
+            payload["enable_thinking"] = enableThinking
+        }
+        let _: [String: String] = try await bridge.sendAsync(payload)
         llmConfig = cfg
-        AppLogger.log("llm_config.update", "model=\(cfg.model) provider=\(cfg.provider)")
+        let thinkingMode = cfg.enableThinking.map(String.init) ?? "provider_default"
+        AppLogger.log(
+            "llm_config.update",
+            "model=\(cfg.model) provider=\(cfg.provider) enable_thinking=\(thinkingMode)"
+        )
         CloudKitSyncService.shared.schedulePush()
     }
 

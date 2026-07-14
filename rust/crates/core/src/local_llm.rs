@@ -258,7 +258,7 @@ cycle-field ::= "\"subscription_cycle\"" ws ":" ws ("\"monthly\"" | "\"yearly\""
 asset-field ::= "\"asset_info\"" ws ":" ws (asset | "null")
 asset ::= "{" ws "\"name\"" ws ":" ws string "," ws "\"category\"" ws ":" ws (string | "null") "," ws "\"amount\"" ws ":" ws number "," ws "\"currency\"" ws ":" ws (string | "null") "," ws "\"recorded_on\"" ws ":" ws (string | "null") "," ws "\"note\"" ws ":" ws (string | "null") ws "}"
 string ::= "\"" char* "\""
-char ::= [^"\\] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F]{4})
+char ::= [^"\\\x7F\x00-\x1F] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F]{4})
 number ::= "-"? ("0" | [1-9] [0-9]*) ("." [0-9]+)? ([eE] [+-]? [0-9]+)?
 ws ::= [ \t\n\r]*
 "#;
@@ -290,6 +290,12 @@ mod tests {
             max_output_tokens: 2048,
             deadline_ms: 45_000,
         }
+    }
+
+    #[test]
+    fn record_grammar_excludes_raw_json_control_characters() {
+        assert!(RECORD_JSON_GRAMMAR.contains(r#"[^"\\\x7F\x00-\x1F]"#));
+        assert!(!RECORD_JSON_GRAMMAR.contains(r#"char ::= [^"\\] |"#));
     }
 
     unsafe extern "C" fn test_run(_request: *const c_char) -> *mut c_char {

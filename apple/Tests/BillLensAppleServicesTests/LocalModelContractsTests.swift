@@ -72,9 +72,77 @@ final class LocalModelContractsTests: XCTestCase {
         XCTAssertFalse(LocalModelDownloadPhase.installed.isActive)
         XCTAssertFalse(LocalModelDownloadPhase.failed.isActive)
     }
+
+    func testDownloadSessionConfigurationMatchesPlatformContract() {
+        let configuration = LocalModelManager.makeDownloadSessionConfiguration()
+        XCTAssertTrue(configuration.waitsForConnectivity)
+        #if os(iOS)
+        XCTAssertEqual(
+            configuration.identifier,
+            LocalModelManager.backgroundSessionIdentifier
+        )
+        XCTAssertFalse(configuration.allowsExpensiveNetworkAccess)
+        XCTAssertFalse(configuration.allowsConstrainedNetworkAccess)
+        #else
+        XCTAssertNil(configuration.identifier)
+        XCTAssertTrue(configuration.allowsExpensiveNetworkAccess)
+        XCTAssertTrue(configuration.allowsConstrainedNetworkAccess)
+        #endif
+    }
+
+    func testNetworkErrorsExposeDomainCodeAndUnderlyingCause() {
+        let underlying = NSError(
+            domain: NSPOSIXErrorDomain,
+            code: Int(ECONNRESET),
+            userInfo: [NSLocalizedDescriptionKey: "connection reset"]
+        )
+        let error = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorUnknown,
+            userInfo: [
+                NSLocalizedDescriptionKey: "unknown error",
+                NSUnderlyingErrorKey: underlying,
+            ]
+        )
+
+        let description = LocalModelManager.diagnosticDescription(error)
+        XCTAssertTrue(description.contains("domain=NSURLErrorDomain"))
+        XCTAssertTrue(description.contains("code=-1"))
+        XCTAssertTrue(description.contains("domain=NSPOSIXErrorDomain"))
+        XCTAssertTrue(description.contains("code=\(ECONNRESET)"))
+    }
 }
 
 final class LocalLlmFFIExportsTests: XCTestCase {
+    func testOutputSummaryRejectsWhitespaceAndExposesOnlyStructuralMetadata() throws {
+        let valid = LocalLlmOutputSummary(
+            content: " \n[]\t",
+            generatedTokenCount: 2,
+            stopReason: .eog
+        )
+        XCTAssertEqual(valid.byteCount, 5)
+        XCTAssertEqual(valid.trimmedByteCount, 2)
+        XCTAssertEqual(valid.firstNonWhitespaceScalar, "U+005B")
+        XCTAssertEqual(valid.lastNonWhitespaceScalar, "U+005D")
+        XCTAssertNoThrow(try valid.validate())
+        XCTAssertEqual(
+            valid.logFields,
+            "tokens=2 bytes=5 trimmed_bytes=2 first_non_whitespace=U+005B last_non_whitespace=U+005D stop=eog"
+        )
+
+        let whitespace = LocalLlmOutputSummary(
+            content: " \n\t",
+            generatedTokenCount: 3,
+            stopReason: .eog
+        )
+        XCTAssertEqual(whitespace.firstNonWhitespaceScalar, "none")
+        XCTAssertEqual(whitespace.lastNonWhitespaceScalar, "none")
+        XCTAssertThrowsError(try whitespace.validate()) { error in
+            XCTAssertTrue(error.localizedDescription.contains("未生成非空白内容"))
+            XCTAssertFalse(error.localizedDescription.contains(" \n\t"))
+        }
+    }
+
     func testNullAndInvalidUTF8RequestsReturnExplicitErrors() throws {
         let nullResponse = try responseJSON(from: billlens_swift_local_llm_run(nil))
         XCTAssertEqual(nullResponse["status"] as? String, "error")

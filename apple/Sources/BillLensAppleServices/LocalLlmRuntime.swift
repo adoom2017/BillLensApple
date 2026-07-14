@@ -75,6 +75,55 @@ private struct LocalLlmRuntimeFailure: LocalizedError {
     var errorDescription: String? { message }
 }
 
+enum LocalLlmStopReason: String {
+    case eog
+    case maxTokens = "max_tokens"
+}
+
+struct LocalLlmOutputSummary: Equatable {
+    let generatedTokenCount: Int
+    let byteCount: Int
+    let trimmedByteCount: Int
+    let firstNonWhitespaceScalar: String
+    let lastNonWhitespaceScalar: String
+    let stopReason: LocalLlmStopReason
+
+    init(content: String, generatedTokenCount: Int, stopReason: LocalLlmStopReason) {
+        let nonWhitespaceScalars = content.unicodeScalars.filter {
+            !CharacterSet.whitespacesAndNewlines.contains($0)
+        }
+        self.generatedTokenCount = generatedTokenCount
+        byteCount = content.utf8.count
+        trimmedByteCount = content
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .utf8
+            .count
+        firstNonWhitespaceScalar = Self.scalarLabel(nonWhitespaceScalars.first)
+        lastNonWhitespaceScalar = Self.scalarLabel(nonWhitespaceScalars.last)
+        self.stopReason = stopReason
+    }
+
+    var logFields: String {
+        "tokens=\(generatedTokenCount) bytes=\(byteCount) trimmed_bytes=\(trimmedByteCount) "
+            + "first_non_whitespace=\(firstNonWhitespaceScalar) "
+            + "last_non_whitespace=\(lastNonWhitespaceScalar) stop=\(stopReason.rawValue)"
+    }
+
+    func validate() throws {
+        guard trimmedByteCount > 0 else {
+            throw LocalLlmRuntimeFailure(
+                code: "invalid_runtime_response",
+                message: "本地模型未生成非空白内容：\(logFields)"
+            )
+        }
+    }
+
+    private static func scalarLabel(_ scalar: Unicode.Scalar?) -> String {
+        guard let scalar else { return "none" }
+        return String(format: "U+%04X", scalar.value)
+    }
+}
+
 public final class LocalLlmRuntime: @unchecked Sendable {
     public static let shared = LocalLlmRuntime()
 
@@ -407,6 +456,7 @@ private final class LlamaSession {
 
         let start = DispatchTime.now().uptimeNanoseconds
         var position = Int32(promptTokens.count)
+        var generatedTokenCount = 0
         var utf8Buffer: [CChar] = []
         var output = ""
         for _ in 0..<maxOutputTokens {
@@ -429,14 +479,19 @@ private final class LlamaSession {
                     }
                     output += tail
                 }
-                guard !output.isEmpty else {
-                    throw LocalLlmRuntimeFailure(
-                        code: "invalid_runtime_response",
-                        message: "本地模型没有生成内容。"
-                    )
-                }
+                let summary = LocalLlmOutputSummary(
+                    content: output,
+                    generatedTokenCount: generatedTokenCount,
+                    stopReason: .eog
+                )
+                try summary.validate()
+                AppLogger.log(
+                    "local_llm.output",
+                    "model_id=\(modelId) \(summary.logFields)"
+                )
                 return output
             }
+            generatedTokenCount += 1
             utf8Buffer.append(contentsOf: try tokenPiece(token))
             if let text = strictUTF8(utf8Buffer) {
                 output += text
@@ -450,9 +505,18 @@ private final class LlamaSession {
             }
             position += 1
         }
+        let summary = LocalLlmOutputSummary(
+            content: output,
+            generatedTokenCount: generatedTokenCount,
+            stopReason: .maxTokens
+        )
+        AppLogger.log(
+            "local_llm.output",
+            "model_id=\(modelId) \(summary.logFields)"
+        )
         throw LocalLlmRuntimeFailure(
             code: "invalid_runtime_response",
-            message: "本地模型达到最大输出 token，未正常结束 JSON。"
+            message: "本地模型达到最大输出 token，未正常结束 JSON：\(summary.logFields)"
         )
     }
 

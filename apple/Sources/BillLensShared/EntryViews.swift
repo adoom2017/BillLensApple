@@ -422,17 +422,16 @@ struct ReviewPanel: View {
                 }
 
                 ReviewField(title: "时间") {
-                    if store.draftForm.transactionAt != nil {
+                    if let draftID = store.currentDraft?.id,
+                       let transactionAt = store.draftForm.transactionAt {
                         DatePicker(
                             "",
-                            selection: Binding(
-                                get: {
-                                    guard let value = store.draftForm.transactionAt else {
-                                        preconditionFailure("transactionAt changed while DatePicker is visible")
-                                    }
-                                    return value
-                                },
-                                set: { store.draftForm.transactionAt = $0 }
+                            selection: draftDateBinding(
+                                draftID: draftID,
+                                visibleValue: transactionAt,
+                                fieldName: "transactionAt",
+                                currentValue: { store.draftForm.transactionAt },
+                                setValue: { store.draftForm.transactionAt = $0 }
                             )
                         )
                         .labelsHidden()
@@ -473,6 +472,33 @@ struct ReviewPanel: View {
         }
     }
 
+    private func draftDateBinding(
+        draftID: String,
+        visibleValue: Date,
+        fieldName: String,
+        currentValue: @escaping () -> Date?,
+        setValue: @escaping (Date) -> Void
+    ) -> Binding<Date> {
+        Binding(
+            get: {
+                // SwiftUI can read a disappearing DatePicker after confirmation advances
+                // or removes its draft. The binding remains valid for that old view only.
+                guard store.currentDraft?.id == draftID else { return visibleValue }
+                guard let value = currentValue() else {
+                    preconditionFailure("\(fieldName) became nil for the active draft")
+                }
+                return value
+            },
+            set: { value in
+                guard store.currentDraft?.id == draftID else { return }
+                guard currentValue() != nil else {
+                    preconditionFailure("\(fieldName) became nil for the active draft")
+                }
+                setValue(value)
+            }
+        )
+    }
+
     private var assetReviewFields: some View {
         VStack(spacing: 12) {
             ReviewFieldGroup(
@@ -500,17 +526,16 @@ struct ReviewPanel: View {
                     .pickerStyle(.menu)
                 }
                 ReviewField(title: "记录日期") {
-                    if store.assetDraftForm.recordedOn != nil {
+                    if let draftID = store.currentDraft?.id,
+                       let recordedOn = store.assetDraftForm.recordedOn {
                         DatePicker(
                             "",
-                            selection: Binding(
-                                get: {
-                                    guard let value = store.assetDraftForm.recordedOn else {
-                                        preconditionFailure("recordedOn changed while DatePicker is visible")
-                                    }
-                                    return value
-                                },
-                                set: { store.assetDraftForm.recordedOn = $0 }
+                            selection: draftDateBinding(
+                                draftID: draftID,
+                                visibleValue: recordedOn,
+                                fieldName: "recordedOn",
+                                currentValue: { store.assetDraftForm.recordedOn },
+                                setValue: { store.assetDraftForm.recordedOn = $0 }
                             ),
                             displayedComponents: .date
                         )
