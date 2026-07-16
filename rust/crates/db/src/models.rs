@@ -576,6 +576,13 @@ pub struct SubscriptionCreate {
     pub next_due_at: NaiveDate,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubscriptionChargeAdvance {
+    pub subscription_id: Uuid,
+    pub last_charged_at: NaiveDate,
+    pub next_due_at: NaiveDate,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SubscriptionUpdate {
     pub direction: Option<RecordDirection>,

@@ -956,9 +956,7 @@ impl BillRepository {
         profile_id: &str,
         device_id: &str,
         input: RecordCreate,
-        subscription_id: Uuid,
-        last_charged_at: NaiveDate,
-        next_due_at: NaiveDate,
+        advance: SubscriptionChargeAdvance,
     ) -> Result<Record> {
         let mut tx = self
             .pool
@@ -997,9 +995,9 @@ impl BillRepository {
             WHERE id = ?1
             "#,
         )
-        .bind(subscription_id.to_string())
-        .bind(last_charged_at.to_string())
-        .bind(next_due_at.to_string())
+        .bind(advance.subscription_id.to_string())
+        .bind(advance.last_charged_at.to_string())
+        .bind(advance.next_due_at.to_string())
         .bind(device_id)
         .execute(&mut *tx)
         .await
@@ -1245,7 +1243,7 @@ impl BillRepository {
             });
         }
 
-        results.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        results.sort_by_key(|item| std::cmp::Reverse(item.updated_at));
         Ok(results)
     }
 

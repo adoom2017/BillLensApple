@@ -16,6 +16,52 @@ swift_build_env() {
     "$@"
 }
 
+assemble_macos_app() {
+    local bin_dir="$1"
+    local app_bundle="$2"
+    local version="$3"
+    local executable_name="BillLensMacApp"
+    local resource_bundle_name="BillLensApple_BillLensAppleServices.bundle"
+
+    rm -rf "$app_bundle"
+    mkdir -p \
+        "$app_bundle/Contents/MacOS" \
+        "$app_bundle/Contents/Frameworks" \
+        "$app_bundle/Contents/Resources"
+    cp "$bin_dir/$executable_name" "$app_bundle/Contents/MacOS/$executable_name"
+    cp "$REPO_ROOT/apple/Sources/BillLensMacApp/AppIcon.icns" \
+        "$app_bundle/Contents/Resources/AppIcon.icns"
+    cp -R "$bin_dir/llama.framework" "$app_bundle/Contents/Frameworks/llama.framework"
+    cp -R "$bin_dir/$resource_bundle_name" \
+        "$app_bundle/Contents/Resources/$resource_bundle_name"
+    install_name_tool -add_rpath "@executable_path/../Frameworks" \
+        "$app_bundle/Contents/MacOS/$executable_name"
+
+    cat > "$app_bundle/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key><string>com.shendongchun.BillLensApple</string>
+    <key>CFBundleName</key><string>BillLens</string>
+    <key>CFBundleDisplayName</key><string>BillLens</string>
+    <key>CFBundleExecutable</key><string>$executable_name</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>CFBundleIconName</key><string>AppIcon</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleShortVersionString</key><string>$version</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleSignature</key><string>????</string>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSMicrophoneUsageDescription</key><string>BillLens 需要麦克风权限以支持语音输入账单。</string>
+    <key>NSSpeechRecognitionUsageDescription</key><string>BillLens 需要语音识别权限以将语音转换为文字。</string>
+    <key>NSPrincipalClass</key><string>NSApplication</string>
+</dict>
+</plist>
+PLIST
+}
+
 build_rust_macos() {
     echo "==> Rust macOS ($BUILD_MODE)"
     cd "$REPO_ROOT/rust"
@@ -43,9 +89,17 @@ cmd_dev() {
     echo "==> Swift macOS (debug)"
     cd "$REPO_ROOT/apple"
     swift_build_env swift build --product BillLensMacApp
-    echo "==> Launching BillLensMacApp"
     BIN_DIR="$(swift_build_env swift build --show-bin-path -c debug)"
-    "$BIN_DIR/BillLensMacApp"
+    APP_BUNDLE="$REPO_ROOT/apple/build/dev/BillLens.app"
+
+    echo "==> Assembling debug .app"
+    assemble_macos_app "$BIN_DIR" "$APP_BUNDLE" "1.0.0"
+
+    echo "==> Code signing debug .app (ad-hoc, without restricted entitlements)"
+    codesign --sign - --deep --force "$APP_BUNDLE"
+
+    echo "==> Launching $APP_BUNDLE"
+    "$APP_BUNDLE/Contents/MacOS/BillLensMacApp"
 }
 
 cmd_mac() {
@@ -59,38 +113,13 @@ cmd_mac() {
     BIN_DIR="$(RUST_BUILD_MODE=release swift_build_env swift build --show-bin-path -c release)"
 
     APP_NAME="BillLens"
-    BUNDLE_ID="com.shendongchun.BillLensApple"
     VERSION="1.0.0"
     DIST_DIR="$REPO_ROOT/dist"
     APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
     DMG_PATH="$DIST_DIR/$APP_NAME.dmg"
 
     echo "==> Assembling .app"
-    rm -rf "$APP_BUNDLE"
-    mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
-    cp "$BIN_DIR/BillLensMacApp" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
-
-    cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
-    <key>CFBundleName</key><string>$APP_NAME</string>
-    <key>CFBundleDisplayName</key><string>$APP_NAME</string>
-    <key>CFBundleExecutable</key><string>$APP_NAME</string>
-    <key>CFBundleVersion</key><string>$VERSION</string>
-    <key>CFBundleShortVersionString</key><string>$VERSION</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleSignature</key><string>????</string>
-    <key>LSMinimumSystemVersion</key><string>14.0</string>
-    <key>NSHighResolutionCapable</key><true/>
-    <key>NSMicrophoneUsageDescription</key><string>BillLens 需要麦克风权限以支持语音输入账单。</string>
-    <key>NSSpeechRecognitionUsageDescription</key><string>BillLens 需要语音识别权限以将语音转换为文字。</string>
-    <key>NSPrincipalClass</key><string>NSApplication</string>
-</dict>
-</plist>
-PLIST
+    assemble_macos_app "$BIN_DIR" "$APP_BUNDLE" "$VERSION"
 
     echo "==> Code signing (ad-hoc with CloudKit entitlements)"
     ENTITLEMENTS="$REPO_ROOT/apple/Sources/BillLensMacApp/BillLensMacApp.entitlements"
@@ -109,12 +138,12 @@ PLIST
 
 cmd_ios_sim() {
     build_rust_ios_sim
-    echo "Done. Open apple/Package.swift in Xcode, select BillLensIOSApp → iOS Simulator and Run."
+    echo "Done. Open apple/BillLensApple.xcodeproj in Xcode, select BillLensIOSApp → iOS Simulator and Run."
 }
 
 cmd_ios() {
     build_rust_ios
-    echo "Done. Open apple/Package.swift in Xcode, select BillLensIOSApp → your device and Run."
+    echo "Done. Open apple/BillLensApple.xcodeproj in Xcode, select BillLensIOSApp → your device and Run."
 }
 
 cmd_all() {

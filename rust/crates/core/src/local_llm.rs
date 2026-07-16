@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, anyhow};
+use billlens_apple_db::{ALL_RECORD_CATEGORIES, ASSET_CATEGORIES};
 use serde::{Deserialize, Serialize};
 use std::ffi::{CStr, CString, c_char};
 use std::sync::OnceLock;
@@ -244,24 +245,51 @@ pub fn unload() -> Result<()> {
     Ok(())
 }
 
-pub const RECORD_JSON_GRAMMAR: &str = r#"
+const RECORD_JSON_GRAMMAR_TEMPLATE: &str = r#"
 root ::= ws "[" ws (record (ws "," ws record)*)? ws "]" ws
 record ::= "{" ws direction-field "," ws amount-field "," ws currency-field "," ws category-field "," ws merchant-field "," ws transaction-field "," ws note-field "," ws cycle-field "," ws asset-field ws "}"
 direction-field ::= "\"direction\"" ws ":" ws ("\"income\"" | "\"expense\"" | "null")
 amount-field ::= "\"amount\"" ws ":" ws (number | "null")
 currency-field ::= "\"currency\"" ws ":" ws (string | "null")
-category-field ::= "\"category\"" ws ":" ws (string | "null")
+category-field ::= "\"category\"" ws ":" ws record-category
+record-category ::= {record_categories} | "null"
 merchant-field ::= "\"merchant\"" ws ":" ws (string | "null")
 transaction-field ::= "\"transaction_at\"" ws ":" ws (string | "null")
 note-field ::= "\"note\"" ws ":" ws (string | "null")
 cycle-field ::= "\"subscription_cycle\"" ws ":" ws ("\"monthly\"" | "\"yearly\"" | "null")
 asset-field ::= "\"asset_info\"" ws ":" ws (asset | "null")
-asset ::= "{" ws "\"name\"" ws ":" ws string "," ws "\"category\"" ws ":" ws (string | "null") "," ws "\"amount\"" ws ":" ws number "," ws "\"currency\"" ws ":" ws (string | "null") "," ws "\"recorded_on\"" ws ":" ws (string | "null") "," ws "\"note\"" ws ":" ws (string | "null") ws "}"
+asset ::= "{" ws "\"name\"" ws ":" ws string "," ws "\"category\"" ws ":" ws asset-category "," ws "\"amount\"" ws ":" ws number "," ws "\"currency\"" ws ":" ws (string | "null") "," ws "\"recorded_on\"" ws ":" ws (string | "null") "," ws "\"note\"" ws ":" ws (string | "null") ws "}"
+asset-category ::= {asset_categories}
 string ::= "\"" char* "\""
 char ::= [^"\\\x7F\x00-\x1F] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F]{4})
 number ::= "-"? ("0" | [1-9] [0-9]*) ("." [0-9]+)? ([eE] [+-]? [0-9]+)?
 ws ::= [ \t\n\r]*
 "#;
+
+pub fn record_json_grammar() -> String {
+    RECORD_JSON_GRAMMAR_TEMPLATE
+        .replace(
+            "{record_categories}",
+            &gbnf_json_string_alternatives(ALL_RECORD_CATEGORIES),
+        )
+        .replace(
+            "{asset_categories}",
+            &gbnf_json_string_alternatives(ASSET_CATEGORIES),
+        )
+}
+
+fn gbnf_json_string_alternatives(values: &[&str]) -> String {
+    values
+        .iter()
+        .map(|value| {
+            let json_string = serde_json::to_string(value)
+                .expect("fixed category must serialize as a JSON string");
+            serde_json::to_string(&json_string)
+                .expect("serialized fixed category must serialize as a GBNF literal")
+        })
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
 
 #[cfg(test)]
 mod tests {
@@ -294,8 +322,34 @@ mod tests {
 
     #[test]
     fn record_grammar_excludes_raw_json_control_characters() {
-        assert!(RECORD_JSON_GRAMMAR.contains(r#"[^"\\\x7F\x00-\x1F]"#));
-        assert!(!RECORD_JSON_GRAMMAR.contains(r#"char ::= [^"\\] |"#));
+        let grammar = record_json_grammar();
+        assert!(grammar.contains(r#"[^"\\\x7F\x00-\x1F]"#));
+        assert!(!grammar.contains(r#"char ::= [^"\\] |"#));
+    }
+
+    #[test]
+    fn record_grammar_constrains_categories_to_database_contract() {
+        let grammar = record_json_grammar();
+
+        for category in ALL_RECORD_CATEGORIES {
+            let literal = gbnf_json_string_alternatives(&[category]);
+            assert!(
+                grammar.contains(&literal),
+                "missing record category {category}"
+            );
+        }
+        for category in ASSET_CATEGORIES {
+            let literal = gbnf_json_string_alternatives(&[category]);
+            assert!(
+                grammar.contains(&literal),
+                "missing asset category {category}"
+            );
+        }
+        assert!(!grammar.contains(
+            r#"category-field ::= \"\\\"category\\\"\" ws \":\" ws (string | \"null\")"#
+        ));
+        assert!(!grammar.contains("服饰"));
+        assert!(!grammar.contains("运动户外"));
     }
 
     unsafe extern "C" fn test_run(_request: *const c_char) -> *mut c_char {

@@ -28,6 +28,10 @@ public final class CloudKitSyncService: @unchecked Sendable {
         self.profileID = profileID
     }
 
+    public var isEnabledForCurrentProcess: Bool {
+        cloudKitIsEnabledForProcess()
+    }
+
     public func pullThenPush(bridge: RustBridge, profileID: String) {
         configure(bridge: bridge, profileID: profileID)
         Task.detached(priority: .background) { [weak self] in
@@ -294,9 +298,9 @@ public final class CloudKitSyncService: @unchecked Sendable {
             return container.privateCloudDatabase
         }
 
-        guard processHasCloudKitEntitlement() else {
+        guard cloudKitIsEnabledForProcess() else {
             logUnavailableOnce(
-                "CloudKit disabled: missing entitlement for \(containerIdentifier). Use the signed Xcode/package build with BillLensMacApp.entitlements or BillLensIOSApp.entitlements."
+                "CloudKit disabled: this build is not configured and signed for \(containerIdentifier)."
             )
             return nil
         }
@@ -306,20 +310,39 @@ public final class CloudKitSyncService: @unchecked Sendable {
         return container.privateCloudDatabase
     }
 
-    private func processHasCloudKitEntitlement() -> Bool {
+    private func cloudKitIsEnabledForProcess() -> Bool {
         #if os(macOS)
         guard let task = SecTaskCreateFromSelf(kCFAllocatorDefault) else { return false }
-        let entitlement = SecTaskCopyValueForEntitlement(
+        let containerEntitlement = SecTaskCopyValueForEntitlement(
             task,
             "com.apple.developer.icloud-container-identifiers" as CFString,
             nil as UnsafeMutablePointer<Unmanaged<CFError>?>?
         )
-        guard let containers = entitlement as? [String] else { return false }
+        let serviceEntitlement = SecTaskCopyValueForEntitlement(
+            task,
+            "com.apple.developer.icloud-services" as CFString,
+            nil as UnsafeMutablePointer<Unmanaged<CFError>?>?
+        )
+        guard let containers = containerEntitlement as? [String],
+              let services = serviceEntitlement as? [String] else {
+            return false
+        }
         return containers.contains(containerIdentifier)
+            && (services.contains("CloudKit") || services.contains("CloudKit-Anonymous"))
         #else
-        // SecTask entitlement inspection is macOS-only. iOS builds get their CloudKit
-        // capability from the generated Xcode project entitlements.
-        return true
+        guard let configured = Bundle.main.object(
+            forInfoDictionaryKey: "BillLensCloudKitEnabled"
+        ) as? String else {
+            preconditionFailure("BillLensCloudKitEnabled is missing from the iOS Info.plist")
+        }
+        switch configured {
+        case "YES":
+            return true
+        case "NO":
+            return false
+        default:
+            preconditionFailure("BillLensCloudKitEnabled must be YES or NO, got \(configured)")
+        }
         #endif
     }
 

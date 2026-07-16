@@ -102,10 +102,10 @@ pub fn cancel(profile_id: &str) -> Result<()> {
     let mut guard = session_slot()
         .lock()
         .map_err(|_| anyhow!("stt session mutex poisoned"))?;
-    if let Some(session) = guard.as_ref() {
-        if session.profile_id != profile_id {
-            bail!("stt session profile mismatch");
-        }
+    if let Some(session) = guard.as_ref()
+        && session.profile_id != profile_id
+    {
+        bail!("stt session profile mismatch");
     }
     *guard = None;
     unsafe { (backend.cancel)() };

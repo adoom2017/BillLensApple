@@ -33,7 +33,9 @@ export LLM_PROVIDER=llamacpp
 
 1. 编译 Rust FFI
 2. 编译 macOS App
-3. 直接启动 `BillLensMacApp`
+3. 组装并临时签名 `apple/build/dev/BillLens.app`，从 App Bundle 内启动
+
+开发启动也必须经过 `.app` Bundle。直接运行 `.build/.../BillLensMacApp` 会被 macOS 视为普通 Unix 可执行文件，Dock 将显示默认 `exec` 图标，而且 Bundle 图标、资源和身份信息不完整。
 
 ## `build.sh` 子命令
 
@@ -139,6 +141,15 @@ ld: warning: object file ... was built for newer 'macOS' version ...
 - 是否用了带 entitlements 的 Xcode / 打包产物
 - 当前设备是否登录了可用 iCloud
 - 容器是否还是 `iCloud.com.shendongchun.BillLensApple`
+
+Personal Team 不支持 CloudKit 和远程推送。iOS Debug 配置会明确设置
+`BILLLENS_CLOUDKIT_ENABLED=NO` 并清空签名 entitlements，因此仍可测试本地模型、
+SQLite、OCR 和后台模型下载，但不会创建 `CKContainer` 或注册远程通知。
+具备完整开发者权限的 Release 配置必须同时满足：
+
+- `BILLLENS_CLOUDKIT_ENABLED=YES`
+- 签名 entitlements 包含目标 iCloud container 与 `CloudKit` service
+- Provisioning Profile 支持 CloudKit 与 Push Notifications
 
 ### 3. iOS 工程打不开或 entitlements 不生效
 

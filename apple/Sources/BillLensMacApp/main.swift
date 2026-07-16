@@ -27,7 +27,9 @@ final class BillLensAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate()
         RustBridge.registerSttBackend()
         RustBridge.registerLocalLlmBackend()
-        NSApp.registerForRemoteNotifications()
+        if CloudKitSyncService.shared.isEnabledForCurrentProcess {
+            NSApp.registerForRemoteNotifications()
+        }
         Task { @MainActor in
             await SpeechCaptureService.shared.bootstrapPermissions()
         }

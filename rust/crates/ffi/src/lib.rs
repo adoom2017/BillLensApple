@@ -206,9 +206,7 @@ fn encode_envelope<T: Serialize>(payload: Envelope<T>) -> *mut c_char {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn billlens_handle_request(request_json: *const c_char) -> *mut c_char {
-    let response =
-        handle_request_inner(request_json).unwrap_or_else(|error| encode_error(error.to_string()));
-    response
+    handle_request_inner(request_json).unwrap_or_else(|error| encode_error(error.to_string()))
 }
 
 /// SAFETY: All FFI entry points use `runtime().block_on()` to bridge async→sync.
@@ -216,6 +214,7 @@ pub extern "C" fn billlens_handle_request(request_json: *const c_char) -> *mut c
 /// 1. The Tokio runtime is created with `rt-multi-thread` (see workspace Cargo.toml).
 /// 2. Swift calls FFI via `Task.detached` on `.userInitiated`, never from inside
 ///    another `block_on` call.
+///
 /// Do NOT call `block_on` from within an already-running Tokio task — that will deadlock.
 fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
     if request_json.is_null() {

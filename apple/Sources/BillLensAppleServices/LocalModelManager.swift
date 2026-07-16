@@ -466,7 +466,16 @@ public final class LocalModelManager: NSObject, ObservableObject, @unchecked Sen
     }
 
     nonisolated static func bundledCatalog() throws -> [LocalModelDescriptor] {
-        guard let url = Bundle.module.url(forResource: "local-models", withExtension: "json") else {
+        let packagedURL = Bundle.main.resourceURL?
+            .appendingPathComponent(
+                "BillLensApple_BillLensAppleServices.bundle",
+                isDirectory: true
+            )
+            .appendingPathComponent("local-models.json")
+        let url = packagedURL.flatMap { url in
+            FileManager.default.fileExists(atPath: url.path) ? url : nil
+        } ?? Bundle.module.url(forResource: "local-models", withExtension: "json")
+        guard let url else {
             throw LocalModelManagerError.invalidManifest("本地模型清单未随 App 发布。")
         }
         let data = try Data(contentsOf: url)

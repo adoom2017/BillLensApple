@@ -12,8 +12,9 @@ pub use billlens_apple_db::{
     INCOME_CATEGORIES, ParsedAssetInfo, ParsedDraftConfirmationAction, ParsedDraftKind,
     ParsedRecordPayload, ParserSource, Record, RecordCreate, RecordDirection, RecordDraft,
     RecordDraftStatus, RecordDraftUpdate, RecordsStatsRange, RecordsStatsResponse, RecordsSummary,
-    Subscription, SubscriptionCreate, SubscriptionCycle, SubscriptionUpdate, advance_next_due,
-    is_valid_asset_category, is_valid_record_category, is_valid_record_category_for_direction,
+    Subscription, SubscriptionChargeAdvance, SubscriptionCreate, SubscriptionCycle,
+    SubscriptionUpdate, advance_next_due, is_valid_asset_category, is_valid_record_category,
+    is_valid_record_category_for_direction,
 };
 use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, TimeZone, Utc};
 use fx::{FxClient, resolve_fx_rate};
@@ -667,9 +668,9 @@ impl AppService {
                 local_llm::run(local_llm::LocalLlmRequest {
                     schema_version: 1,
                     model_id: model_id.to_string(),
-                    system_prompt: build_record_prompt(),
+                    system_prompt: build_record_prompt(source),
                     user_text: content.to_string(),
-                    grammar: local_llm::RECORD_JSON_GRAMMAR.to_string(),
+                    grammar: local_llm::record_json_grammar(),
                     context_tokens: 8192,
                     max_output_tokens: 2048,
                     deadline_ms: 45_000,
@@ -908,10 +909,10 @@ impl AppService {
             let direction = update.direction.as_ref();
             validate_category_for_direction(category, direction)?;
         }
-        if let Some(amount) = update.amount {
-            if amount <= 0.0 {
-                return Err(CoreError::bad_request("amount must be greater than 0"));
-            }
+        if let Some(amount) = update.amount
+            && amount <= 0.0
+        {
+            return Err(CoreError::bad_request("amount must be greater than 0"));
         }
         self.repo
             .update_subscription(subscription_id, profile_id, update)
@@ -1127,9 +1128,11 @@ impl AppService {
                         profile_id,
                         &self.device_id,
                         record_create,
-                        sub.id,
-                        current_due,
-                        next,
+                        SubscriptionChargeAdvance {
+                            subscription_id: sub.id,
+                            last_charged_at: current_due,
+                            next_due_at: next,
+                        },
                     )
                     .await
                 {
@@ -1201,7 +1204,7 @@ impl AppService {
                         .map_err(map_internal)?;
                     batch.records = rows
                         .into_iter()
-                        .map(|r| SyncDirtyItem::from_record(r))
+                        .map(SyncDirtyItem::from_record)
                         .collect::<Result<Vec<_>>>()
                         .map_err(map_internal)?;
                 }
@@ -1213,7 +1216,7 @@ impl AppService {
                         .map_err(map_internal)?;
                     batch.subscriptions = rows
                         .into_iter()
-                        .map(|s| SyncDirtyItem::from_subscription(s))
+                        .map(SyncDirtyItem::from_subscription)
                         .collect::<Result<Vec<_>>>()
                         .map_err(map_internal)?;
                 }
@@ -1225,7 +1228,7 @@ impl AppService {
                         .map_err(map_internal)?;
                     batch.assets = rows
                         .into_iter()
-                        .map(|a| SyncDirtyItem::from_asset(a))
+                        .map(SyncDirtyItem::from_asset)
                         .collect::<Result<Vec<_>>>()
                         .map_err(map_internal)?;
                 }
@@ -1237,7 +1240,7 @@ impl AppService {
                         .map_err(map_internal)?;
                     batch.asset_snapshots = rows
                         .into_iter()
-                        .map(|s| SyncDirtyItem::from_asset_snapshot(s))
+                        .map(SyncDirtyItem::from_asset_snapshot)
                         .collect::<Result<Vec<_>>>()
                         .map_err(map_internal)?;
                 }
@@ -1249,7 +1252,7 @@ impl AppService {
                         .map_err(map_internal)?;
                     batch.app_settings = rows
                         .into_iter()
-                        .map(|s| SyncDirtyItem::from_app_setting(s))
+                        .map(SyncDirtyItem::from_app_setting)
                         .collect::<Result<Vec<_>>>()
                         .map_err(map_internal)?;
                 }
@@ -1710,10 +1713,10 @@ fn merge_draft_input(
                 "asset amount must be a finite positive number",
             ));
         }
-        if let Some(category) = asset.category.as_deref() {
-            if !is_valid_asset_category(category) {
-                return Err(CoreError::bad_request("asset category is invalid"));
-            }
+        if let Some(category) = asset.category.as_deref()
+            && !is_valid_asset_category(category)
+        {
+            return Err(CoreError::bad_request("asset category is invalid"));
         }
         if let Some(currency) = asset.currency.as_deref() {
             validate_required_currency(Some(currency))?;
@@ -1741,10 +1744,10 @@ fn merge_draft_input(
     }
     let direction = input.direction.or_else(|| existing.direction.clone());
     let amount = input.amount.or(existing.amount);
-    if let Some(amount) = amount {
-        if amount <= 0.0 {
-            return Err(CoreError::bad_request("amount must be greater than 0"));
-        }
+    if let Some(amount) = amount
+        && amount <= 0.0
+    {
+        return Err(CoreError::bad_request("amount must be greater than 0"));
     }
     let category = input
         .category

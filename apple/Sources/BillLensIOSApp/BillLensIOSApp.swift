@@ -12,7 +12,9 @@ final class BillLensIOSAppDelegate: NSObject, UIApplicationDelegate {
     ) -> Bool {
         RustBridge.registerSttBackend()
         RustBridge.registerLocalLlmBackend()
-        application.registerForRemoteNotifications()
+        if CloudKitSyncService.shared.isEnabledForCurrentProcess {
+            application.registerForRemoteNotifications()
+        }
         return true
     }
 

@@ -24,6 +24,7 @@ targets:
       properties:
         CFBundleName: 账单助手
         CFBundleDisplayName: 账单助手
+        BillLensCloudKitEnabled: "$(BILLLENS_CLOUDKIT_ENABLED)"
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -54,9 +55,14 @@ targets:
         EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
       configs:
         Debug:
-          OTHER_LDFLAGS: "$(inherited) -L$(SRCROOT)/../rust/target/aarch64-apple-ios-sim/debug -lbilllens_ffi"
+          BILLLENS_CLOUDKIT_ENABLED: NO
+          CODE_SIGN_ENTITLEMENTS: ""
+          OTHER_LDFLAGS[sdk=iphoneos*]: "$(inherited) -L$(SRCROOT)/../rust/target/aarch64-apple-ios/debug -lbilllens_ffi"
+          OTHER_LDFLAGS[sdk=iphonesimulator*]: "$(inherited) -L$(SRCROOT)/../rust/target/aarch64-apple-ios-sim/debug -lbilllens_ffi"
         Release:
-          OTHER_LDFLAGS: "$(inherited) -L$(SRCROOT)/../rust/target/aarch64-apple-ios/release -lbilllens_ffi"
+          BILLLENS_CLOUDKIT_ENABLED: YES
+          OTHER_LDFLAGS[sdk=iphoneos*]: "$(inherited) -L$(SRCROOT)/../rust/target/aarch64-apple-ios/release -lbilllens_ffi"
+          OTHER_LDFLAGS[sdk=iphonesimulator*]: "$(inherited) -L$(SRCROOT)/../rust/target/aarch64-apple-ios-sim/release -lbilllens_ffi"
     dependencies:
       - package: BillLensApple
         product: BillLensShared

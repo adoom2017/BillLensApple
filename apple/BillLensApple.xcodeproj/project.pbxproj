@@ -294,8 +294,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = Sources/BillLensIOSApp/BillLensIOSApp.entitlements;
+				BILLLENS_CLOUDKIT_ENABLED = NO;
+				CODE_SIGN_ENTITLEMENTS = "";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = YH6JCRN97J;
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 				INFOPLIST_FILE = Sources/BillLensIOSApp/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -303,7 +305,12 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				OTHER_LDFLAGS = (
+				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
+					"$(inherited)",
+					"-L$(SRCROOT)/../rust/target/aarch64-apple-ios/debug",
+					"-lbilllens_ffi",
+				);
+				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
 					"$(inherited)",
 					"-L$(SRCROOT)/../rust/target/aarch64-apple-ios-sim/debug",
 					"-lbilllens_ffi",
@@ -380,6 +387,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				BILLLENS_CLOUDKIT_ENABLED = YES;
 				CODE_SIGN_ENTITLEMENTS = Sources/BillLensIOSApp/BillLensIOSApp.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
@@ -389,9 +397,14 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				OTHER_LDFLAGS = (
+				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
 					"$(inherited)",
 					"-L$(SRCROOT)/../rust/target/aarch64-apple-ios/release",
+					"-lbilllens_ffi",
+				);
+				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
+					"$(inherited)",
+					"-L$(SRCROOT)/../rust/target/aarch64-apple-ios-sim/release",
 					"-lbilllens_ffi",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.shendongchun.BillLensApple;

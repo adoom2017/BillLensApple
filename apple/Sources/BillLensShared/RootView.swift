@@ -222,12 +222,8 @@ public struct RootView: View {
             HStack(spacing: compactDock ? 0 : 8) {
                 Image(systemName: page.icon)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(selectedPage == page ? .white : IMColors.textLabel)
+                    .foregroundStyle(selectedPage == page ? IMColors.accent : IMColors.textLabel)
                     .frame(width: 26, height: 26)
-                    .background(
-                        Circle()
-                            .fill(selectedPage == page ? IMColors.accent : Color.white.opacity(0.44))
-                    )
 
                 if !compactDock {
                     Text(page.title)

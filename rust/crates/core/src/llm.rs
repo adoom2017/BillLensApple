@@ -5,28 +5,49 @@ use billlens_apple_db::{
     ASSET_CATEGORIES, EXPENSE_CATEGORIES, INCOME_CATEGORIES, ParsedRecordPayload,
     is_valid_asset_category, is_valid_record_category, is_valid_record_category_for_direction,
 };
-use chrono::{DateTime, FixedOffset, Local, NaiveDate, SecondsFormat};
+use chrono::{DateTime, Duration, FixedOffset, Local, NaiveDate, SecondsFormat};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::logger;
+use crate::{EntrySource, logger};
+
+const TEXT_INPUT_RULES: &str =
+    r#"输入来自用户直接表述。按原文明确语义提取字段，不要补充原文没有表达的交易对象或用途。"#;
+
+const OCR_INPUT_RULES: &str = r#"输入来自账单、收据、银行流水或支付凭证的 OCR 文本，页面样式和 OCR 行顺序都不固定。不要依据文字出现顺序、字号或视觉显著性选择字段，必须依据字段标签、上下文语义和交易角色选择证据：
+- transaction_at 优先使用凭证中明确标注的实际支付、交易、记账或入账时间；设备状态栏时间、截图时间、页面更新时间不是交易时间。只有凭证中没有任何交易时间线索时，才使用上方当前完整时间。
+- merchant 优先使用实际收款方、商户、店铺或服务提供方；电商平台、支付平台、银行和支付渠道只有在其本身就是明确交易对手时才能作为 merchant，不能因为名称更醒目而覆盖更具体的交易对手。
+- note 表示本次交易购买的商品或服务、交易用途或用户备注。存在商品或服务名称时，提取能区分交易的简短核心名称，去掉规格堆叠和营销修饰。
+- 订单、支付、履约、物流或退款流程状态可以帮助判断交易，但不能直接作为 note。订单号、流水号、支付工具、银行卡尾号、积分奖励、广告活动和页面功能说明也不能作为 note。
+- 如果没有明确的商品、服务、用途或用户备注，note 返回 null；不要用页面上最靠近金额的文字填充。"#;
 
 const RECORD_PROMPT_TEMPLATE: &str = r#"你是一个消费记录结构化助手。请将用户输入解析为 JSON。
+{input_source_rules}
 今天的日期是：{today}
 当前完整时间（含设备时区偏移）是：{current_time}
+相对日期基准：昨天是 {yesterday_date}，前天是 {day_before_yesterday_date}。
+相对时间必须先换算，再填写 transaction_at，禁止把“昨天”“前天”等相对日期直接替换成今天或当前完整时间：
+- 原文包含“昨天”且没有精确钟点时，使用 {yesterday_time}。
+- 原文包含“前天”且没有精确钟点时，使用 {day_before_yesterday_time}。
+- 原文出现“N 天前”“N 天后”“上周/下周 + 星期”时，必须以今天 {today} 为基准完成日历换算，不能复制当前日期。
+- 原文给出精确钟点时，必须用该钟点覆盖当前钟点。例如“下午2点”是 14:00:00，“晚上8点半”是 20:30:00。
+- “早上”“中午”“下午”“晚上”等词本身不代表唯一钟点；没有具体几点几分时，不要臆造固定小时，保留当前完整时间的时分秒，但日期仍必须按相对日期换算。
+示例：“昨天打车花了50元”的 transaction_at 必须是 “{yesterday_time}”；“前天下午2点买东西”的 transaction_at 必须是 “{day_before_yesterday_date}T14:00:00{timezone_offset}”。
 必须严格返回 JSON，不要输出解释文字，不要输出 markdown。
 如果输入包含多条交易记录（如账单列表、银行流水、多笔消费），请返回 JSON 数组，每条记录一个对象。如果只有一条记录，也返回包含一个元素的数组。
 category 只能从以下固定分类中选择：
 - 支出：{expense_categories}
 - 收入：{income_categories}
 如果无法判断分类，使用”其他”。
+外部平台或账单原有分类只能作为语义线索，不能原样复制到 category，必须映射到上面的固定分类。
+购买服装、鞋靴、运动装备或其他实体商品时，category 使用“购物”。分类应依据实际交易内容，不能只依据平台或支付渠道名称。
 涉及会员、订阅、续费、月费、年费等周期性付费服务（如 ChatGPT、Netflix、iCloud、Spotify、视频会员等），应分类为”订阅”。
 如果文本明确出现”退款””退回””退费””退款成功”等语义，应判断为收入，分类优先使用”其他”。
 amount 必须始终返回正数，不要返回负数；收支方向只放在 direction 字段里表达。
 只有当原始输入中明确出现时间线索时，才填写 transaction_at；如果原始输入没有体现任何时间信息，transaction_at 必须直接使用当前完整时间，精确到秒，不要只返回日期，不要返回当天 0 点，不要猜测、不要编造。
 transaction_at 必须是包含时区偏移的 RFC3339 时间。原始时间没有时区、且语义明确是设备本地时间时，使用上方当前时间中的设备时区偏移；不要臆造 Z 或 UTC。原文明确属于其他时区但无法确定偏移时，transaction_at 返回 null。
-note 只保留与交易本身直接相关的简短备注；忽略积分、贴纸、奖励、营销文案、活动提示；如果没有合适备注，返回 null。
+note 只表达交易对象、商品或服务内容、交易用途或用户备注。忽略交易流程状态、编号、支付工具、积分、贴纸、奖励、营销文案、活动提示和页面功能说明；如果没有合适备注，返回 null。
 如果用户描述的是订阅/会员/周期性付费服务，额外返回 "subscription_cycle" 字段：
 - "monthly" 表示每月付费
 - "yearly" 表示每年付费
@@ -171,10 +192,10 @@ pub struct CloudLlmClient {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ModelListStrategy {
-    OpenAiModels,
-    AnthropicModels,
-    XaiLanguageModels,
-    SiliconFlowChatModels,
+    OpenAi,
+    Anthropic,
+    XaiLanguage,
+    SiliconFlowChat,
 }
 
 impl CloudLlmClient {
@@ -218,20 +239,20 @@ impl CloudLlmClient {
         &self,
         text: String,
     ) -> Result<Vec<ParsedRecordPayload>> {
-        self.parse_records_multi(text).await
+        self.parse_records_multi(text, EntrySource::Ocr).await
     }
 
     pub async fn parse_record_text_multi(&self, text: String) -> Result<Vec<ParsedRecordPayload>> {
-        self.parse_records_multi(text).await
+        self.parse_records_multi(text, EntrySource::Text).await
     }
 
     pub async fn list_models(&self) -> Result<Vec<LlmModelItem>> {
         let strategy = self.model_list_strategy();
         let path = match strategy {
-            ModelListStrategy::OpenAiModels => "/models",
-            ModelListStrategy::AnthropicModels => "/models",
-            ModelListStrategy::XaiLanguageModels => "/language-models",
-            ModelListStrategy::SiliconFlowChatModels => "/models?type=text&sub_type=chat",
+            ModelListStrategy::OpenAi => "/models",
+            ModelListStrategy::Anthropic => "/models",
+            ModelListStrategy::XaiLanguage => "/language-models",
+            ModelListStrategy::SiliconFlowChat => "/models?type=text&sub_type=chat",
         };
         let url = self.endpoint_url(path);
         logger::info(
@@ -259,8 +280,12 @@ impl CloudLlmClient {
         Ok(items)
     }
 
-    async fn parse_records_multi(&self, text: String) -> Result<Vec<ParsedRecordPayload>> {
-        let prompt = build_record_prompt();
+    async fn parse_records_multi(
+        &self,
+        text: String,
+        source: EntrySource,
+    ) -> Result<Vec<ParsedRecordPayload>> {
+        let prompt = build_record_prompt(&source);
         let thinking_mode = self
             .enable_thinking
             .map(|value| value.to_string())
@@ -268,8 +293,10 @@ impl CloudLlmClient {
         logger::info(
             "llm.request",
             format!(
-                "provider={} model={} mode=multi enable_thinking={thinking_mode}",
-                self.provider, self.model,
+                "provider={} model={} mode=multi source={} enable_thinking={thinking_mode}",
+                self.provider,
+                self.model,
+                entry_source_name(&source),
             ),
         );
         let response = self.send_prompted_request(prompt, text.clone()).await?;
@@ -366,10 +393,10 @@ impl CloudLlmClient {
 
     fn model_list_strategy(&self) -> ModelListStrategy {
         match self.provider_id.as_str() {
-            "anthropic" => ModelListStrategy::AnthropicModels,
-            "xai" => ModelListStrategy::XaiLanguageModels,
-            "siliconflow" => ModelListStrategy::SiliconFlowChatModels,
-            _ => ModelListStrategy::OpenAiModels,
+            "anthropic" => ModelListStrategy::Anthropic,
+            "xai" => ModelListStrategy::XaiLanguage,
+            "siliconflow" => ModelListStrategy::SiliconFlowChat,
+            _ => ModelListStrategy::OpenAi,
         }
     }
 }
@@ -418,20 +445,54 @@ fn parse_llm_model_item(value: &Value) -> Result<LlmModelItem> {
     })
 }
 
-pub(crate) fn build_record_prompt() -> String {
-    build_record_prompt_at(Local::now().fixed_offset())
+pub(crate) fn build_record_prompt(source: &EntrySource) -> String {
+    build_record_prompt_at(Local::now().fixed_offset(), source)
 }
 
-fn build_record_prompt_at(now: DateTime<FixedOffset>) -> String {
+fn build_record_prompt_at(now: DateTime<FixedOffset>, source: &EntrySource) -> String {
+    let yesterday = now - Duration::days(1);
+    let day_before_yesterday = now - Duration::days(2);
     RECORD_PROMPT_TEMPLATE
+        .replace("{input_source_rules}", input_source_rules(source))
         .replace("{today}", &now.format("%Y-%m-%d").to_string())
         .replace(
             "{current_time}",
             &now.to_rfc3339_opts(SecondsFormat::Secs, false),
         )
+        .replace(
+            "{yesterday_date}",
+            &yesterday.format("%Y-%m-%d").to_string(),
+        )
+        .replace(
+            "{yesterday_time}",
+            &yesterday.to_rfc3339_opts(SecondsFormat::Secs, false),
+        )
+        .replace(
+            "{day_before_yesterday_date}",
+            &day_before_yesterday.format("%Y-%m-%d").to_string(),
+        )
+        .replace(
+            "{day_before_yesterday_time}",
+            &day_before_yesterday.to_rfc3339_opts(SecondsFormat::Secs, false),
+        )
+        .replace("{timezone_offset}", &now.offset().to_string())
         .replace("{expense_categories}", &EXPENSE_CATEGORIES.join("、"))
         .replace("{income_categories}", &INCOME_CATEGORIES.join("、"))
         .replace("{asset_categories_pipe}", &ASSET_CATEGORIES.join("|"))
+}
+
+fn input_source_rules(source: &EntrySource) -> &'static str {
+    match source {
+        EntrySource::Text => TEXT_INPUT_RULES,
+        EntrySource::Ocr => OCR_INPUT_RULES,
+    }
+}
+
+fn entry_source_name(source: &EntrySource) -> &'static str {
+    match source {
+        EntrySource::Text => "text",
+        EntrySource::Ocr => "ocr",
+    }
 }
 
 fn build_openai_request_body(
@@ -719,12 +780,12 @@ fn validate_record_payload_contract(payload: &ParsedRecordPayload) -> Result<()>
             "LLM payload cannot be both an asset and a subscription"
         ));
     }
-    if let Some(amount) = payload.amount {
-        if !amount.is_finite() || amount <= 0.0 {
-            return Err(anyhow!(
-                "LLM payload amount must be a finite positive number"
-            ));
-        }
+    if let Some(amount) = payload.amount
+        && (!amount.is_finite() || amount <= 0.0)
+    {
+        return Err(anyhow!(
+            "LLM payload amount must be a finite positive number"
+        ));
     }
     if let Some(currency) = payload.currency.as_deref() {
         let normalized = normalize_currency_code(currency)
@@ -752,10 +813,10 @@ fn validate_record_payload_contract(payload: &ParsedRecordPayload) -> Result<()>
                 "LLM asset payload amount must be a finite positive number"
             ));
         }
-        if let Some(category) = asset.category.as_deref() {
-            if !is_valid_asset_category(category) {
-                return Err(anyhow!("LLM asset payload category is invalid"));
-            }
+        if let Some(category) = asset.category.as_deref()
+            && !is_valid_asset_category(category)
+        {
+            return Err(anyhow!("LLM asset payload category is invalid"));
         }
         if let Some(currency) = asset.currency.as_deref() {
             let normalized = normalize_currency_code(currency)
@@ -833,6 +894,8 @@ pub(crate) fn normalize_currency_code(value: &str) -> Option<String> {
 mod tests {
     use serde_json::json;
 
+    use crate::EntrySource;
+
     use super::{
         LlmConfig, LlmProvider, build_openai_request_body, build_record_prompt_at,
         extract_openai_message_content, normalize_currency_code, parse_llm_model_items,
@@ -902,10 +965,62 @@ mod tests {
     #[test]
     fn record_prompt_provides_an_rfc3339_time_with_explicit_device_offset() {
         let now = chrono::DateTime::parse_from_rfc3339("2026-07-14T14:38:45+08:00").unwrap();
-        let prompt = build_record_prompt_at(now);
+        let prompt = build_record_prompt_at(now, &EntrySource::Text);
         assert!(prompt.contains("2026-07-14T14:38:45+08:00"));
+        assert!(prompt.contains("昨天是 2026-07-13，前天是 2026-07-12"));
+        assert!(
+            prompt
+                .contains("“昨天打车花了50元”的 transaction_at 必须是 “2026-07-13T14:38:45+08:00”")
+        );
+        assert!(
+            prompt.contains(
+                "“前天下午2点买东西”的 transaction_at 必须是 “2026-07-12T14:00:00+08:00”"
+            )
+        );
         assert!(prompt.contains("transaction_at 必须是包含时区偏移的 RFC3339 时间"));
         assert!(prompt.contains("不要臆造 Z 或 UTC"));
+        assert!(prompt.contains("购买服装、鞋靴、运动装备或其他实体商品时"));
+        assert!(prompt.contains("category 使用“购物”"));
+        assert!(prompt.contains("不能只依据平台或支付渠道名称"));
+    }
+
+    #[test]
+    fn record_prompt_relative_date_anchors_cross_month_and_year_boundaries() {
+        let now = chrono::DateTime::parse_from_rfc3339("2027-01-01T00:05:06+08:00").unwrap();
+        let prompt = build_record_prompt_at(now, &EntrySource::Text);
+
+        assert!(prompt.contains("昨天是 2026-12-31，前天是 2026-12-30"));
+        assert!(prompt.contains("2026-12-31T00:05:06+08:00"));
+        assert!(prompt.contains("2026-12-30T14:00:00+08:00"));
+        assert!(!prompt.contains("{yesterday_"));
+        assert!(!prompt.contains("{day_before_yesterday_"));
+        assert!(!prompt.contains("{timezone_offset}"));
+    }
+
+    #[test]
+    fn record_prompt_distinguishes_ocr_evidence_without_assuming_a_page_style() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-07-14T14:38:45+08:00").unwrap();
+        let prompt = build_record_prompt_at(now, &EntrySource::Ocr);
+
+        assert!(prompt.contains("页面样式和 OCR 行顺序都不固定"));
+        assert!(prompt.contains("必须依据字段标签、上下文语义和交易角色选择证据"));
+        assert!(prompt.contains("设备状态栏时间、截图时间、页面更新时间不是交易时间"));
+        assert!(prompt.contains("实际收款方、商户、店铺或服务提供方"));
+        assert!(prompt.contains("存在商品或服务名称时，提取能区分交易的简短核心名称"));
+        assert!(prompt.contains("订单、支付、履约、物流或退款流程状态"));
+        assert!(prompt.contains("不能直接作为 note"));
+        assert!(prompt.contains("不要用页面上最靠近金额的文字填充"));
+        assert!(!prompt.contains("{input_source_rules}"));
+    }
+
+    #[test]
+    fn text_prompt_does_not_receive_ocr_only_evidence_rules() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-07-14T14:38:45+08:00").unwrap();
+        let prompt = build_record_prompt_at(now, &EntrySource::Text);
+
+        assert!(prompt.contains("输入来自用户直接表述"));
+        assert!(!prompt.contains("页面样式和 OCR 行顺序都不固定"));
+        assert!(!prompt.contains("{input_source_rules}"));
     }
 
     #[test]
