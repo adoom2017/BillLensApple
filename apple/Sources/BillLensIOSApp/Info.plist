@@ -28,7 +28,12 @@
 	<string>账单助手需要语音识别权限来将您的语音转换为文字录入账单。</string>
 	<key>UIBackgroundModes</key>
 	<array>
+		<string>fetch</string>
 		<string>remote-notification</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.shendongchun.BillLensApple.subscription-refresh</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>

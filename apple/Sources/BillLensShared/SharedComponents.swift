@@ -4,24 +4,34 @@ import AppKit
 import SwiftUI
 
 struct WelcomeBubble: View {
+    @EnvironmentObject private var store: BillLensStore
+
+    @ViewBuilder
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            AssistantAvatar()
-            VStack(alignment: .leading, spacing: 4) {
-                Text("账单助手")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(IMColors.textLabel)
-                Text("输入一句账单描述，或上传图片、语音记账，我会先生成待确认记录。")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(IMColors.textBody)
-                Text("刚刚")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(IMColors.textMeta)
+        if store.messages.isEmpty && store.drafts.isEmpty {
+            VStack(spacing: 10) {
+                Image(systemName: "bubble.left.and.bubble.right")
+                    .font(.system(size: 34, weight: .regular))
+                    .foregroundStyle(IMColors.accent)
+
+                #if os(iOS)
+                Text("今天花了什么？")
+                    .font(.system(size: 24, weight: .bold))
+                #else
+                Text("记录一笔账")
+                    .font(.system(size: 30, weight: .bold))
+                #endif
+
+                Text("输入一句话，或导入账单截图")
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(IMColors.textMuted)
             }
-            .chatBubbleSurface(fill: IMColors.botBubble, prominence: .regular)
-            Spacer(minLength: 44)
+            .foregroundStyle(IMColors.textPrimary)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 28)
+            .accessibilityElement(children: .combine)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -152,11 +162,9 @@ struct DraftConversationCard: View {
 
                 draftCardContent
                     .padding(14)
-                    .appRoundedGlass(
+                    .appFlatCardSurface(
                         cornerRadius: LayoutRadii.section,
-                        prominence: .regular,
-                        tint: IMColors.accentBright.opacity(0.08),
-                        fallbackFill: IMColors.botBubble
+                        fill: IMColors.surfaceStrong
                     )
                     .frame(maxWidth: 520, alignment: .leading)
 
@@ -219,11 +227,10 @@ private extension View {
         self
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .appRoundedGlass(
+            .appFlatCardSurface(
                 cornerRadius: LayoutMetrics.bubbleRadius,
-                prominence: prominence,
-                tint: IMColors.accentBright.opacity(prominence == .prominent ? 0.10 : 0.06),
-                fallbackFill: fill
+                fill: fill,
+                borderOpacity: prominence == .prominent ? 0.08 : 0.06
             )
     }
 }
@@ -237,36 +244,38 @@ struct ComposerPanel: View {
     let onSubmit: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            IMColors.divider.frame(height: 1)
+        HStack(spacing: 8) {
+            ComposerIconButton(systemImage: "photo") { onImage() }
 
-            HStack(spacing: 8) {
-                ComposerIconButton(systemImage: "photo") { onImage() }
+            composerEditor
+                .frame(maxWidth: .infinity, minHeight: 40, maxHeight: 40)
+                .padding(.horizontal, 12)
 
-                composerEditor
-                    .frame(maxWidth: .infinity, minHeight: 40, maxHeight: 40)
-                    .padding(.horizontal, 12)
-                    .appRoundedGlass(
-                        cornerRadius: LayoutRadii.compactField,
-                        tint: IMColors.accentBright.opacity(0.08),
-                        fallbackFill: IMColors.surfaceStrong
-                    )
-
-                ComposerIconButton(
-                    systemImage: isRecording ? "stop.circle.fill" : "mic.fill",
-                    tint: isRecording ? Color.red : IMColors.textSecondary
-                ) {
-                    onVoice()
-                }
+            ComposerIconButton(
+                systemImage: isRecording ? "stop.circle.fill" : "mic.fill",
+                tint: isRecording ? Color.red : IMColors.textSecondary
+            ) {
+                onVoice()
             }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 4)
+
+            Button(action: onSubmit) {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(IMColors.accent, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("提交账单")
         }
-        .appRoundedGlass(
-            cornerRadius: LayoutRadii.section,
-            prominence: .regular,
-            tint: IMColors.glassCoolTint.opacity(0.72),
-            fallbackFill: IMColors.chatBg
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: LayoutRadii.card, style: .continuous)
+                .fill(IMColors.surfaceStrong)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: LayoutRadii.card, style: .continuous)
+                .strokeBorder(IMColors.textPrimary.opacity(0.08), lineWidth: 1)
         )
     }
 
@@ -382,15 +391,51 @@ struct ComposerIconButton: View {
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(tint)
                 .frame(width: 40, height: 40)
-                .appCircleGlass(
-                    prominence: .regular,
-                    interactive: true,
-                    tint: IMColors.accentBright.opacity(0.10),
-                    fallbackFill: IMColors.surfaceStrong
-                )
-                .contentShape(Circle())
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+struct CollectionOverviewCard: View {
+    let icon: String
+    let title: String
+    let value: String
+    let detail: String
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.system(size: 22, weight: .medium))
+                .foregroundStyle(IMColors.accent)
+                .frame(width: 36)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(IMColors.textMuted)
+                Text(value)
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundStyle(IMColors.textPrimary)
+                Text(detail)
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(IMColors.textMuted)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: LayoutRadii.card, style: .continuous)
+                .fill(IMColors.surfaceStrong)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: LayoutRadii.card, style: .continuous)
+                .strokeBorder(IMColors.textPrimary.opacity(0.06), lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -419,11 +464,9 @@ struct ReviewSummaryCard: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .appRoundedGlass(
+        .appFlatCardSurface(
             cornerRadius: LayoutRadii.section,
-            prominence: .regular,
-            tint: IMColors.accentBright.opacity(0.08),
-            fallbackFill: IMColors.surfaceStrong.opacity(0.96)
+            fill: IMColors.surfaceStrong
         )
     }
 }
@@ -450,11 +493,9 @@ struct EmptyReviewState: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .appRoundedGlass(
+        .appFlatCardSurface(
             cornerRadius: LayoutRadii.section,
-            prominence: .regular,
-            tint: IMColors.accentBright.opacity(0.06),
-            fallbackFill: IMColors.surface.opacity(0.98)
+            fill: IMColors.surface
         )
     }
 }
@@ -866,6 +907,20 @@ enum IMGlassProminence {
 }
 
 extension View {
+    func appFlatCardSurface(
+        cornerRadius: CGFloat = LayoutRadii.card,
+        fill: Color = IMColors.surfaceStrong,
+        borderOpacity: Double = 0.06
+    ) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        return background(shape.fill(fill))
+            .overlay(
+                shape
+                    .strokeBorder(IMColors.textPrimary.opacity(borderOpacity), lineWidth: 1)
+                    .allowsHitTesting(false)
+            )
+    }
+
     @ViewBuilder
     func appRoundedGlass(
         cornerRadius: CGFloat = 18,
@@ -917,6 +972,22 @@ extension View {
                 fallbackFill: fallbackFill
             )
         )
+    }
+
+    @ViewBuilder
+    func adaptivePageSurface(cornerRadius: CGFloat = LayoutRadii.shell) -> some View {
+        #if os(iOS)
+        self.background(Color.clear)
+        #else
+        self
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .appRoundedGlass(
+                cornerRadius: cornerRadius,
+                prominence: .prominent,
+                tint: IMColors.glassCoolTint,
+                fallbackFill: IMColors.surface
+            )
+        #endif
     }
 }
 

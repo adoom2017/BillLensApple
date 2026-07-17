@@ -19,15 +19,9 @@ struct SubscriptionShell: View {
                 splitBody
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: shellCornerRadius, style: .continuous))
-        .appRoundedGlass(
-            cornerRadius: shellCornerRadius,
-            prominence: .prominent,
-            tint: IMColors.glassCoolTint,
-            fallbackFill: IMColors.surface
-        )
+        .adaptivePageSurface(cornerRadius: shellCornerRadius)
         .onAppear {
-            Task { try? await store.loadSubscriptions() }
+            store.loadSubscriptionsReportingErrors()
         }
         .alert("确认删除", isPresented: .init(
             get: { subscriptionToDelete != nil },
@@ -53,8 +47,22 @@ struct SubscriptionShell: View {
 
     private var compactBody: some View {
         VStack(alignment: .leading, spacing: 0) {
+            CollectionOverviewCard(
+                icon: "repeat",
+                title: "订阅服务",
+                value: "\(activeSubscriptionCount) 项",
+                detail: nextRenewalText
+            )
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 14)
+
+            subscriptionReminderRow
+                .padding(.horizontal, 14)
+                .padding(.bottom, 14)
+
             HStack {
-                Text("订阅列表")
+                Text("全部订阅")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(IMColors.textPrimary)
                 Spacer()
@@ -92,10 +100,23 @@ struct SubscriptionShell: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(IMColors.panelBg.opacity(0.74))
+        .background(Color.clear)
         .sheet(isPresented: $isDetailPresented, onDismiss: { store.selectedSubscriptionId = nil }) {
             compactDetailSheet
         }
+    }
+
+    private var activeSubscriptionCount: Int {
+        store.subscriptions.filter(\.isActive).count
+    }
+
+    private var nextRenewalText: String {
+        guard let next = store.subscriptions
+            .filter(\.isActive)
+            .min(by: { $0.nextDueAt < $1.nextDueAt }) else {
+            return "暂无即将续费项目"
+        }
+        return "最近续费：\(next.merchant ?? next.category) · \(BillLensFormatters.displayDateTime(next.nextDueAt))"
     }
 
     @ViewBuilder
@@ -145,6 +166,11 @@ struct SubscriptionShell: View {
         HStack(spacing: 0) {
             // Left: Subscription list
             VStack(alignment: .leading, spacing: 0) {
+                subscriptionReminderRow
+                    .padding(14)
+
+                Divider().opacity(0.3)
+
                 HStack {
                     Text("订阅列表")
                         .font(.system(size: 15, weight: .bold))
@@ -261,6 +287,40 @@ struct SubscriptionShell: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var subscriptionReminderRow: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "bell.badge")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(IMColors.accent)
+                .frame(width: 34, height: 34)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("扣款提醒")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(IMColors.textPrimary)
+                Text("在下次订阅扣款日发送本地通知")
+                    .font(.system(size: 11))
+                    .foregroundStyle(IMColors.textMuted)
+            }
+
+            Spacer(minLength: 8)
+
+            Toggle("", isOn: Binding(
+                get: { store.subscriptionRemindersEnabled },
+                set: { store.setSubscriptionRemindersEnabled($0) }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(IMColors.surface.opacity(0.84), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(IMColors.divider.opacity(0.6), lineWidth: 1)
+        }
     }
 
     private func hydrateEditForm(from sub: SubscriptionItem) {

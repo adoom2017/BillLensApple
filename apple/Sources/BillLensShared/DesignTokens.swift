@@ -1,10 +1,12 @@
 import SwiftUI
 
-enum AppPage: String, CaseIterable {
+enum AppPage: String, CaseIterable, Identifiable {
     case entry
     case ledger
     case subscriptions
     case assets
+
+    var id: Self { self }
 
     var title: String {
         switch self {
@@ -19,9 +21,31 @@ enum AppPage: String, CaseIterable {
         switch self {
         case .entry: "square.and.pencil"
         case .ledger: "list.bullet.rectangle"
-        case .subscriptions: "repeat.circle"
-        case .assets: "chart.pie"
+        case .subscriptions: "calendar.badge.clock"
+        case .assets: "chart.line.uptrend.xyaxis"
         }
+    }
+
+    var tabTitle: String {
+        switch self {
+        case .entry: "记账"
+        case .ledger: "账单"
+        case .subscriptions: "订阅"
+        case .assets: "资产"
+        }
+    }
+
+    var navigationTitle: String {
+        #if os(iOS)
+        switch self {
+        case .entry: "记一笔"
+        case .ledger: "账单"
+        case .subscriptions: "订阅"
+        case .assets: "资产"
+        }
+        #else
+        title
+        #endif
     }
 }
 

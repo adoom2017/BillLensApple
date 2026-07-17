@@ -47,14 +47,8 @@ struct LedgerShell: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: shellCornerRadius, style: .continuous))
         .frame(maxHeight: availableHeight)
-        .appRoundedGlass(
-            cornerRadius: shellCornerRadius,
-            prominence: .prominent,
-            tint: IMColors.glassCoolTint,
-            fallbackFill: IMColors.surface
-        )
+        .adaptivePageSurface(cornerRadius: shellCornerRadius)
         .alert(
             "确认删除",
             isPresented: Binding(

@@ -22,13 +22,7 @@ struct AssetShell: View {
                 splitBody
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: shellCornerRadius, style: .continuous))
-        .appRoundedGlass(
-            cornerRadius: shellCornerRadius,
-            prominence: .prominent,
-            tint: IMColors.glassCoolTint,
-            fallbackFill: IMColors.surface
-        )
+        .adaptivePageSurface(cornerRadius: shellCornerRadius)
         .onAppear {
             Task { try? await store.loadAssets() }
         }
@@ -59,8 +53,18 @@ struct AssetShell: View {
 
     private var compactBody: some View {
         VStack(alignment: .leading, spacing: 0) {
+            CollectionOverviewCard(
+                icon: "chart.line.uptrend.xyaxis",
+                title: "资产概览",
+                value: compactAssetValue,
+                detail: "\(store.assets.count) 个资产账户"
+            )
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 14)
+
             HStack {
-                Text("资产列表")
+                Text("资产账户")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(IMColors.textPrimary)
                 Spacer()
@@ -96,10 +100,25 @@ struct AssetShell: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(IMColors.panelBg.opacity(0.74))
+        .background(Color.clear)
         .sheet(isPresented: $isDetailPresented, onDismiss: { store.selectedAssetId = nil }) {
             compactDetailSheet
         }
+    }
+
+    private var compactAssetValue: String {
+        let valuedAssets = store.assets.compactMap { asset -> (Double, String)? in
+            guard let amount = asset.latestAmount else { return nil }
+            return (amount, asset.currency)
+        }
+        guard let currency = valuedAssets.first?.1 else { return "暂无余额" }
+        guard valuedAssets.allSatisfy({ $0.1 == currency }) else {
+            return "\(valuedAssets.count) 项有余额"
+        }
+        return BillLensFormatters.currencyString(
+            valuedAssets.reduce(0) { $0 + $1.0 },
+            currencyCode: currency
+        )
     }
 
     @ViewBuilder

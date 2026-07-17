@@ -387,6 +387,10 @@ public struct SubscriptionListResponse: Codable, Sendable {
     public let subscriptions: [SubscriptionItem]
 }
 
+public struct SubscriptionChargeResult: Codable, Sendable {
+    public let charged: Int
+}
+
 public struct SubscriptionUpdateInput: Codable {
     public var direction: String?
     public var amount: Double?

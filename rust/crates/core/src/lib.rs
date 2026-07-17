@@ -1104,10 +1104,14 @@ impl AppService {
                         0,
                     )
                     .single()
-                    .unwrap_or_else(|| Utc::now().with_timezone(&shanghai_offset()))
+                    .ok_or_else(|| {
+                        CoreError::Internal(format!(
+                            "failed to construct subscription transaction time for {current_due}"
+                        ))
+                    })?
                     .with_timezone(&Utc);
 
-                let record_id = Uuid::new_v4();
+                let record_id = subscription_charge_record_id(sub.id, current_due);
                 let record_create = RecordCreate {
                     direction: sub.direction.clone(),
                     amount: sub.amount,
@@ -1121,8 +1125,7 @@ impl AppService {
                 let next =
                     advance_next_due(&sub.cycle, sub.anchor_day, sub.anchor_month, current_due);
 
-                if let Err(e) = self
-                    .repo
+                self.repo
                     .create_record_and_advance_subscription(
                         record_id,
                         profile_id,
@@ -1135,13 +1138,12 @@ impl AppService {
                         },
                     )
                     .await
-                {
-                    logger::error(
-                        "subscription.charge",
-                        format!("failed to charge subscription {}: {e}", sub.id),
-                    );
-                    break;
-                }
+                    .map_err(|error| {
+                        CoreError::Internal(format!(
+                            "failed to charge subscription {} for {}: {error}",
+                            sub.id, current_due
+                        ))
+                    })?;
 
                 created_summaries.push((
                     sub.merchant.clone().unwrap_or_else(|| sub.category.clone()),
@@ -2049,6 +2051,10 @@ fn validate_required_currency(value: Option<&str>) -> Result<String, CoreError> 
     }
 }
 
+fn subscription_charge_record_id(subscription_id: Uuid, due_at: NaiveDate) -> Uuid {
+    Uuid::new_v5(&subscription_id, due_at.to_string().as_bytes())
+}
+
 fn format_amount_with_currency(amount: f64, currency: Option<&str>) -> String {
     let Some(currency) = currency.and_then(normalize_currency_code) else {
         return format!("未设置币种 {amount:.2}");
@@ -2091,6 +2097,68 @@ mod tests {
             code,
             message: format!("{} failure", code.as_str()),
         }
+    }
+
+    #[test]
+    fn subscription_charge_record_id_is_stable_per_due_date() {
+        let subscription_id = Uuid::parse_str("b044d8a4-4bdb-497f-a0af-9a6b00db983f").unwrap();
+        let first_due = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
+        let second_due = NaiveDate::from_ymd_opt(2026, 8, 1).unwrap();
+
+        assert_eq!(
+            subscription_charge_record_id(subscription_id, first_due),
+            subscription_charge_record_id(subscription_id, first_due)
+        );
+        assert_ne!(
+            subscription_charge_record_id(subscription_id, first_due),
+            subscription_charge_record_id(subscription_id, second_due)
+        );
+    }
+
+    #[tokio::test]
+    async fn due_subscription_is_charged_once_across_repeated_checks() {
+        let database_path = std::env::temp_dir().join(format!(
+            "billlens-subscription-maintenance-{}.sqlite",
+            Uuid::new_v4()
+        ));
+        let repo = BillRepository::connect(&database_path).await.unwrap();
+        let profile_id = "subscription-test";
+        let subscription_id = Uuid::new_v4();
+        let today = Utc::now().with_timezone(&shanghai_offset()).date_naive();
+        repo.create_subscription(
+            subscription_id,
+            profile_id,
+            "test-device",
+            SubscriptionCreate {
+                direction: RecordDirection::Expense,
+                amount: 12.0,
+                currency: "CNY".to_string(),
+                category: "订阅".to_string(),
+                merchant: Some("测试订阅".to_string()),
+                note: None,
+                cycle: SubscriptionCycle::Yearly,
+                anchor_day: today.day() as i32,
+                anchor_month: Some(today.month() as i32),
+                next_due_at: today,
+            },
+        )
+        .await
+        .unwrap();
+        let service = AppService::new(
+            repo.clone(),
+            EngineBootstrap {
+                device_id: "test-device".to_string(),
+                llm: None,
+                log_file_path: None,
+            },
+        )
+        .unwrap();
+
+        let first = service.process_due_subscriptions(profile_id).await.unwrap();
+        let second = service.process_due_subscriptions(profile_id).await.unwrap();
+
+        assert_eq!(first.len(), 1);
+        assert!(second.is_empty());
     }
 
     #[tokio::test]

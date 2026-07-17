@@ -254,6 +254,10 @@ struct SettingsShell: View {
                         .overlay(
                             RoundedRectangle(cornerRadius: LayoutRadii.micro, style: .continuous)
                                 .stroke(IMColors.accentAlt, lineWidth: 1)
+                                .allowsHitTesting(false)
+                        )
+                        .contentShape(
+                            RoundedRectangle(cornerRadius: LayoutRadii.micro, style: .continuous)
                         )
                 }
                 .buttonStyle(.plain)

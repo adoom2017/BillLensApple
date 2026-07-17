@@ -21,7 +21,7 @@ struct EntryShell: View {
 
     var body: some View {
         #if os(macOS)
-        desktopLayout
+        macLayout
         #else
         if sizeClass == .regular {
             desktopLayout
@@ -30,6 +30,28 @@ struct EntryShell: View {
         }
         #endif
     }
+
+    #if os(macOS)
+    private var macLayout: some View {
+        HStack(spacing: 0) {
+            ChatPanel(isImportingImage: $isImportingImage)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Divider()
+
+            ReviewPanel()
+                .frame(width: 360)
+                .frame(maxHeight: .infinity)
+                .background(IMColors.surfaceStrong)
+        }
+        .background(IMColors.surfaceStrong)
+        .clipShape(RoundedRectangle(cornerRadius: LayoutRadii.card, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: LayoutRadii.card, style: .continuous)
+                .strokeBorder(IMColors.textPrimary.opacity(0.06), lineWidth: 1)
+        )
+    }
+    #endif
 
     private var desktopLayout: some View {
         HStack(spacing: 14) {
@@ -214,7 +236,7 @@ struct ChatScrollView: View {
                         status: "待确认",
                         copy: draftCount > 1
                             ? "共 \(draftCount) 笔待确认账单，每张卡片可单独审核或确认。"
-                            : "已为你解析出一张待确认账单。若要修改，可以继续说\"改成300元\"，也可以点审核手动编辑。",
+                            : "已为你解析出一张待确认账单。请在草稿编辑区检查并修改字段。",
                         actions: draftActions(for: index, draft: draft)
                     )
                     .opacity(draftCardOpacity(for: index))
@@ -224,9 +246,19 @@ struct ChatScrollView: View {
 
             Color.clear.frame(height: 1).id("chatBottom")
         }
-        // minHeight pins messages to the bottom when content is shorter than the chat area,
-        // matching standard chat-app behaviour (WhatsApp/iMessage style).
-        .frame(minWidth: width, maxWidth: width, minHeight: minHeight, alignment: .bottomLeading)
+        .frame(
+            minWidth: width,
+            maxWidth: width,
+            minHeight: minHeight,
+            alignment: usesEmptyConversationLayout ? .center : .bottomLeading
+        )
+    }
+
+    private var usesEmptyConversationLayout: Bool {
+        store.messages.isEmpty
+            && store.drafts.isEmpty
+            && store.transientProgressMessage == nil
+            && !store.speechService.isRecording
     }
 
     private func draftActions(for index: Int, draft: RecordDraft) -> DraftConversationCard.Actions? {
@@ -588,11 +620,9 @@ struct ReviewPanel: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(14)
-        .appRoundedGlass(
+        .appFlatCardSurface(
             cornerRadius: LayoutRadii.section,
-            prominence: .regular,
-            tint: IMColors.accentBright.opacity(0.06),
-            fallbackFill: IMColors.surface.opacity(0.96)
+            fill: IMColors.surface
         )
     }
 
@@ -618,11 +648,9 @@ struct ReviewPanel: View {
             }
         }
         .padding(14)
-        .appRoundedGlass(
+        .appFlatCardSurface(
             cornerRadius: LayoutRadii.section,
-            prominence: .regular,
-            tint: IMColors.accentBright.opacity(0.06),
-            fallbackFill: IMColors.surface.opacity(0.96)
+            fill: IMColors.surface
         )
     }
 
@@ -688,11 +716,9 @@ private struct ReviewFieldGroup<Content: View>: View {
             content
         }
         .padding(14)
-        .appRoundedGlass(
+        .appFlatCardSurface(
             cornerRadius: LayoutRadii.section,
-            prominence: .regular,
-            tint: IMColors.accentBright.opacity(0.05),
-            fallbackFill: IMColors.surface.opacity(0.94)
+            fill: IMColors.surface
         )
     }
 }

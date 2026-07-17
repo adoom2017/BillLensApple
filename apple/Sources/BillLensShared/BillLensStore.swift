@@ -51,6 +51,9 @@ public final class BillLensStore: ObservableObject {
     @Published public var subscriptionCycle = ""
     @Published public var subscriptions: [SubscriptionItem] = []
     @Published public var selectedSubscriptionId: String?
+    @Published public private(set) var subscriptionRemindersEnabled = UserDefaults.standard.bool(
+        forKey: "subscriptionRemindersEnabled"
+    )
     @Published public var assets: [AssetItem] = []
     @Published public var selectedAssetId: String?
     @Published public var llmConfig: LlmConfigItem?
@@ -61,6 +64,7 @@ public final class BillLensStore: ObservableObject {
     private let ocrService: ReceiptTextRecognizing
     private let profileID = "local-default"
     private let deviceID: String
+    private var bootstrapTask: Task<Void, Error>?
 
     public init(ocrService: ReceiptTextRecognizing = ReceiptOCRService()) {
         self.ocrService = ocrService
@@ -115,44 +119,90 @@ public final class BillLensStore: ObservableObject {
     }
 
     public func bootstrap() {
+        guard bootstrapTask == nil else { return }
+        let task = Task {
+            try await bootstrapEngine()
+        }
+        bootstrapTask = task
         Task {
             do {
-                let dbURL = try databaseURL()
-                AppLogger.log("bootstrap", "database_path=\(dbURL.path)")
-                let _: [String: String] = try await bridge.sendAsync([
-                    "action": "bootstrap",
-                    "database_path": dbURL.path,
-                    "profile_id": profileID,
-                    "device_id": deviceID,
-                    "llm": try self.llmBootstrapConfig(),
-                    "log_file_path": AppLogger.defaultLogFilePath
-                ])
-                statusText = "已连接本地账本"
-                AppLogger.log("bootstrap", "engine bootstrapped successfully")
-                await Self.loadCategoriesFromRust(bridge: bridge)
-                async let pullOK = CloudKitSyncService.shared.pullSync(bridge: bridge, profileID: profileID)
-                async let home: Void = refreshHome()
-                async let ledger: Void = refreshLedger()
-                async let subs: Void = loadSubscriptions()
-                async let assetsLoad: Void = loadAssets()
-                _ = try await (home, ledger, subs, assetsLoad)
-
-                // Pull must succeed before charging to avoid double-charges on multi-device setups.
-                if await pullOK {
-                    let _: [String: Int] = try await bridge.sendAsync([
-                        "action": "process_due_subscriptions",
-                        "profile_id": profileID
-                    ])
-                    try await refreshLedger()
-                    try await loadSubscriptions()
-                }
-                CloudKitSyncService.shared.schedulePush()
+                try await task.value
             } catch {
                 AppLogger.log("bootstrap.error", error.localizedDescription)
                 errorText = error.localizedDescription
                 statusText = "初始化失败"
             }
         }
+    }
+
+    private func bootstrapEngine() async throws {
+        let dbURL = try databaseURL()
+        AppLogger.log("bootstrap", "database_path=\(dbURL.path)")
+        let _: [String: String] = try await bridge.sendAsync([
+            "action": "bootstrap",
+            "database_path": dbURL.path,
+            "profile_id": profileID,
+            "device_id": deviceID,
+            "llm": try llmBootstrapConfig(),
+            "log_file_path": AppLogger.defaultLogFilePath
+        ])
+        statusText = "已连接本地账本"
+        AppLogger.log("bootstrap", "engine bootstrapped successfully")
+        await Self.loadCategoriesFromRust(bridge: bridge)
+
+        async let home: Void = refreshHome()
+        async let ledger: Void = refreshLedger()
+        async let subs: Void = loadSubscriptions()
+        async let assetsLoad: Void = loadAssets()
+        _ = try await (home, ledger, subs, assetsLoad)
+
+        _ = try await processDueSubscriptionsAfterRemoteSync(trigger: "bootstrap")
+        if CloudKitSyncService.shared.isEnabledForCurrentProcess {
+            CloudKitSyncService.shared.schedulePush()
+        }
+    }
+
+    @discardableResult
+    public func processDueSubscriptions(trigger: String) async throws -> Int {
+        guard let bootstrapTask else {
+            preconditionFailure("processDueSubscriptions called before bootstrap started")
+        }
+        try await bootstrapTask.value
+        return try await processDueSubscriptionsAfterRemoteSync(trigger: trigger)
+    }
+
+    public func processDueSubscriptionsReportingErrors(trigger: String) {
+        Task {
+            do {
+                _ = try await processDueSubscriptions(trigger: trigger)
+            } catch {
+                AppLogger.log("subscription.maintenance.error", "trigger=\(trigger) error=\(error.localizedDescription)")
+                errorText = error.localizedDescription
+                statusText = "订阅检查失败"
+            }
+        }
+    }
+
+    private func processDueSubscriptionsAfterRemoteSync(trigger: String) async throws -> Int {
+        if CloudKitSyncService.shared.isEnabledForCurrentProcess {
+            let pulled = await CloudKitSyncService.shared.pullSync(bridge: bridge, profileID: profileID)
+            guard pulled else {
+                throw RustBridgeError.engineError("CloudKit 拉取失败，已停止订阅补算，避免多设备重复记账。")
+            }
+        }
+
+        let result: SubscriptionChargeResult = try await bridge.sendAsync([
+            "action": "process_due_subscriptions",
+            "profile_id": profileID
+        ])
+        try await refreshLedger()
+        try await loadSubscriptions()
+        try await refreshSubscriptionRemindersIfEnabled()
+        AppLogger.log("subscription.maintenance", "trigger=\(trigger) charged=\(result.charged)")
+        if result.charged > 0, CloudKitSyncService.shared.isEnabledForCurrentProcess {
+            CloudKitSyncService.shared.schedulePush()
+        }
+        return result.charged
     }
 
     public func submitText() {
@@ -194,6 +244,7 @@ public final class BillLensStore: ObservableObject {
             if result.subscriptionCreated {
                 self.statusText += "（已创建订阅）"
                 try await self.loadSubscriptions()
+                try await self.refreshSubscriptionRemindersIfEnabled()
             }
             if let acks = result.assetAcks, !acks.isEmpty {
                 try await self.loadAssets()
@@ -243,6 +294,10 @@ public final class BillLensStore: ObservableObject {
                 "entry.ocr.result",
                 "route=\(result.parserSource) auto_confirmed=\(result.autoConfirmed) count=\(result.parsed.count)"
             )
+            if result.subscriptionCreated {
+                try await self.loadSubscriptions()
+                try await self.refreshSubscriptionRemindersIfEnabled()
+            }
             try await self.refreshLedger()
             self.finishProgress()
         }
@@ -313,6 +368,10 @@ public final class BillLensStore: ObservableObject {
             ])
             try await self.refreshHome()
             try await self.refreshLedger()
+            if draft.kind == "subscription" {
+                try await self.loadSubscriptions()
+                try await self.refreshSubscriptionRemindersIfEnabled()
+            }
             self.statusText = "账单已入库"
             AppLogger.log("draft.confirm", "draft_id=\(draft.id)")
             CloudKitSyncService.shared.schedulePush()
@@ -328,6 +387,8 @@ public final class BillLensStore: ObservableObject {
             ])
             self.apply(home: result.home)
             try await self.refreshLedger()
+            try await self.loadSubscriptions()
+            try await self.refreshSubscriptionRemindersIfEnabled()
             self.statusText = "已批量入库"
             AppLogger.log("draft.confirm_all", "count=\(self.drafts.count)")
             CloudKitSyncService.shared.schedulePush()
@@ -379,6 +440,45 @@ public final class BillLensStore: ObservableObject {
         AppLogger.log("subscriptions.load", "count=\(response.subscriptions.count)")
     }
 
+    public func loadSubscriptionsReportingErrors() {
+        Task {
+            do {
+                try await loadSubscriptions()
+                try await refreshSubscriptionRemindersIfEnabled()
+            } catch {
+                AppLogger.log("subscriptions.load.error", error.localizedDescription)
+                errorText = error.localizedDescription
+                statusText = "订阅加载失败"
+            }
+        }
+    }
+
+    public func setSubscriptionRemindersEnabled(_ enabled: Bool) {
+        perform(enabled ? "正在开启订阅提醒" : "正在关闭订阅提醒") {
+            if enabled {
+                try await SubscriptionNotificationService.shared.requestAuthorization()
+                self.subscriptionRemindersEnabled = true
+                UserDefaults.standard.set(true, forKey: "subscriptionRemindersEnabled")
+                try await self.refreshSubscriptionRemindersIfEnabled()
+                self.statusText = "订阅提醒已开启"
+            } else {
+                await SubscriptionNotificationService.shared.removeAllPendingReminders()
+                self.subscriptionRemindersEnabled = false
+                UserDefaults.standard.set(false, forKey: "subscriptionRemindersEnabled")
+                self.statusText = "订阅提醒已关闭"
+            }
+        }
+    }
+
+    private func refreshSubscriptionRemindersIfEnabled() async throws {
+        guard subscriptionRemindersEnabled else { return }
+        try await SubscriptionNotificationService.shared.replacePendingReminders(with: subscriptions)
+        AppLogger.log(
+            "subscription.notifications",
+            "scheduled=\(subscriptions.filter(\.isActive).count)"
+        )
+    }
+
     private static func loadCategoriesFromRust(bridge: RustBridge) async {
         do {
             let response: CategoriesResponse = try await bridge.sendAsync([
@@ -399,6 +499,7 @@ public final class BillLensStore: ObservableObject {
                 "subscription_id": subscriptionId
             ])
             try await self.loadSubscriptions()
+            try await self.refreshSubscriptionRemindersIfEnabled()
             self.statusText = "订阅已暂停"
             AppLogger.log("subscription.pause", "id=\(subscriptionId)")
             CloudKitSyncService.shared.schedulePush()
@@ -413,6 +514,7 @@ public final class BillLensStore: ObservableObject {
                 "subscription_id": subscriptionId
             ])
             try await self.loadSubscriptions()
+            try await self.refreshSubscriptionRemindersIfEnabled()
             self.statusText = "订阅已恢复"
             AppLogger.log("subscription.resume", "id=\(subscriptionId)")
             CloudKitSyncService.shared.schedulePush()
@@ -430,6 +532,7 @@ public final class BillLensStore: ObservableObject {
                 self.selectedSubscriptionId = nil
             }
             try await self.loadSubscriptions()
+            try await self.refreshSubscriptionRemindersIfEnabled()
             self.statusText = "订阅已删除"
             AppLogger.log("subscription.delete", "id=\(subscriptionId)")
             CloudKitSyncService.shared.schedulePush()
@@ -448,6 +551,7 @@ public final class BillLensStore: ObservableObject {
                 "update": updateDict
             ])
             try await self.loadSubscriptions()
+            try await self.refreshSubscriptionRemindersIfEnabled()
             self.statusText = "订阅已更新"
             AppLogger.log("subscription.update", "id=\(subscriptionId)")
             CloudKitSyncService.shared.schedulePush()

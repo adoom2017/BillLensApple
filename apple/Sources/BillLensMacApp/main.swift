@@ -48,14 +48,20 @@ final class BillLensAppDelegate: NSObject, NSApplicationDelegate {
 struct BillLensMacApp: App {
     @NSApplicationDelegateAdaptor(BillLensAppDelegate.self) private var appDelegate
     @StateObject private var store = BillLensStore()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(store)
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active {
+                        store.processDueSubscriptionsReportingErrors(trigger: "app_active")
+                    }
+                }
         }
-        .windowStyle(.hiddenTitleBar)
-        .windowToolbarStyle(.unifiedCompact)
+        .windowStyle(.titleBar)
+        .windowToolbarStyle(.unified)
         .defaultSize(width: 1240, height: 820)
         .windowResizability(.contentMinSize)
     }
