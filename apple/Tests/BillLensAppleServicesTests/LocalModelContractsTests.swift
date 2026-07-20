@@ -106,10 +106,41 @@ final class LocalModelContractsTests: XCTestCase {
         )
 
         let description = LocalModelManager.diagnosticDescription(error)
+        XCTAssertTrue(description.contains("系统未能分类具体原因"))
         XCTAssertTrue(description.contains("domain=NSURLErrorDomain"))
         XCTAssertTrue(description.contains("code=-1"))
         XCTAssertTrue(description.contains("domain=NSPOSIXErrorDomain"))
         XCTAssertTrue(description.contains("code=\(ECONNRESET)"))
+        XCTAssertFalse(description.contains("unknown error"))
+    }
+
+    func testKnownNetworkErrorHasActionableDescription() {
+        let error = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorNotConnectedToInternet
+        )
+
+        let description = LocalModelManager.diagnosticDescription(error)
+        XCTAssertTrue(description.contains("设备当前未连接互联网"))
+        XCTAssertTrue(description.contains("domain=NSURLErrorDomain"))
+        XCTAssertTrue(description.contains("code=\(NSURLErrorNotConnectedToInternet)"))
+    }
+
+    func testLegacyUnknownDownloadErrorIsNotDisplayedVerbatim() {
+        let state = LocalModelDownloadState(
+            phase: .failed,
+            receivedBytes: 0,
+            expectedBytes: 100,
+            error: "unknown error",
+            revision: "revision",
+            sourceURL: "https://huggingface.co/model.gguf"
+        )
+
+        XCTAssertEqual(
+            state.visibleError,
+            "上次下载失败，但旧版本未记录错误域和错误码。请重新下载以获取具体原因。"
+        )
+        XCTAssertFalse(try XCTUnwrap(state.visibleError).contains("unknown error"))
     }
 }
 

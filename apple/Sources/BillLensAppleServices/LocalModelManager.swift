@@ -74,6 +74,14 @@ public struct LocalModelDownloadState: Codable, Sendable {
         revision: nil,
         sourceURL: nil
     )
+
+    public var visibleError: String? {
+        guard let error else { return nil }
+        if error == "unknown error" {
+            return "上次下载失败，但旧版本未记录错误域和错误码。请重新下载以获取具体原因。"
+        }
+        return error
+    }
 }
 
 public struct LocalModelInstalledState: Codable, Sendable {
@@ -413,11 +421,17 @@ public final class LocalModelManager: NSObject, ObservableObject, @unchecked Sen
         _ error: NSError,
         depth: Int
     ) -> String {
-        var fields = [
+        var fields: [String] = []
+        if let failureReason = transportFailureReason(error) {
+            fields.append(failureReason)
+        }
+        fields.append(contentsOf: [
             "domain=\(error.domain)",
             "code=\(error.code)",
-            "description=\(error.localizedDescription)",
-        ]
+        ])
+        if error.domain != NSURLErrorDomain || error.code != NSURLErrorUnknown {
+            fields.append("description=\(error.localizedDescription)")
+        }
         if let failureReason = error.localizedFailureReason, !failureReason.isEmpty {
             fields.append("reason=\(failureReason)")
         }
@@ -425,6 +439,71 @@ public final class LocalModelManager: NSObject, ObservableObject, @unchecked Sen
             fields.append("underlying={\(diagnosticDescription(underlying, depth: depth + 1))}")
         }
         return fields.joined(separator: " ")
+    }
+
+    nonisolated private static func transportFailureReason(_ error: NSError) -> String? {
+        guard error.domain == NSURLErrorDomain else {
+            return nil
+        }
+        switch error.code {
+        case NSURLErrorUnknown:
+            return "模型下载网络请求失败，系统未能分类具体原因。"
+        case NSURLErrorCancelled:
+            return "模型下载任务被系统取消。"
+        case NSURLErrorBadURL, NSURLErrorUnsupportedURL:
+            return "模型下载地址无效或系统不支持该地址。"
+        case NSURLErrorTimedOut:
+            return "连接模型下载服务器超时。"
+        case NSURLErrorCannotFindHost:
+            return "无法找到模型下载服务器。"
+        case NSURLErrorCannotConnectToHost:
+            return "无法连接模型下载服务器。"
+        case NSURLErrorNetworkConnectionLost:
+            return "模型下载期间网络连接中断。"
+        case NSURLErrorDNSLookupFailed:
+            return "模型下载服务器的 DNS 解析失败。"
+        case NSURLErrorHTTPTooManyRedirects:
+            return "模型下载地址重定向次数过多。"
+        case NSURLErrorResourceUnavailable:
+            return "模型下载资源当前不可用。"
+        case NSURLErrorNotConnectedToInternet:
+            return "设备当前未连接互联网。"
+        case NSURLErrorBadServerResponse:
+            return "模型下载服务器返回了无效响应。"
+        case NSURLErrorUserAuthenticationRequired:
+            return "模型下载服务器要求身份验证。"
+        case NSURLErrorZeroByteResource:
+            return "模型下载服务器返回了空文件。"
+        case NSURLErrorCannotDecodeRawData,
+             NSURLErrorCannotDecodeContentData,
+             NSURLErrorCannotParseResponse:
+            return "无法解析模型下载服务器的响应。"
+        case NSURLErrorSecureConnectionFailed:
+            return "无法与模型下载服务器建立安全连接。"
+        case NSURLErrorServerCertificateHasBadDate,
+             NSURLErrorServerCertificateUntrusted,
+             NSURLErrorServerCertificateHasUnknownRoot,
+             NSURLErrorServerCertificateNotYetValid:
+            return "模型下载服务器的证书无效。"
+        case NSURLErrorClientCertificateRejected,
+             NSURLErrorClientCertificateRequired:
+            return "模型下载服务器拒绝了客户端证书。"
+        case NSURLErrorFileDoesNotExist:
+            return "下载的模型临时文件不存在。"
+        case NSURLErrorNoPermissionsToReadFile:
+            return "没有权限读取下载的模型临时文件。"
+        case NSURLErrorDataLengthExceedsMaximum:
+            return "模型下载数据超过系统允许的大小。"
+        case NSURLErrorCannotCreateFile,
+             NSURLErrorCannotOpenFile,
+             NSURLErrorCannotWriteToFile:
+            return "无法写入模型下载文件。"
+        case NSURLErrorDownloadDecodingFailedMidStream,
+             NSURLErrorDownloadDecodingFailedToComplete:
+            return "模型下载内容解码失败。"
+        default:
+            return "模型下载网络请求失败。"
+        }
     }
 
     nonisolated public static func resolvedSelectedModel() throws -> (LocalModelDescriptor, URL) {

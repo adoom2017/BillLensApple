@@ -456,7 +456,7 @@ struct SettingsShell: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
 
-            if let error = download.error {
+            if let error = download.visibleError {
                 Text(error)
                     .font(.system(size: 10))
                     .foregroundStyle(IMColors.danger)
