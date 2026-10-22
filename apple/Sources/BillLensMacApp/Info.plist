@@ -22,13 +22,15 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>BillLens 需要麦克风权限以支持语音输入账单。</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>BillLens 需要语音识别权限以将语音转换为文字。</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>BillLens 需要语音识别权限以将语音转换为文字。</string>
 </dict>
 </plist>

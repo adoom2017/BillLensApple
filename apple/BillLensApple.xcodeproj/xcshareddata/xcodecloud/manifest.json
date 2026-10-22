@@ -1,0 +1,9 @@
+{
+  "id" : "8a4c6219-d1d6-4b9d-aff3-03ef6c1edacc",
+  "targets" : [
+    {
+      "id" : "eb3471fb-7f73-4e32-9bfb-451ebfa1562e",
+      "name" : "BillLensIOSApp"
+    }
+  ]
+}
