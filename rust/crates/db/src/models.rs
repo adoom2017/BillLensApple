@@ -169,6 +169,7 @@ impl TryFrom<&str> for ParsedDraftKind {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ParserSource {
+    Rule,
     Local,
     Cloud,
     CloudAfterLocalFailure,
@@ -177,6 +178,7 @@ pub enum ParserSource {
 impl ParserSource {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Rule => "rule",
             Self::Local => "local",
             Self::Cloud => "cloud",
             Self::CloudAfterLocalFailure => "cloud_after_local_failure",
@@ -189,6 +191,7 @@ impl TryFrom<&str> for ParserSource {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value {
+            "rule" => Ok(Self::Rule),
             "local" => Ok(Self::Local),
             "cloud" => Ok(Self::Cloud),
             "cloud_after_local_failure" => Ok(Self::CloudAfterLocalFailure),

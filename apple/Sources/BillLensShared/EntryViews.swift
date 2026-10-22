@@ -238,6 +238,7 @@ struct ReviewPanel: View {
         default: "账单"
         }
         let source = switch draft.parserSource {
+        case "rule": "规则解析"
         case "local": "本地模型"
         case "cloud_after_local_failure": "本地失败后云端"
         default: "云端模型"

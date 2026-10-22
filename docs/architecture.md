@@ -57,7 +57,7 @@ BillLensApple/
 
 | 路径 | 职责 |
 |---|---|
-| `rust/crates/core/` | `AppService`、LLM 调用、汇率、订阅到期处理 |
+| `rust/crates/core/` | `AppService`、规则解析（`rule_parser.rs`）、LLM 调用、汇率、订阅到期处理 |
 | `rust/crates/db/` | SQLite 持久化、迁移后的领域模型、查询 |
 | `rust/crates/ffi/` | 单入口 JSON FFI 协议，给 Swift 用 |
 | `rust/migrations/` | 数据库迁移，当前到 `0009_drop_sync_outbox.sql` |
@@ -98,9 +98,15 @@ RootView
 
 1. 用户输入文本、上传票据或开始语音。
 2. Swift 侧把输入发给 Rust。
-3. Rust 调 LLM，返回结构化结果。
-4. 结构化结果先写成 `RecordDraft`。
-5. 用户审核后确认入库，生成 `Record`。
+3. 文本输入先走 Rust 规则解析（`rule_parser.rs`）：金额、币种、收支方向、分类、订阅周期和时间。
+   - 规则能完整确定单笔账单（金额、显式币种、唯一分类）时直接生成结果，`parser_source = rule`，不调用模型。
+   - 否则调用本地 / 云端模型补全；规则已确定的字段写进 prompt，并在模型返回后由代码覆盖。
+   - 资产描述、多笔流水、订阅（需要识别服务名）和 OCR 文本始终交给模型。
+4. 时间换算只在代码里做：模型只返回原文时间片段 `time_text`（如“今天早上”），由 `rule_parser::resolve_time` 换算。
+   时段默认钟点：凌晨 05:00、早上 08:00、上午 10:00、中午 12:00、下午 15:00、傍晚 18:00、晚上 20:00；
+   只有日期（如“昨天”）时沿用当前钟点；没有任何时间线索时使用当前时间。
+5. 结构化结果先写成 `RecordDraft`。
+6. 用户审核后确认入库，生成 `Record`。
 
 ### 图片录入
 

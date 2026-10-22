@@ -2,89 +2,48 @@ use std::{env, fmt};
 
 use anyhow::{Context, Result, anyhow};
 use billlens_apple_db::{
-    ASSET_CATEGORIES, EXPENSE_CATEGORIES, INCOME_CATEGORIES, ParsedRecordPayload,
-    is_valid_asset_category, is_valid_record_category, is_valid_record_category_for_direction,
+    ASSET_CATEGORIES, EXPENSE_CATEGORIES, INCOME_CATEGORIES, ParsedAssetInfo, ParsedRecordPayload,
+    RecordDirection, SubscriptionCycle, is_valid_asset_category, is_valid_record_category,
+    is_valid_record_category_for_direction,
 };
-use chrono::{DateTime, Duration, FixedOffset, Local, NaiveDate, SecondsFormat};
+use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{EntrySource, logger};
+use crate::{EntrySource, logger, rule_parser};
 
 const TEXT_INPUT_RULES: &str =
     r#"输入来自用户直接表述。按原文明确语义提取字段，不要补充原文没有表达的交易对象或用途。"#;
 
 const OCR_INPUT_RULES: &str = r#"输入来自账单、收据、银行流水或支付凭证的 OCR 文本，页面样式和 OCR 行顺序都不固定。不要依据文字出现顺序、字号或视觉显著性选择字段，必须依据字段标签、上下文语义和交易角色选择证据：
-- transaction_at 优先使用凭证中明确标注的实际支付、交易、记账或入账时间；设备状态栏时间、截图时间、页面更新时间不是交易时间。只有凭证中没有任何交易时间线索时，才使用上方当前完整时间。
+- time_text 摘录凭证中明确标注的实际支付、交易、记账或入账时间原文；设备状态栏时间、截图时间、页面更新时间不是交易时间。凭证中没有交易时间时返回 null。
 - merchant 优先使用实际收款方、商户、店铺或服务提供方；电商平台、支付平台、银行和支付渠道只有在其本身就是明确交易对手时才能作为 merchant，不能因为名称更醒目而覆盖更具体的交易对手。
 - note 表示本次交易购买的商品或服务、交易用途或用户备注。存在商品或服务名称时，提取能区分交易的简短核心名称，去掉规格堆叠和营销修饰。
 - 订单、支付、履约、物流或退款流程状态可以帮助判断交易，但不能直接作为 note。订单号、流水号、支付工具、银行卡尾号、积分奖励、广告活动和页面功能说明也不能作为 note。
 - 如果没有明确的商品、服务、用途或用户备注，note 返回 null；不要用页面上最靠近金额的文字填充。"#;
 
-const RECORD_PROMPT_TEMPLATE: &str = r#"你是一个消费记录结构化助手。请将用户输入解析为 JSON。
+const RECORD_PROMPT_TEMPLATE: &str = r#"你是记账助手，把用户输入解析成 JSON 数组，每笔交易一个对象；只有一笔也返回包含一个元素的数组。只输出 JSON，不要解释，不要 markdown。
 {input_source_rules}
-今天的日期是：{today}
-当前完整时间（含设备时区偏移）是：{current_time}
-相对日期基准：昨天是 {yesterday_date}，前天是 {day_before_yesterday_date}。
-相对时间必须先换算，再填写 transaction_at，禁止把“昨天”“前天”等相对日期直接替换成今天或当前完整时间：
-- 原文包含“昨天”且没有精确钟点时，使用 {yesterday_time}。
-- 原文包含“前天”且没有精确钟点时，使用 {day_before_yesterday_time}。
-- 原文出现“N 天前”“N 天后”“上周/下周 + 星期”时，必须以今天 {today} 为基准完成日历换算，不能复制当前日期。
-- 原文给出精确钟点时，必须用该钟点覆盖当前钟点。例如“下午2点”是 14:00:00，“晚上8点半”是 20:30:00。
-- “早上”“中午”“下午”“晚上”等词本身不代表唯一钟点；没有具体几点几分时，不要臆造固定小时，保留当前完整时间的时分秒，但日期仍必须按相对日期换算。
-示例：“昨天打车花了50元”的 transaction_at 必须是 “{yesterday_time}”；“前天下午2点买东西”的 transaction_at 必须是 “{day_before_yesterday_date}T14:00:00{timezone_offset}”。
-必须严格返回 JSON，不要输出解释文字，不要输出 markdown。
-如果输入包含多条交易记录（如账单列表、银行流水、多笔消费），请返回 JSON 数组，每条记录一个对象。如果只有一条记录，也返回包含一个元素的数组。
-category 只能从以下固定分类中选择：
-- 支出：{expense_categories}
-- 收入：{income_categories}
-如果无法判断分类，使用”其他”。
-外部平台或账单原有分类只能作为语义线索，不能原样复制到 category，必须映射到上面的固定分类。
-购买服装、鞋靴、运动装备或其他实体商品时，category 使用“购物”。分类应依据实际交易内容，不能只依据平台或支付渠道名称。
-涉及会员、订阅、续费、月费、年费等周期性付费服务（如 ChatGPT、Netflix、iCloud、Spotify、视频会员等），应分类为”订阅”。
-如果文本明确出现”退款””退回””退费””退款成功”等语义，应判断为收入，分类优先使用”其他”。
-amount 必须始终返回正数，不要返回负数；收支方向只放在 direction 字段里表达。
-只有当原始输入中明确出现时间线索时，才填写 transaction_at；如果原始输入没有体现任何时间信息，transaction_at 必须直接使用当前完整时间，精确到秒，不要只返回日期，不要返回当天 0 点，不要猜测、不要编造。
-transaction_at 必须是包含时区偏移的 RFC3339 时间。原始时间没有时区、且语义明确是设备本地时间时，使用上方当前时间中的设备时区偏移；不要臆造 Z 或 UTC。原文明确属于其他时区但无法确定偏移时，transaction_at 返回 null。
-note 只表达交易对象、商品或服务内容、交易用途或用户备注。忽略交易流程状态、编号、支付工具、积分、贴纸、奖励、营销文案、活动提示和页面功能说明；如果没有合适备注，返回 null。
-如果用户描述的是订阅/会员/周期性付费服务，额外返回 "subscription_cycle" 字段：
-- "monthly" 表示每月付费
-- "yearly" 表示每年付费
-如果不是订阅类消费，subscription_cycle 返回 null。
-判断依据：出现"订阅""会员""月费""年费""续费""每月""每年""包月""包年""月付""年付"等关键词时应识别为订阅。
-如果用户描述的是资产余额/账户存款/投资持仓（如"招商银行存款还有 54000 元""支付宝余额 3000 块""股票账户 12 万""持有加密货币市值 5 万"等），额外返回 "asset_info" 字段：
-{
-  "name": 机构或品牌名（字符串，只保留核心机构/品牌名，去掉"账号""账户""股票""存款""基金""证券"等描述性后缀，如"东方财富股票账号"→"东方财富"，"招商银行存款账户"→"招商银行"）,
-  "category": "{asset_categories_pipe}" 之一,
-  "amount": 数字（正数）,
-  "currency": ISO 4217 代码,
-  "recorded_on": "YYYY-MM-DD" | null,
-  "note": string | null
-}
-判断依据：出现"资产""余额""存款""还有 XX 元""账户里 XX""持仓""市值"等关键词，且主体是账户/机构而非消费动作。
-资产记录时，direction/amount/category/merchant/transaction_at/subscription_cycle 一律返回 null，让 asset_info 独立表达。
-如果不是资产描述，asset_info 返回 null。
-JSON 格式如下：
-[
-  {
-    "direction": "income" | "expense" | null,
-    "amount": number | null,
-    "currency": "ISO 4217 code, e.g. CNY/USD/EUR/HKD/JPY/GBP" | null,
-    "category": string | null,
-    "merchant": string | null,
-    "transaction_at": "RFC3339 datetime" | null,
-    "note": string | null,
-    "subscription_cycle": "monthly" | "yearly" | null,
-    "asset_info": { "name": string, "category": string, "amount": number, "currency": string, "recorded_on": string | null, "note": string | null } | null
-  }
-]
-如果原文明确出现币种，请返回对应 ISO 4217 代码：
-- 人民币 / 元 / 块 / RMB / ￥ / ¥ -> CNY
-- 美元 / 美金 / $ / USD -> USD
-- 港币 / 港元 / HK$ / HKD -> HKD
-- 欧元 / € / EUR -> EUR
-- 日元 / JPY -> JPY"#;
+{pinned_fields}
+字段规则：
+- direction："expense" 支出，"income" 收入。退款、退回、退费属于收入。
+- amount：正数；收支方向只放在 direction。
+- currency：原文出现币种时返回 ISO 4217 代码（元/块/人民币/¥ → CNY，美元/美金/$ → USD，港币/港元 → HKD，欧元/€ → EUR，日元 → JPY，英镑/£ → GBP）；原文没有币种返回 null。
+- category：只能从固定分类中选择。支出：{expense_categories}；收入：{income_categories}。平台或账单原有分类只是线索，必须映射到固定分类；无法判断用“其他”。服装、鞋靴、数码等实体商品用“购物”；会员、订阅、续费等周期付费用“订阅”；退款用“退款”。
+- merchant：实际交易对手（商户、店铺、服务方）；没有返回 null。
+- note：交易的商品、服务或用途的简短描述，不含编号、支付工具、营销文案；没有返回 null。
+- time_text：原文中描述交易时间的片段，原样摘录，不要换算或补全（如“今天早上”“昨晚8点”“10月3日”“2026-10-22 08:15”）；原文没有时间返回 null。
+- subscription_cycle：订阅、会员、续费等周期付费时返回 "monthly" 或 "yearly"，否则 null。
+- asset_info：仅当描述账户余额、存款、持仓、市值等资产状态（不是消费动作）时返回，此时其余字段全部为 null：
+  {"name": 核心机构或品牌名（去掉“账户”“存款”“股票”等后缀，如“招商银行存款账户”→“招商银行”）, "category": "{asset_categories_pipe}" 之一, "amount": 正数, "currency": ISO 代码或 null, "recorded_on": "YYYY-MM-DD" 或 null, "note": 字符串或 null}
+示例：
+输入：今天早上打车花了30块
+输出：[{"direction":"expense","amount":30,"currency":"CNY","category":"交通","merchant":null,"time_text":"今天早上","note":"打车","subscription_cycle":null,"asset_info":null}]
+输入：订阅了 Netflix 每月 15.99 美元
+输出：[{"direction":"expense","amount":15.99,"currency":"USD","category":"订阅","merchant":"Netflix","time_text":null,"note":null,"subscription_cycle":"monthly","asset_info":null}]
+输入：招商银行存款还有54000元
+输出：[{"direction":null,"amount":null,"currency":null,"category":null,"merchant":null,"time_text":null,"note":null,"subscription_cycle":null,"asset_info":{"name":"招商银行","category":"存款","amount":54000,"currency":"CNY","recorded_on":null,"note":null}}]"#;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
@@ -235,15 +194,15 @@ impl CloudLlmClient {
         }
     }
 
-    pub async fn parse_record_ocr_text_multi(
+    pub(crate) async fn parse_records(
         &self,
         text: String,
+        source: &EntrySource,
+        system_prompt: String,
+        now: DateTime<FixedOffset>,
     ) -> Result<Vec<ParsedRecordPayload>> {
-        self.parse_records_multi(text, EntrySource::Ocr).await
-    }
-
-    pub async fn parse_record_text_multi(&self, text: String) -> Result<Vec<ParsedRecordPayload>> {
-        self.parse_records_multi(text, EntrySource::Text).await
+        self.parse_records_multi(text, source, system_prompt, now)
+            .await
     }
 
     pub async fn list_models(&self) -> Result<Vec<LlmModelItem>> {
@@ -283,9 +242,10 @@ impl CloudLlmClient {
     async fn parse_records_multi(
         &self,
         text: String,
-        source: EntrySource,
+        source: &EntrySource,
+        prompt: String,
+        now: DateTime<FixedOffset>,
     ) -> Result<Vec<ParsedRecordPayload>> {
-        let prompt = build_record_prompt(&source);
         let thinking_mode = self
             .enable_thinking
             .map(|value| value.to_string())
@@ -296,7 +256,7 @@ impl CloudLlmClient {
                 "provider={} model={} mode=multi source={} enable_thinking={thinking_mode}",
                 self.provider,
                 self.model,
-                entry_source_name(&source),
+                entry_source_name(source),
             ),
         );
         let response = self.send_prompted_request(prompt, text.clone()).await?;
@@ -330,7 +290,7 @@ impl CloudLlmClient {
                 summarize_text_output(&content)
             ),
         );
-        let payloads = parse_record_payloads_strict(&content)?;
+        let payloads = parse_record_payloads_strict(&content, now)?;
         logger::info(
             "llm.response.parsed_multi",
             format!("count={}", payloads.len()),
@@ -445,37 +405,11 @@ fn parse_llm_model_item(value: &Value) -> Result<LlmModelItem> {
     })
 }
 
-pub(crate) fn build_record_prompt(source: &EntrySource) -> String {
-    build_record_prompt_at(Local::now().fixed_offset(), source)
-}
-
-fn build_record_prompt_at(now: DateTime<FixedOffset>, source: &EntrySource) -> String {
-    let yesterday = now - Duration::days(1);
-    let day_before_yesterday = now - Duration::days(2);
+/// `pinned_fields` 是规则解析已确定的字段说明，模型输出后仍由代码覆盖。
+pub(crate) fn build_record_prompt(source: &EntrySource, pinned_fields: Option<&str>) -> String {
     RECORD_PROMPT_TEMPLATE
         .replace("{input_source_rules}", input_source_rules(source))
-        .replace("{today}", &now.format("%Y-%m-%d").to_string())
-        .replace(
-            "{current_time}",
-            &now.to_rfc3339_opts(SecondsFormat::Secs, false),
-        )
-        .replace(
-            "{yesterday_date}",
-            &yesterday.format("%Y-%m-%d").to_string(),
-        )
-        .replace(
-            "{yesterday_time}",
-            &yesterday.to_rfc3339_opts(SecondsFormat::Secs, false),
-        )
-        .replace(
-            "{day_before_yesterday_date}",
-            &day_before_yesterday.format("%Y-%m-%d").to_string(),
-        )
-        .replace(
-            "{day_before_yesterday_time}",
-            &day_before_yesterday.to_rfc3339_opts(SecondsFormat::Secs, false),
-        )
-        .replace("{timezone_offset}", &now.offset().to_string())
+        .replace("{pinned_fields}", pinned_fields.unwrap_or(""))
         .replace("{expense_categories}", &EXPENSE_CATEGORIES.join("、"))
         .replace("{income_categories}", &INCOME_CATEGORIES.join("、"))
         .replace("{asset_categories_pipe}", &ASSET_CATEGORIES.join("|"))
@@ -614,7 +548,53 @@ fn extract_anthropic_message_content(raw_response: &Value) -> Result<String> {
     }
 }
 
-pub(crate) fn parse_record_payloads_strict(content: &str) -> Result<Vec<ParsedRecordPayload>> {
+/// 模型输出契约：时间只摘录原文片段（time_text），由代码统一换算。
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LlmRecordPayload {
+    direction: Option<RecordDirection>,
+    amount: Option<f64>,
+    currency: Option<String>,
+    category: Option<String>,
+    merchant: Option<String>,
+    time_text: Option<String>,
+    note: Option<String>,
+    subscription_cycle: Option<SubscriptionCycle>,
+    asset_info: Option<ParsedAssetInfo>,
+}
+
+impl LlmRecordPayload {
+    fn into_payload(self, now: DateTime<FixedOffset>) -> Result<ParsedRecordPayload> {
+        let time_text = self
+            .time_text
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let transaction_at = match (&self.asset_info, time_text) {
+            (Some(_), _) => None,
+            (None, None) => Some(now),
+            (None, Some(text)) => Some(
+                rule_parser::resolve_time(&text, now)?
+                    .ok_or_else(|| anyhow!("LLM time_text 无法换算为时间：{text}"))?,
+            ),
+        };
+        Ok(ParsedRecordPayload {
+            direction: self.direction,
+            amount: self.amount,
+            currency: self.currency,
+            category: self.category,
+            merchant: self.merchant,
+            transaction_at: transaction_at.map(|value| value.with_timezone(&Utc)),
+            note: self.note,
+            subscription_cycle: self.subscription_cycle,
+            asset_info: self.asset_info,
+        })
+    }
+}
+
+pub(crate) fn parse_record_payloads_strict(
+    content: &str,
+    now: DateTime<FixedOffset>,
+) -> Result<Vec<ParsedRecordPayload>> {
     let trimmed = content.trim();
     let output_summary = summarize_text_output(content);
     let value: Value = serde_json::from_str(trimmed).map_err(|error| {
@@ -624,7 +604,7 @@ pub(crate) fn parse_record_payloads_strict(content: &str) -> Result<Vec<ParsedRe
             summarize_json_error_location(trimmed, &error)
         )
     })?;
-    let payloads: Vec<ParsedRecordPayload> =
+    let raw_payloads: Vec<LlmRecordPayload> =
         serde_path_to_error::deserialize(value).map_err(|error| {
         anyhow!(
             "LLM response JSON does not match the record contract: {}; error_path={}; parser_error={}",
@@ -633,9 +613,13 @@ pub(crate) fn parse_record_payloads_strict(content: &str) -> Result<Vec<ParsedRe
             error.inner()
         )
     })?;
-    if payloads.is_empty() {
+    if raw_payloads.is_empty() {
         return Err(anyhow!("LLM response contains no parsed records"));
     }
+    let payloads = raw_payloads
+        .into_iter()
+        .map(|payload| payload.into_payload(now))
+        .collect::<Result<Vec<_>>>()?;
     for payload in &payloads {
         validate_record_payload_contract(payload)?;
     }
@@ -774,7 +758,7 @@ fn summarize_scalar(value: char) -> String {
     format!("U+{:04X}", value as u32)
 }
 
-fn validate_record_payload_contract(payload: &ParsedRecordPayload) -> Result<()> {
+pub(crate) fn validate_record_payload_contract(payload: &ParsedRecordPayload) -> Result<()> {
     if payload.asset_info.is_some() && payload.subscription_cycle.is_some() {
         return Err(anyhow!(
             "LLM payload cannot be both an asset and a subscription"
@@ -897,7 +881,7 @@ mod tests {
     use crate::EntrySource;
 
     use super::{
-        LlmConfig, LlmProvider, build_openai_request_body, build_record_prompt_at,
+        LlmConfig, LlmProvider, build_openai_request_body, build_record_prompt,
         extract_openai_message_content, normalize_currency_code, parse_llm_model_items,
         parse_record_payloads_strict,
     };
@@ -962,45 +946,32 @@ mod tests {
         assert_eq!(disabled["enable_thinking"], json!(false));
     }
 
-    #[test]
-    fn record_prompt_provides_an_rfc3339_time_with_explicit_device_offset() {
-        let now = chrono::DateTime::parse_from_rfc3339("2026-07-14T14:38:45+08:00").unwrap();
-        let prompt = build_record_prompt_at(now, &EntrySource::Text);
-        assert!(prompt.contains("2026-07-14T14:38:45+08:00"));
-        assert!(prompt.contains("昨天是 2026-07-13，前天是 2026-07-12"));
-        assert!(
-            prompt
-                .contains("“昨天打车花了50元”的 transaction_at 必须是 “2026-07-13T14:38:45+08:00”")
-        );
-        assert!(
-            prompt.contains(
-                "“前天下午2点买东西”的 transaction_at 必须是 “2026-07-12T14:00:00+08:00”"
-            )
-        );
-        assert!(prompt.contains("transaction_at 必须是包含时区偏移的 RFC3339 时间"));
-        assert!(prompt.contains("不要臆造 Z 或 UTC"));
-        assert!(prompt.contains("购买服装、鞋靴、运动装备或其他实体商品时"));
-        assert!(prompt.contains("category 使用“购物”"));
-        assert!(prompt.contains("不能只依据平台或支付渠道名称"));
+    fn test_now() -> chrono::DateTime<chrono::FixedOffset> {
+        chrono::DateTime::parse_from_rfc3339("2026-07-14T14:38:45+08:00").unwrap()
     }
 
     #[test]
-    fn record_prompt_relative_date_anchors_cross_month_and_year_boundaries() {
-        let now = chrono::DateTime::parse_from_rfc3339("2027-01-01T00:05:06+08:00").unwrap();
-        let prompt = build_record_prompt_at(now, &EntrySource::Text);
+    fn record_prompt_leaves_time_arithmetic_to_code() {
+        let prompt = build_record_prompt(&EntrySource::Text, None);
+        assert!(prompt.contains("time_text：原文中描述交易时间的片段，原样摘录"));
+        assert!(!prompt.contains("transaction_at"));
+        assert!(!prompt.contains("{pinned_fields}"));
+        assert!(!prompt.contains("{expense_categories}"));
+        assert!(prompt.contains("服装、鞋靴、数码等实体商品用“购物”"));
+    }
 
-        assert!(prompt.contains("昨天是 2026-12-31，前天是 2026-12-30"));
-        assert!(prompt.contains("2026-12-31T00:05:06+08:00"));
-        assert!(prompt.contains("2026-12-30T14:00:00+08:00"));
-        assert!(!prompt.contains("{yesterday_"));
-        assert!(!prompt.contains("{day_before_yesterday_"));
-        assert!(!prompt.contains("{timezone_offset}"));
+    #[test]
+    fn record_prompt_includes_pinned_fields() {
+        let prompt = build_record_prompt(
+            &EntrySource::Text,
+            Some("以下字段已由程序确定\n- amount: 25"),
+        );
+        assert!(prompt.contains("- amount: 25"));
     }
 
     #[test]
     fn record_prompt_distinguishes_ocr_evidence_without_assuming_a_page_style() {
-        let now = chrono::DateTime::parse_from_rfc3339("2026-07-14T14:38:45+08:00").unwrap();
-        let prompt = build_record_prompt_at(now, &EntrySource::Ocr);
+        let prompt = build_record_prompt(&EntrySource::Ocr, None);
 
         assert!(prompt.contains("页面样式和 OCR 行顺序都不固定"));
         assert!(prompt.contains("必须依据字段标签、上下文语义和交易角色选择证据"));
@@ -1015,8 +986,7 @@ mod tests {
 
     #[test]
     fn text_prompt_does_not_receive_ocr_only_evidence_rules() {
-        let now = chrono::DateTime::parse_from_rfc3339("2026-07-14T14:38:45+08:00").unwrap();
-        let prompt = build_record_prompt_at(now, &EntrySource::Text);
+        let prompt = build_record_prompt(&EntrySource::Text, None);
 
         assert!(prompt.contains("输入来自用户直接表述"));
         assert!(!prompt.contains("页面样式和 OCR 行顺序都不固定"));
@@ -1053,7 +1023,8 @@ mod tests {
     #[test]
     fn strict_parser_accepts_exact_json_array_contract() {
         let payloads = parse_record_payloads_strict(
-            r#"[{"direction":"expense","amount":35,"currency":"CNY","category":"餐饮","merchant":null,"transaction_at":"2026-07-14T12:00:00Z","note":null,"subscription_cycle":null,"asset_info":null}]"#,
+            r#"[{"direction":"expense","amount":35,"currency":"CNY","category":"餐饮","merchant":null,"time_text":null,"note":null,"subscription_cycle":null,"asset_info":null}]"#,
+            test_now(),
         )
         .unwrap();
         assert_eq!(payloads.len(), 1);
@@ -1062,14 +1033,14 @@ mod tests {
 
     #[test]
     fn strict_parser_rejects_markdown_and_nested_string_json() {
-        assert!(parse_record_payloads_strict("```json\n[]\n```").is_err());
-        assert!(parse_record_payloads_strict(r#""[{\"direction\":null}]""#).is_err());
+        assert!(parse_record_payloads_strict("```json\n[]\n```", test_now()).is_err());
+        assert!(parse_record_payloads_strict(r#""[{\"direction\":null}]""#, test_now()).is_err());
     }
 
     #[test]
     fn strict_parser_reports_json_syntax_location_without_output_content() {
-        let error =
-            parse_record_payloads_strict("[\n  {\"direction\": \"expense\"\n]").unwrap_err();
+        let error = parse_record_payloads_strict("[\n  {\"direction\": \"expense\"\n]", test_now())
+            .unwrap_err();
         let message = error.to_string();
         assert!(message.contains("invalid JSON syntax"));
         assert!(message.contains("error_line="));
@@ -1080,7 +1051,8 @@ mod tests {
 
     #[test]
     fn strict_parser_distinguishes_valid_json_from_record_contract_failure() {
-        let error = parse_record_payloads_strict(r#"[{"unexpected":true}]"#).unwrap_err();
+        let error =
+            parse_record_payloads_strict(r#"[{"unexpected":true}]"#, test_now()).unwrap_err();
         let message = error.to_string();
         assert!(message.contains("JSON does not match the record contract"));
         assert!(message.contains("error_path=[0].unexpected"));
@@ -1089,27 +1061,47 @@ mod tests {
     }
 
     #[test]
-    fn strict_parser_accepts_allowlisted_local_transaction_timestamp() {
+    fn strict_parser_resolves_time_text_in_code() {
         let payloads = parse_record_payloads_strict(
-            r#"[{"direction":"expense","amount":35,"currency":"CNY","category":"餐饮","merchant":null,"transaction_at":"2026-07-14","note":null,"subscription_cycle":null,"asset_info":null}]"#,
+            r#"[{"direction":"expense","amount":35,"currency":"CNY","category":"餐饮","merchant":null,"time_text":"昨天早上","note":null,"subscription_cycle":null,"asset_info":null}]"#,
+            test_now(),
         )
         .unwrap();
         assert_eq!(
             payloads[0].transaction_at.unwrap().to_rfc3339(),
-            "2026-07-13T16:00:00+00:00"
+            "2026-07-13T00:00:00+00:00"
         );
     }
 
     #[test]
-    fn strict_parser_reports_path_for_transaction_timestamp_outside_allowlist() {
+    fn strict_parser_uses_now_without_time_text_and_none_for_assets() {
+        let payloads = parse_record_payloads_strict(
+            r#"[{"direction":"expense","amount":35,"currency":"CNY","category":"餐饮","merchant":null,"time_text":null,"note":null,"subscription_cycle":null,"asset_info":null},{"direction":null,"amount":null,"currency":null,"category":null,"merchant":null,"time_text":null,"note":null,"subscription_cycle":null,"asset_info":{"name":"招商银行","category":"存款","amount":54000,"currency":"CNY","recorded_on":null,"note":null}}]"#,
+            test_now(),
+        )
+        .unwrap();
+        assert_eq!(
+            payloads[0].transaction_at.unwrap().to_rfc3339(),
+            "2026-07-14T06:38:45+00:00"
+        );
+        assert!(payloads[1].transaction_at.is_none());
+    }
+
+    #[test]
+    fn strict_parser_rejects_unresolvable_time_text_and_legacy_transaction_at() {
         let error = parse_record_payloads_strict(
-            r#"[{"direction":"expense","amount":35,"currency":"CNY","category":"餐饮","merchant":null,"transaction_at":"2026/07/14 14:38:45","note":null,"subscription_cycle":null,"asset_info":null}]"#,
+            r#"[{"direction":"expense","amount":35,"currency":"CNY","category":"餐饮","merchant":null,"time_text":"最近","note":null,"subscription_cycle":null,"asset_info":null}]"#,
+            test_now(),
         )
         .unwrap_err();
-        let message = error.to_string();
-        assert!(message.contains("error_path=[0].transaction_at"));
-        assert!(message.contains("transaction_at must be"));
-        assert!(!message.contains("2026/07/14"));
+        assert!(error.to_string().contains("time_text 无法换算"));
+
+        let error = parse_record_payloads_strict(
+            r#"[{"direction":"expense","amount":35,"currency":"CNY","category":"餐饮","merchant":null,"transaction_at":"2026-07-14","note":null,"subscription_cycle":null,"asset_info":null}]"#,
+            test_now(),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("error_path=[0].transaction_at"));
     }
 
     #[test]
@@ -1149,7 +1141,8 @@ mod tests {
     fn strict_parser_rejects_currency_aliases() {
         assert!(
             parse_record_payloads_strict(
-                r#"[{"direction":"expense","amount":12,"currency":"美元","category":"餐饮","merchant":null,"transaction_at":null,"note":null,"subscription_cycle":null,"asset_info":null}]"#,
+                r#"[{"direction":"expense","amount":12,"currency":"美元","category":"餐饮","merchant":null,"time_text":null,"note":null,"subscription_cycle":null,"asset_info":null}]"#,
+                test_now(),
             )
             .is_err()
         );

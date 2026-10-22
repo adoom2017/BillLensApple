@@ -2610,6 +2610,34 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn rule_parser_source_is_persisted_after_migration() {
+        let repo = make_repo().await;
+        let payload = ParsedRecordPayload {
+            direction: Some(RecordDirection::Expense),
+            amount: Some(100.0),
+            currency: Some("CNY".to_string()),
+            category: Some("交通".to_string()),
+            merchant: None,
+            transaction_at: Some(Utc::now()),
+            note: None,
+            subscription_cycle: None,
+            asset_info: None,
+        };
+        let draft = repo
+            .create_parsed_drafts_batch(
+                "rule-profile",
+                "今天早上打车花了100元",
+                &[payload],
+                ParserSource::Rule,
+                None,
+            )
+            .await
+            .unwrap()
+            .remove(0);
+        assert_eq!(draft.parser_source, ParserSource::Rule);
+    }
+
     async fn assert_injected_confirmation_failure_rolls_back(
         profile: &str,
         trigger: &str,

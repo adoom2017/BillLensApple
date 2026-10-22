@@ -2,6 +2,7 @@ mod fx;
 mod llm;
 pub mod local_llm;
 mod logger;
+mod rule_parser;
 pub mod stt;
 
 use anyhow::{Result, anyhow};
@@ -16,12 +17,14 @@ pub use billlens_apple_db::{
     SubscriptionUpdate, advance_next_due, is_valid_asset_category, is_valid_record_category,
     is_valid_record_category_for_direction,
 };
-use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate, TimeZone, Utc};
 use fx::{FxClient, resolve_fx_rate};
 use llm::{
     CloudLlmClient, build_record_prompt, normalize_currency_code, parse_record_payloads_strict,
+    validate_record_payload_contract,
 };
 pub use llm::{LlmConfig, LlmModelItem};
+use rule_parser::{RuleHints, RuleOutcome};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
@@ -94,6 +97,7 @@ struct ParseRouter;
 impl ParseRouter {
     async fn route<LocalCall, LocalFuture, CloudCall, CloudFuture>(
         routing: LocalRoutingRequest,
+        now: DateTime<FixedOffset>,
         mut local_call: LocalCall,
         mut cloud_call: CloudCall,
     ) -> Result<RoutedParseResult, CoreError>
@@ -138,7 +142,7 @@ impl ParseRouter {
                     "llm.local.response",
                     format!("model_id={returned_model_id} elapsed_ms={elapsed_ms}"),
                 );
-                match parse_record_payloads_strict(&raw_content) {
+                match parse_record_payloads_strict(&raw_content, now) {
                     Ok(payloads) => {
                         return Ok(RoutedParseResult {
                             payloads,
@@ -408,7 +412,10 @@ impl AppService {
             .await
             .map_err(map_internal)?;
 
-        let routed = self.parse_with_routing(&content, &source, routing).await?;
+        let now = Local::now().fixed_offset();
+        let routed = self
+            .parse_with_rules(&content, &source, routing, now)
+            .await?;
         let payloads = routed.payloads;
 
         if payloads.is_empty() {
@@ -656,19 +663,64 @@ impl AppService {
         })
     }
 
+    /// 文字输入先走规则解析：能完整确定就不调用模型；否则模型补全，规则字段覆盖模型结果。
+    async fn parse_with_rules(
+        &self,
+        content: &str,
+        source: &EntrySource,
+        routing: LocalRoutingRequest,
+        now: DateTime<FixedOffset>,
+    ) -> Result<RoutedParseResult, CoreError> {
+        let hints = match source {
+            EntrySource::Ocr => RuleHints::default(),
+            EntrySource::Text => {
+                match rule_parser::parse_text(content, now).map_err(map_internal)? {
+                    RuleOutcome::Complete(payload) => {
+                        logger::info("parse.rule.complete", "model_skipped=true");
+                        return Ok(RoutedParseResult {
+                            payloads: vec![payload],
+                            parser_source: ParserSource::Rule,
+                            local_model_id: None,
+                            local_failure: None,
+                        });
+                    }
+                    RuleOutcome::NeedsModel(hints) => hints,
+                }
+            }
+        };
+        let pinned_fields = hints.prompt_block();
+        let mut routed = self
+            .parse_with_routing(content, source, routing, now, pinned_fields.as_deref())
+            .await?;
+        if !hints.is_empty() {
+            let applied = hints.apply(&mut routed.payloads);
+            logger::info("parse.rule.hints", format!("applied={applied}"));
+            for payload in &routed.payloads {
+                validate_record_payload_contract(payload).map_err(|error| {
+                    CoreError::Internal(format!("规则字段与模型结果冲突：{error:#}"))
+                })?;
+            }
+        }
+        Ok(routed)
+    }
+
     async fn parse_with_routing(
         &self,
         content: &str,
         source: &EntrySource,
         routing: LocalRoutingRequest,
+        now: DateTime<FixedOffset>,
+        pinned_fields: Option<&str>,
     ) -> Result<RoutedParseResult, CoreError> {
+        let system_prompt = build_record_prompt(source, pinned_fields);
         ParseRouter::route(
             routing,
+            now,
             |model_id| {
                 local_llm::run(local_llm::LocalLlmRequest {
                     schema_version: 1,
                     model_id: model_id.to_string(),
-                    system_prompt: build_record_prompt(source),
+                    system_prompt: system_prompt.clone(),
                     user_text: content.to_string(),
                     grammar: local_llm::record_json_grammar(),
                     context_tokens: 8192,
@@ -676,7 +728,7 @@ impl AppService {
                     deadline_ms: 45_000,
                 })
             },
-            || self.parse_with_cloud(content, source),
+            || self.parse_with_cloud(content, source, system_prompt.clone(), now),
         )
         .await
     }
@@ -685,16 +737,16 @@ impl AppService {
         &self,
         content: &str,
         source: &EntrySource,
+        system_prompt: String,
+        now: DateTime<FixedOffset>,
     ) -> Result<Vec<ParsedRecordPayload>, CoreError> {
         let llm = self
             .llm
             .as_ref()
             .ok_or_else(|| CoreError::bad_request("未配置可用的云端模型"))?;
-        match source {
-            EntrySource::Text => llm.parse_record_text_multi(content.to_string()).await,
-            EntrySource::Ocr => llm.parse_record_ocr_text_multi(content.to_string()).await,
-        }
-        .map_err(map_internal)
+        llm.parse_records(content.to_string(), source, system_prompt, now)
+            .await
+            .map_err(map_internal)
     }
 
     async fn upsert_asset_from_payload(
@@ -2084,10 +2136,14 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    const VALID_LOCAL_RESPONSE: &str = r#"[{"direction":"expense","amount":12,"currency":"CNY","category":"其他","merchant":null,"transaction_at":"2026-07-14T12:00:00Z","note":null,"subscription_cycle":null,"asset_info":null}]"#;
+    const VALID_LOCAL_RESPONSE: &str = r#"[{"direction":"expense","amount":12,"currency":"CNY","category":"其他","merchant":null,"time_text":"2026-07-14 20:00","note":null,"subscription_cycle":null,"asset_info":null}]"#;
+
+    fn test_now() -> DateTime<FixedOffset> {
+        DateTime::parse_from_rfc3339("2026-07-14T14:38:45+08:00").unwrap()
+    }
 
     fn routed_payload() -> ParsedRecordPayload {
-        parse_record_payloads_strict(VALID_LOCAL_RESPONSE)
+        parse_record_payloads_strict(VALID_LOCAL_RESPONSE, test_now())
             .unwrap()
             .remove(0)
     }
@@ -2162,6 +2218,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rule_parsed_text_creates_draft_without_any_model() {
+        let db_path = std::env::temp_dir().join(format!("billlens-rule-{}.sqlite", Uuid::new_v4()));
+        let repo = BillRepository::connect(&db_path).await.unwrap();
+        let service = AppService::new(
+            repo,
+            EngineBootstrap {
+                device_id: "test-device".to_string(),
+                llm: None,
+                log_file_path: None,
+            },
+        )
+        .unwrap();
+        let profile_id = "rule-profile";
+        service.bootstrap(profile_id).await.unwrap();
+
+        // 未配置任何模型、云端模式：规则能完整解析时不应调用模型。
+        let result = service
+            .submit_text(
+                profile_id,
+                "今天早上打车花了100元".to_string(),
+                false,
+                EntrySource::Text,
+                LocalRoutingRequest {
+                    mode: LocalRoutingMode::CloudOnly,
+                    model_id: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.parser_source, ParserSource::Rule);
+        let draft = &result.home.drafts[0];
+        assert_eq!(draft.parser_source, ParserSource::Rule);
+        assert_eq!(draft.amount, Some(100.0));
+        assert_eq!(draft.category.as_deref(), Some("交通"));
+        let local = draft.transaction_at.unwrap().with_timezone(&Local);
+        assert_eq!(local.date_naive(), Local::now().date_naive());
+        assert_eq!(local.format("%H:%M:%S").to_string(), "08:00:00");
+
+        // 规则不完整时仍需要模型；未配置模型时显式报错，而不是静默生成残缺草稿。
+        let error = service
+            .submit_text(
+                profile_id,
+                "在全家花了25".to_string(),
+                false,
+                EntrySource::Text,
+                LocalRoutingRequest {
+                    mode: LocalRoutingMode::CloudOnly,
+                    model_id: None,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("未配置可用的云端模型"));
+    }
+
+    #[tokio::test]
     async fn cloud_only_calls_cloud_once_and_never_calls_local() {
         let local_calls = AtomicUsize::new(0);
         let cloud_calls = AtomicUsize::new(0);
@@ -2170,6 +2283,7 @@ mod tests {
                 mode: LocalRoutingMode::CloudOnly,
                 model_id: Some("ignored-model".to_string()),
             },
+            test_now(),
             |_| {
                 local_calls.fetch_add(1, Ordering::SeqCst);
                 std::future::ready(Err(local_error(
@@ -2198,6 +2312,7 @@ mod tests {
                 mode: LocalRoutingMode::LocalFirst,
                 model_id: Some("test-model".to_string()),
             },
+            test_now(),
             |_| {
                 local_calls.fetch_add(1, Ordering::SeqCst);
                 std::future::ready(Ok((
@@ -2227,6 +2342,7 @@ mod tests {
                 mode: LocalRoutingMode::LocalFirst,
                 model_id: Some("test-model".to_string()),
             },
+            test_now(),
             |_| std::future::ready(Err(local_error(local_llm::LocalLlmErrorCode::OutOfMemory))),
             || {
                 cloud_calls.fetch_add(1, Ordering::SeqCst);
@@ -2249,6 +2365,7 @@ mod tests {
                 mode: LocalRoutingMode::LocalFirst,
                 model_id: Some("test-model".to_string()),
             },
+            test_now(),
             |_| {
                 std::future::ready(Ok((
                     "```json\n[]\n```".to_string(),
@@ -2292,6 +2409,7 @@ mod tests {
                 mode: LocalRoutingMode::LocalFirst,
                 model_id: Some("test-model".to_string()),
             },
+            test_now(),
             |_| std::future::ready(Err(local_error(local_llm::LocalLlmErrorCode::Cancelled))),
             || {
                 cloud_calls.fetch_add(1, Ordering::SeqCst);
@@ -2313,6 +2431,7 @@ mod tests {
                 mode: LocalRoutingMode::LocalFirst,
                 model_id: Some("test-model".to_string()),
             },
+            test_now(),
             |_| std::future::ready(Err(local_error(local_llm::LocalLlmErrorCode::Timeout))),
             || {
                 cloud_calls.fetch_add(1, Ordering::SeqCst);

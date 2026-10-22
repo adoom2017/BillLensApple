@@ -247,14 +247,14 @@ pub fn unload() -> Result<()> {
 
 const RECORD_JSON_GRAMMAR_TEMPLATE: &str = r#"
 root ::= ws "[" ws (record (ws "," ws record)*)? ws "]" ws
-record ::= "{" ws direction-field "," ws amount-field "," ws currency-field "," ws category-field "," ws merchant-field "," ws transaction-field "," ws note-field "," ws cycle-field "," ws asset-field ws "}"
+record ::= "{" ws direction-field "," ws amount-field "," ws currency-field "," ws category-field "," ws merchant-field "," ws time-field "," ws note-field "," ws cycle-field "," ws asset-field ws "}"
 direction-field ::= "\"direction\"" ws ":" ws ("\"income\"" | "\"expense\"" | "null")
 amount-field ::= "\"amount\"" ws ":" ws (number | "null")
 currency-field ::= "\"currency\"" ws ":" ws (string | "null")
 category-field ::= "\"category\"" ws ":" ws record-category
 record-category ::= {record_categories} | "null"
 merchant-field ::= "\"merchant\"" ws ":" ws (string | "null")
-transaction-field ::= "\"transaction_at\"" ws ":" ws (string | "null")
+time-field ::= "\"time_text\"" ws ":" ws (string | "null")
 note-field ::= "\"note\"" ws ":" ws (string | "null")
 cycle-field ::= "\"subscription_cycle\"" ws ":" ws ("\"monthly\"" | "\"yearly\"" | "null")
 asset-field ::= "\"asset_info\"" ws ":" ws (asset | "null")

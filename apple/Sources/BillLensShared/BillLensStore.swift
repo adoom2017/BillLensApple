@@ -212,8 +212,7 @@ public final class BillLensStore: ObservableObject {
         appendLocalUserMessage(content)
         perform("正在解析账单") {
             AppLogger.log("entry.text", "characters=\(content.count)")
-            self.startProgress("已接收文本，准备调用大模型。")
-            self.advanceProgress("正在发送文本到 LLM…")
+            self.startProgress("已接收文本，正在解析…")
             let result: SubmitTextResult = try await self.bridge.sendAsync([
                 "action": "submit_text",
                 "profile_id": self.profileID,
@@ -222,10 +221,12 @@ public final class BillLensStore: ObservableObject {
                 "source": "text",
                 "local_routing": try LocalModelManager.shared.routingDictionary()
             ])
-            self.advanceProgress("LLM 已返回，正在更新草稿与账本…")
+            self.advanceProgress("解析完成，正在更新草稿与账本…")
             self.apply(home: result.home)
             self.statusText = result.autoConfirmed ? "已自动入库" : "已生成待确认草稿"
-            if result.parserSource == "local" {
+            if result.parserSource == "rule" {
+                self.statusText += "（规则解析）"
+            } else if result.parserSource == "local" {
                 self.statusText += "（本地模型）"
             } else if result.parserSource == "cloud_after_local_failure" {
                 guard let localFailure = result.localFailure else {
