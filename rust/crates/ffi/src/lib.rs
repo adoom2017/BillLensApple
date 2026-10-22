@@ -38,6 +38,12 @@ enum EngineRequest {
         device_id: String,
         llm: Option<LlmConfig>,
         log_file_path: Option<String>,
+        /// 设备 IANA 时区，如 Asia/Shanghai。
+        time_zone: String,
+    },
+    /// 系统时区变化后更新引擎使用的时区。
+    SetTimeZone {
+        time_zone: String,
     },
     Home {
         profile_id: String,
@@ -234,6 +240,7 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
             device_id,
             llm,
             log_file_path,
+            time_zone,
         } => {
             let db_path = PathBuf::from(database_path);
             let repo = runtime().block_on(BillRepository::connect(&db_path))?;
@@ -264,6 +271,7 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
                     device_id,
                     llm: resolved_llm,
                     log_file_path,
+                    time_zone,
                 },
             )?;
             runtime().block_on(app.bootstrap(&profile_id))?;
@@ -271,6 +279,10 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
             *slot = Some(app.clone());
             Ok(encode_ok(serde_json::json!({ "profile_id": profile_id })))
         }
+        EngineRequest::SetTimeZone { time_zone } => with_app(|app| {
+            app.set_time_zone(&time_zone)?;
+            Ok(encode_ok(serde_json::json!({ "time_zone": time_zone })))
+        }),
         EngineRequest::Home { profile_id } => with_app(|app| {
             let snapshot = runtime().block_on(app.home(&profile_id))?;
             Ok(encode_ok(snapshot))

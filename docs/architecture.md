@@ -108,6 +108,12 @@ RootView
 5. 结构化结果先写成 `RecordDraft`。
 6. 用户审核后确认入库，生成 `Record`。
 
+### 时区
+
+- 数据库只存带时区偏移的绝对时间（UTC）；不带偏移的时间字符串直接拒绝，不按任何固定时区猜测。
+- 本地日期相关的计算都在 Rust 里按设备 IANA 时区（`chrono-tz`，含夏令时规则）完成：时间描述换算、账本按天分组、本月/本年范围、订阅扣费日与 09:00 扣费时间、解析回复里的时间。
+- Swift 在 `bootstrap` 时传 `TimeZone.current.identifier`；系统时区变化（`NSSystemTimeZoneDidChange`）时调用 `set_time_zone` 并刷新账本。
+
 ### 图片录入
 
 1. `ReceiptOCRService` 用 Vision 做 OCR。

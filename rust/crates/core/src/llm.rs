@@ -6,7 +6,8 @@ use billlens_apple_db::{
     RecordDirection, SubscriptionCycle, is_valid_asset_category, is_valid_record_category,
     is_valid_record_category_for_direction,
 };
-use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
+use chrono_tz::Tz;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -199,7 +200,7 @@ impl CloudLlmClient {
         text: String,
         source: &EntrySource,
         system_prompt: String,
-        now: DateTime<FixedOffset>,
+        now: DateTime<Tz>,
     ) -> Result<Vec<ParsedRecordPayload>> {
         self.parse_records_multi(text, source, system_prompt, now)
             .await
@@ -244,7 +245,7 @@ impl CloudLlmClient {
         text: String,
         source: &EntrySource,
         prompt: String,
-        now: DateTime<FixedOffset>,
+        now: DateTime<Tz>,
     ) -> Result<Vec<ParsedRecordPayload>> {
         let thinking_mode = self
             .enable_thinking
@@ -564,7 +565,7 @@ struct LlmRecordPayload {
 }
 
 impl LlmRecordPayload {
-    fn into_payload(self, now: DateTime<FixedOffset>) -> Result<ParsedRecordPayload> {
+    fn into_payload(self, now: DateTime<Tz>) -> Result<ParsedRecordPayload> {
         let time_text = self
             .time_text
             .map(|value| value.trim().to_string())
@@ -593,7 +594,7 @@ impl LlmRecordPayload {
 
 pub(crate) fn parse_record_payloads_strict(
     content: &str,
-    now: DateTime<FixedOffset>,
+    now: DateTime<Tz>,
 ) -> Result<Vec<ParsedRecordPayload>> {
     let trimmed = content.trim();
     let output_summary = summarize_text_output(content);
@@ -946,8 +947,11 @@ mod tests {
         assert_eq!(disabled["enable_thinking"], json!(false));
     }
 
-    fn test_now() -> chrono::DateTime<chrono::FixedOffset> {
-        chrono::DateTime::parse_from_rfc3339("2026-07-14T14:38:45+08:00").unwrap()
+    fn test_now() -> chrono::DateTime<chrono_tz::Tz> {
+        use chrono::TimeZone;
+        chrono_tz::Asia::Shanghai
+            .with_ymd_and_hms(2026, 7, 14, 14, 38, 45)
+            .unwrap()
     }
 
     #[test]

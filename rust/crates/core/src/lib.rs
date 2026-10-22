@@ -17,7 +17,8 @@ pub use billlens_apple_db::{
     SubscriptionUpdate, advance_next_due, is_valid_asset_category, is_valid_record_category,
     is_valid_record_category_for_direction,
 };
-use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, TimeZone, Utc};
+use chrono_tz::Tz;
 use fx::{FxClient, resolve_fx_rate};
 use llm::{
     CloudLlmClient, build_record_prompt, normalize_currency_code, parse_record_payloads_strict,
@@ -28,6 +29,7 @@ use rule_parser::{RuleHints, RuleOutcome};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
+use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
 const STATS_CURRENCY: &str = "CNY";
@@ -97,7 +99,7 @@ struct ParseRouter;
 impl ParseRouter {
     async fn route<LocalCall, LocalFuture, CloudCall, CloudFuture>(
         routing: LocalRoutingRequest,
-        now: DateTime<FixedOffset>,
+        now: DateTime<Tz>,
         mut local_call: LocalCall,
         mut cloud_call: CloudCall,
     ) -> Result<RoutedParseResult, CoreError>
@@ -257,6 +259,8 @@ pub struct EngineBootstrap {
     pub device_id: String,
     pub llm: Option<LlmConfig>,
     pub log_file_path: Option<String>,
+    /// 设备 IANA 时区（如 Asia/Shanghai），由 Swift 的 TimeZone.current.identifier 提供。
+    pub time_zone: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -347,18 +351,41 @@ pub struct AppService {
     device_id: String,
     llm: Option<CloudLlmClient>,
     fx: FxClient,
+    /// 本地日期（账本按天分组、月/年范围、订阅扣费日）都按此时区计算，含夏令时规则。
+    time_zone: Arc<RwLock<Tz>>,
+}
+
+fn parse_time_zone(name: &str) -> Result<Tz, CoreError> {
+    name.parse::<Tz>()
+        .map_err(|error| CoreError::bad_request(format!("invalid time_zone {name:?}: {error}")))
 }
 
 impl AppService {
     pub fn new(repo: BillRepository, bootstrap: EngineBootstrap) -> Result<Self> {
         logger::initialize(bootstrap.log_file_path.as_deref())?;
         let llm = bootstrap.llm.map(CloudLlmClient::from_config).transpose()?;
+        let time_zone =
+            parse_time_zone(&bootstrap.time_zone).map_err(|error| anyhow!("{error}"))?;
+        logger::info("engine.time_zone", time_zone.name());
         Ok(Self {
             repo,
             device_id: bootstrap.device_id,
             llm,
             fx: FxClient::new(),
+            time_zone: Arc::new(RwLock::new(time_zone)),
         })
+    }
+
+    /// 系统时区变化（如出行）时由 Swift 调用。
+    pub fn set_time_zone(&self, name: &str) -> Result<(), CoreError> {
+        let time_zone = parse_time_zone(name)?;
+        *self.time_zone.write().expect("time zone lock poisoned") = time_zone;
+        logger::info("engine.time_zone", time_zone.name());
+        Ok(())
+    }
+
+    fn time_zone(&self) -> Tz {
+        *self.time_zone.read().expect("time zone lock poisoned")
     }
 
     pub async fn bootstrap(&self, profile_id: &str) -> Result<()> {
@@ -389,6 +416,7 @@ impl AppService {
         routing: LocalRoutingRequest,
     ) -> Result<SubmitTextResult, CoreError> {
         let content = trim_required(content, "content is required")?;
+        let time_zone = self.time_zone();
         logger::info(
             "submit_text",
             format!(
@@ -412,7 +440,7 @@ impl AppService {
             .await
             .map_err(map_internal)?;
 
-        let now = Local::now().fixed_offset();
+        let now = Utc::now().with_timezone(&time_zone);
         let routed = self
             .parse_with_rules(&content, &source, routing, now)
             .await?;
@@ -513,7 +541,7 @@ impl AppService {
             });
         }
 
-        let summary = format_multi_parsed_summary(&bill_payloads);
+        let summary = format_multi_parsed_summary(&bill_payloads, &time_zone);
         let asset_tail = if asset_acks.is_empty() {
             String::new()
         } else {
@@ -538,7 +566,7 @@ impl AppService {
                     let category = payload.category.as_deref().ok_or_else(|| {
                         CoreError::bad_request("subscription category is required")
                     })?;
-                    let local_time = transaction_at.with_timezone(&shanghai_offset());
+                    let local_time = transaction_at.with_timezone(&time_zone);
                     let today = local_time.date_naive();
                     let anchor_day = local_time.day() as i32;
                     let anchor_month = match cycle {
@@ -669,7 +697,7 @@ impl AppService {
         content: &str,
         source: &EntrySource,
         routing: LocalRoutingRequest,
-        now: DateTime<FixedOffset>,
+        now: DateTime<Tz>,
     ) -> Result<RoutedParseResult, CoreError> {
         let hints = match source {
             EntrySource::Ocr => RuleHints::default(),
@@ -709,7 +737,7 @@ impl AppService {
         content: &str,
         source: &EntrySource,
         routing: LocalRoutingRequest,
-        now: DateTime<FixedOffset>,
+        now: DateTime<Tz>,
         pinned_fields: Option<&str>,
     ) -> Result<RoutedParseResult, CoreError> {
         let system_prompt = build_record_prompt(source, pinned_fields);
@@ -738,7 +766,7 @@ impl AppService {
         content: &str,
         source: &EntrySource,
         system_prompt: String,
-        now: DateTime<FixedOffset>,
+        now: DateTime<Tz>,
     ) -> Result<Vec<ParsedRecordPayload>, CoreError> {
         let llm = self
             .llm
@@ -849,7 +877,7 @@ impl AppService {
             return Err(CoreError::bad_request("draft is not confirmable"));
         }
 
-        let action = confirmation_action_from_draft(&draft)?;
+        let action = confirmation_action_from_draft(&draft, &self.time_zone())?;
         let record = self
             .repo
             .confirm_parsed_drafts(
@@ -908,10 +936,13 @@ impl AppService {
         if drafts.is_empty() {
             return Err(CoreError::bad_request("no active drafts to confirm"));
         }
+        let time_zone = self.time_zone();
         let actions: Vec<(Uuid, ParsedDraftConfirmationAction)> = drafts
             .iter()
             .filter(|d| d.status == RecordDraftStatus::Parsed)
-            .map(|draft| confirmation_action_from_draft(draft).map(|action| (draft.id, action)))
+            .map(|draft| {
+                confirmation_action_from_draft(draft, &time_zone).map(|action| (draft.id, action))
+            })
             .collect::<Result<_, _>>()?;
         let last_record = self
             .repo
@@ -1129,8 +1160,8 @@ impl AppService {
         &self,
         profile_id: &str,
     ) -> Result<Vec<(String, f64, String)>, CoreError> {
-        let now = Utc::now().with_timezone(&shanghai_offset());
-        let today = now.date_naive();
+        let time_zone = self.time_zone();
+        let today = Utc::now().with_timezone(&time_zone).date_naive();
         let today_str = today.to_string();
 
         let due_subs = self
@@ -1146,7 +1177,7 @@ impl AppService {
 
             // Generate records for each missed cycle up to today
             while current_due <= today {
-                let transaction_at = shanghai_offset()
+                let transaction_at = time_zone
                     .with_ymd_and_hms(
                         current_due.year(),
                         current_due.month(),
@@ -1155,7 +1186,7 @@ impl AppService {
                         0,
                         0,
                     )
-                    .single()
+                    .earliest()
                     .ok_or_else(|| {
                         CoreError::Internal(format!(
                             "failed to construct subscription transaction time for {current_due}"
@@ -1483,7 +1514,8 @@ impl AppService {
         start_at: Option<DateTime<FixedOffset>>,
         end_at: Option<DateTime<FixedOffset>>,
     ) -> Result<LedgerSnapshot, CoreError> {
-        let range = build_ledger_range(preset, start_at, end_at)?;
+        let time_zone = self.time_zone();
+        let range = build_ledger_range(preset, start_at, end_at, &time_zone)?;
         let stats_range = RecordsStatsRange {
             start_at: range.start_at.with_timezone(&Utc),
             end_at: range.end_at.with_timezone(&Utc),
@@ -1509,8 +1541,9 @@ impl AppService {
             rate_map.insert(currency, rate);
             used_cached_rate |= resolution.used_cached_rate;
         }
-        let (summary, by_day) = aggregate_converted_stats(&records, stats_range.clone(), &rate_map)
-            .map_err(map_internal)?;
+        let (summary, by_day) =
+            aggregate_converted_stats(&records, stats_range.clone(), &rate_map, &time_zone)
+                .map_err(map_internal)?;
 
         Ok(LedgerSnapshot {
             range,
@@ -1539,6 +1572,7 @@ fn aggregate_converted_stats(
     records: &[Record],
     range: RecordsStatsRange,
     rate_map: &BTreeMap<String, f64>,
+    time_zone: &Tz,
 ) -> Result<(RecordsStatsResponse, Vec<LedgerDayGroup>)> {
     let mut income_amount = 0.0;
     let mut income_count = 0;
@@ -1577,10 +1611,7 @@ fn aggregate_converted_stats(
         category_entry.1 += converted_amount;
         category_entry.2 += 1;
 
-        let day = record
-            .transaction_at
-            .with_timezone(&shanghai_offset())
-            .date_naive();
+        let day = record.transaction_at.with_timezone(time_zone).date_naive();
         let day_entry = by_day.entry(day).or_insert((0.0, 0.0, Vec::new()));
         match record.direction {
             RecordDirection::Income => day_entry.0 += converted_amount,
@@ -1660,17 +1691,24 @@ fn build_ledger_range(
     preset: &str,
     start_at: Option<DateTime<FixedOffset>>,
     end_at: Option<DateTime<FixedOffset>>,
+    time_zone: &Tz,
 ) -> Result<LedgerRangeSelection, CoreError> {
-    let now = Utc::now().with_timezone(&shanghai_offset());
+    let now = Utc::now().with_timezone(time_zone).fixed_offset();
     let today = now.date_naive();
     let preset = preset.trim().to_ascii_lowercase();
     let (start_at, end_at) = match preset.as_str() {
         "month" => (
-            at_start_of_day(NaiveDate::from_ymd_opt(today.year(), today.month(), 1).unwrap())?,
+            at_start_of_day(
+                NaiveDate::from_ymd_opt(today.year(), today.month(), 1).unwrap(),
+                time_zone,
+            )?,
             now,
         ),
         "year" => (
-            at_start_of_day(NaiveDate::from_ymd_opt(today.year(), 1, 1).unwrap())?,
+            at_start_of_day(
+                NaiveDate::from_ymd_opt(today.year(), 1, 1).unwrap(),
+                time_zone,
+            )?,
             now,
         ),
         "custom" => {
@@ -1698,15 +1736,17 @@ fn build_ledger_range(
     })
 }
 
-fn at_start_of_day(date: NaiveDate) -> Result<DateTime<FixedOffset>, CoreError> {
-    shanghai_offset()
-        .with_ymd_and_hms(date.year(), date.month(), date.day(), 0, 0, 0)
-        .single()
-        .ok_or_else(|| CoreError::bad_request("failed to build range boundary"))
-}
-
-fn shanghai_offset() -> FixedOffset {
-    FixedOffset::east_opt(8 * 3600).unwrap()
+/// 当天在设备时区里的第一个有效时刻。个别时区的夏令时在 0 点切换，当天没有 00:00，
+/// 此时一天从切换后的第一个整点开始。
+fn at_start_of_day(date: NaiveDate, time_zone: &Tz) -> Result<DateTime<FixedOffset>, CoreError> {
+    (0..24)
+        .find_map(|hour| {
+            time_zone
+                .with_ymd_and_hms(date.year(), date.month(), date.day(), hour, 0, 0)
+                .earliest()
+        })
+        .map(|value| value.fixed_offset())
+        .ok_or_else(|| CoreError::bad_request(format!("failed to build range boundary for {date}")))
 }
 
 fn trim_required(value: String, message: &str) -> Result<String, CoreError> {
@@ -1907,6 +1947,7 @@ fn record_create_from_parsed(payload: &ParsedRecordPayload) -> Result<RecordCrea
 
 fn confirmation_action_from_draft(
     draft: &RecordDraft,
+    time_zone: &Tz,
 ) -> Result<ParsedDraftConfirmationAction, CoreError> {
     match draft.kind {
         ParsedDraftKind::Record => Ok(ParsedDraftConfirmationAction::Record(
@@ -1961,7 +2002,7 @@ fn confirmation_action_from_draft(
                 .subscription_cycle
                 .clone()
                 .ok_or_else(|| CoreError::bad_request("subscription cycle is required"))?;
-            let local_date = record.transaction_at.with_timezone(&shanghai_offset());
+            let local_date = record.transaction_at.with_timezone(time_zone);
             let anchor_day = local_date.day() as i32;
             let anchor_month = match cycle {
                 SubscriptionCycle::Yearly => Some(local_date.month() as i32),
@@ -2000,7 +2041,7 @@ fn confirmation_message(kind: ParsedDraftKind, count: usize) -> &'static str {
     }
 }
 
-fn format_parsed_summary(payload: &ParsedRecordPayload) -> String {
+fn format_parsed_summary(payload: &ParsedRecordPayload, time_zone: &Tz) -> String {
     let direction = match payload.direction {
         Some(RecordDirection::Income) => "收入",
         Some(RecordDirection::Expense) => "支出",
@@ -2020,7 +2061,12 @@ fn format_parsed_summary(payload: &ParsedRecordPayload) -> String {
         .unwrap_or_else(|| "商户待确认".to_string());
     let transaction_at = payload
         .transaction_at
-        .map(|value| value.format("%Y-%m-%d %H:%M:%S").to_string())
+        .map(|value| {
+            value
+                .with_timezone(time_zone)
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        })
         .unwrap_or_else(|| "时间待确认".to_string());
 
     format!(
@@ -2028,14 +2074,14 @@ fn format_parsed_summary(payload: &ParsedRecordPayload) -> String {
     )
 }
 
-fn format_multi_parsed_summary(payloads: &[ParsedRecordPayload]) -> String {
+fn format_multi_parsed_summary(payloads: &[ParsedRecordPayload], time_zone: &Tz) -> String {
     if payloads.len() == 1 {
-        return format_parsed_summary(&payloads[0]);
+        return format_parsed_summary(&payloads[0], time_zone);
     }
     let lines: Vec<String> = payloads
         .iter()
         .enumerate()
-        .map(|(i, p)| format!("{}. {}", i + 1, format_parsed_summary(p)))
+        .map(|(i, p)| format!("{}. {}", i + 1, format_parsed_summary(p, time_zone)))
         .collect();
     lines.join("\n")
 }
@@ -2138,8 +2184,10 @@ mod tests {
 
     const VALID_LOCAL_RESPONSE: &str = r#"[{"direction":"expense","amount":12,"currency":"CNY","category":"其他","merchant":null,"time_text":"2026-07-14 20:00","note":null,"subscription_cycle":null,"asset_info":null}]"#;
 
-    fn test_now() -> DateTime<FixedOffset> {
-        DateTime::parse_from_rfc3339("2026-07-14T14:38:45+08:00").unwrap()
+    fn test_now() -> DateTime<Tz> {
+        chrono_tz::Asia::Shanghai
+            .with_ymd_and_hms(2026, 7, 14, 14, 38, 45)
+            .unwrap()
     }
 
     fn routed_payload() -> ParsedRecordPayload {
@@ -2180,7 +2228,9 @@ mod tests {
         let repo = BillRepository::connect(&database_path).await.unwrap();
         let profile_id = "subscription-test";
         let subscription_id = Uuid::new_v4();
-        let today = Utc::now().with_timezone(&shanghai_offset()).date_naive();
+        let today = Utc::now()
+            .with_timezone(&chrono_tz::Asia::Shanghai)
+            .date_naive();
         repo.create_subscription(
             subscription_id,
             profile_id,
@@ -2206,6 +2256,7 @@ mod tests {
                 device_id: "test-device".to_string(),
                 llm: None,
                 log_file_path: None,
+                time_zone: "Asia/Shanghai".to_string(),
             },
         )
         .unwrap();
@@ -2227,6 +2278,7 @@ mod tests {
                 device_id: "test-device".to_string(),
                 llm: None,
                 log_file_path: None,
+                time_zone: "Asia/Shanghai".to_string(),
             },
         )
         .unwrap();
@@ -2253,9 +2305,23 @@ mod tests {
         assert_eq!(draft.parser_source, ParserSource::Rule);
         assert_eq!(draft.amount, Some(100.0));
         assert_eq!(draft.category.as_deref(), Some("交通"));
-        let local = draft.transaction_at.unwrap().with_timezone(&Local);
-        assert_eq!(local.date_naive(), Local::now().date_naive());
+        let beijing = FixedOffset::east_opt(8 * 3600).unwrap();
+        let local = draft.transaction_at.unwrap().with_timezone(&beijing);
+        assert_eq!(
+            local.date_naive(),
+            Utc::now().with_timezone(&beijing).date_naive()
+        );
         assert_eq!(local.format("%H:%M:%S").to_string(), "08:00:00");
+        // 回复消息中的时间必须按设备时区显示，而不是 UTC。
+        let expected = format!("时间：{} 08:00:00", local.format("%Y-%m-%d"));
+        assert!(
+            result
+                .home
+                .messages
+                .iter()
+                .any(|message| message.content.contains(&expected)),
+            "missing {expected}"
+        );
 
         // 规则不完整时仍需要模型；未配置模型时显式报错，而不是静默生成残缺草稿。
         let error = service
@@ -2272,6 +2338,29 @@ mod tests {
             .await
             .unwrap_err();
         assert!(error.to_string().contains("未配置可用的云端模型"));
+    }
+
+    #[test]
+    fn parsed_summary_formats_time_in_device_offset() {
+        let payload = ParsedRecordPayload {
+            direction: Some(RecordDirection::Expense),
+            amount: Some(9.9),
+            currency: Some("CNY".to_string()),
+            category: Some("餐饮".to_string()),
+            merchant: Some("瑞幸咖啡".to_string()),
+            transaction_at: Some(
+                DateTime::parse_from_rfc3339("2026-10-22T08:02:01Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+            ),
+            note: None,
+            subscription_cycle: None,
+            asset_info: None,
+        };
+        assert!(
+            format_parsed_summary(&payload, &chrono_tz::Asia::Shanghai)
+                .contains("时间：2026-10-22 16:02:01")
+        );
     }
 
     #[tokio::test]
@@ -2448,13 +2537,16 @@ mod tests {
 
     #[test]
     fn build_custom_range_rejects_inverted_range() {
-        let start = shanghai_offset()
+        let shanghai = chrono_tz::Asia::Shanghai;
+        let start = shanghai
             .with_ymd_and_hms(2026, 4, 2, 0, 0, 0)
-            .unwrap();
-        let end = shanghai_offset()
+            .unwrap()
+            .fixed_offset();
+        let end = shanghai
             .with_ymd_and_hms(2026, 4, 1, 0, 0, 0)
-            .unwrap();
-        let error = build_ledger_range("custom", Some(start), Some(end)).unwrap_err();
+            .unwrap()
+            .fixed_offset();
+        let error = build_ledger_range("custom", Some(start), Some(end), &shanghai).unwrap_err();
         assert_eq!(
             error.to_string(),
             "start_at must be earlier than or equal to end_at"
@@ -2506,7 +2598,9 @@ mod tests {
         ];
         let rate_map = BTreeMap::from([(String::from("USD"), 7.0)]);
 
-        let (stats, by_day) = aggregate_converted_stats(&records, range, &rate_map).unwrap();
+        let (stats, by_day) =
+            aggregate_converted_stats(&records, range, &rate_map, &chrono_tz::Asia::Shanghai)
+                .unwrap();
 
         assert_eq!(stats.summary.expense_amount, 70.0);
         assert_eq!(stats.summary.income_amount, 20.0);
@@ -2514,5 +2608,78 @@ mod tests {
         assert_eq!(by_day.len(), 1);
         assert_eq!(by_day[0].expense_amount, 70.0);
         assert_eq!(by_day[0].income_amount, 20.0);
+    }
+
+    #[test]
+    fn ledger_groups_records_by_local_date_in_device_time_zone() {
+        // 2026-10-22 02:00 UTC：上海是 10-22 10:00，纽约是 10-21 22:00。
+        let transaction_at = DateTime::parse_from_rfc3339("2026-10-22T02:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let record = Record {
+            id: Uuid::new_v4(),
+            profile_id: "local-default".to_string(),
+            direction: RecordDirection::Expense,
+            amount: 30.0,
+            currency: "CNY".to_string(),
+            category: "交通".to_string(),
+            merchant: None,
+            transaction_at,
+            note: None,
+            device_id: "device-a".to_string(),
+            sync_version: 1,
+            synced_version: 1,
+            deleted_at: None,
+            created_at: transaction_at,
+            updated_at: transaction_at,
+        };
+        let range = RecordsStatsRange {
+            start_at: transaction_at,
+            end_at: transaction_at,
+        };
+        let day_in = |time_zone: &Tz| {
+            aggregate_converted_stats(
+                std::slice::from_ref(&record),
+                range.clone(),
+                &BTreeMap::new(),
+                time_zone,
+            )
+            .unwrap()
+            .1[0]
+                .day
+        };
+        assert_eq!(
+            day_in(&chrono_tz::Asia::Shanghai),
+            NaiveDate::from_ymd_opt(2026, 10, 22).unwrap()
+        );
+        assert_eq!(
+            day_in(&chrono_tz::America::New_York),
+            NaiveDate::from_ymd_opt(2026, 10, 21).unwrap()
+        );
+    }
+
+    #[test]
+    fn start_of_day_uses_first_valid_local_time() {
+        let shanghai = at_start_of_day(
+            NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
+            &chrono_tz::Asia::Shanghai,
+        )
+        .unwrap();
+        assert_eq!(shanghai.to_rfc3339(), "2026-10-01T00:00:00+08:00");
+
+        // 智利 2026-09-06 夏令时在 0 点开始，当天没有 00:00。
+        let santiago = at_start_of_day(
+            NaiveDate::from_ymd_opt(2026, 9, 6).unwrap(),
+            &chrono_tz::America::Santiago,
+        )
+        .unwrap();
+        assert_eq!(santiago.to_rfc3339(), "2026-09-06T01:00:00-03:00");
+    }
+
+    #[test]
+    fn invalid_time_zone_names_are_rejected() {
+        assert!(parse_time_zone("Asia/Shanghai").is_ok());
+        assert!(parse_time_zone("UTC+8").is_err());
+        assert!(parse_time_zone("").is_err());
     }
 }

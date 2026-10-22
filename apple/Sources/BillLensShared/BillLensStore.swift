@@ -65,6 +65,7 @@ public final class BillLensStore: ObservableObject {
     private let profileID = "local-default"
     private let deviceID: String
     private var bootstrapTask: Task<Void, Error>?
+    private var timeZoneObserver: NSObjectProtocol?
 
     public init(ocrService: ReceiptTextRecognizing = ReceiptOCRService()) {
         self.ocrService = ocrService
@@ -144,8 +145,10 @@ public final class BillLensStore: ObservableObject {
             "profile_id": profileID,
             "device_id": deviceID,
             "llm": try llmBootstrapConfig(),
-            "log_file_path": AppLogger.defaultLogFilePath
+            "log_file_path": AppLogger.defaultLogFilePath,
+            "time_zone": TimeZone.current.identifier
         ])
+        observeSystemTimeZoneChanges()
         statusText = "已连接本地账本"
         AppLogger.log("bootstrap", "engine bootstrapped successfully")
         await Self.loadCategoriesFromRust(bridge: bridge)
@@ -792,6 +795,34 @@ public final class BillLensStore: ObservableObject {
             errorText = "草稿的 transaction_at 格式无效。"
         }
         subscriptionCycle = draft.subscriptionCycle ?? ""
+    }
+
+    /// 账本按天分组、月/年范围和订阅扣费日都由 Rust 按设备时区计算；系统时区变化（如出行）时同步给引擎。
+    private func observeSystemTimeZoneChanges() {
+        precondition(timeZoneObserver == nil, "时区监听只能注册一次")
+        timeZoneObserver = NotificationCenter.default.addObserver(
+            forName: .NSSystemTimeZoneDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.applySystemTimeZone()
+            }
+        }
+    }
+
+    private func applySystemTimeZone() {
+        NSTimeZone.resetSystemTimeZone()
+        let identifier = TimeZone.current.identifier
+        perform("时区已变为 \(identifier)，正在刷新账本") {
+            let _: [String: String] = try await self.bridge.sendAsync([
+                "action": "set_time_zone",
+                "time_zone": identifier
+            ])
+            AppLogger.log("timezone.changed", identifier)
+            try await self.refreshLedger()
+            self.statusText = "已按时区 \(identifier) 刷新账本"
+        }
     }
 
     private func perform(_ status: String, operation: @MainActor @escaping () async throws -> Void) {

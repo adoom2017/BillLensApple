@@ -5,7 +5,8 @@
 
 use anyhow::{Result, anyhow};
 use billlens_apple_db::{ParsedRecordPayload, RecordDirection, SubscriptionCycle};
-use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveTime, TimeZone, Utc};
+use chrono_tz::Tz;
 
 /// 规则已确定、模型不得改动的字段。
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -15,7 +16,7 @@ pub(crate) struct RuleHints {
     pub direction: Option<RecordDirection>,
     pub category: Option<&'static str>,
     pub merchant: Option<&'static str>,
-    pub transaction_at: Option<DateTime<FixedOffset>>,
+    pub transaction_at: Option<DateTime<Tz>>,
     pub subscription_cycle: Option<SubscriptionCycle>,
 }
 
@@ -27,7 +28,7 @@ pub(crate) enum RuleOutcome {
     NeedsModel(RuleHints),
 }
 
-pub(crate) fn parse_text(text: &str, now: DateTime<FixedOffset>) -> Result<RuleOutcome> {
+pub(crate) fn parse_text(text: &str, now: DateTime<Tz>) -> Result<RuleOutcome> {
     let chars: Vec<char> = text.trim().chars().collect();
     if chars.is_empty() || contains_any(text, ASSET_KEYWORDS) {
         return Ok(RuleOutcome::NeedsModel(RuleHints::default()));
@@ -641,10 +642,8 @@ const DAY_OFFSETS: &[(&str, i64)] = &[
 ];
 
 /// 从文本中换算交易时间；没有任何时间线索时返回 None。
-pub(crate) fn resolve_time(
-    text: &str,
-    now: DateTime<FixedOffset>,
-) -> Result<Option<DateTime<FixedOffset>>> {
+/// 按设备时区规则换算，每个日期使用当天自己的 UTC 偏移（夏令时）。
+pub(crate) fn resolve_time(text: &str, now: DateTime<Tz>) -> Result<Option<DateTime<Tz>>> {
     let chars: Vec<char> = text.chars().collect();
     let today = now.date_naive();
     let date = find_date(&chars, today)?;
@@ -671,11 +670,12 @@ pub(crate) fn resolve_time(
         (None, None) => Some(now.time()),
     }
     .ok_or_else(|| anyhow!("无法换算时间描述「{text}」"))?;
-    now.offset()
+    // 夏令时回拨的重复时段取较早的一次；跳过的时段不存在，显式报错。
+    now.timezone()
         .from_local_datetime(&date.and_time(time))
-        .single()
+        .earliest()
         .map(Some)
-        .ok_or_else(|| anyhow!("无法换算时间描述「{text}」"))
+        .ok_or_else(|| anyhow!("「{text}」换算出的本地时间在夏令时切换中不存在"))
 }
 
 /// 12 小时制口语换成 24 小时制；返回值第二项表示跨到次日（“晚上12点”）。
@@ -891,9 +891,11 @@ fn find_clock(chars: &[char]) -> Result<Option<(u32, u32, u32)>> {
 mod tests {
     use super::*;
 
-    fn now() -> DateTime<FixedOffset> {
+    fn now() -> DateTime<Tz> {
         // 2026-10-22 是星期四
-        DateTime::parse_from_rfc3339("2026-10-22T14:38:45+08:00").unwrap()
+        chrono_tz::Asia::Shanghai
+            .with_ymd_and_hms(2026, 10, 22, 14, 38, 45)
+            .unwrap()
     }
 
     fn time(text: &str) -> String {
@@ -941,9 +943,31 @@ mod tests {
 
     #[test]
     fn crosses_month_and_year_boundaries() {
-        let new_year = DateTime::parse_from_rfc3339("2027-01-01T00:05:06+08:00").unwrap();
+        let new_year = chrono_tz::Asia::Shanghai
+            .with_ymd_and_hms(2027, 1, 1, 0, 5, 6)
+            .unwrap();
         let resolved = resolve_time("昨天下午2点", new_year).unwrap().unwrap();
         assert_eq!(resolved.to_rfc3339(), "2026-12-31T14:00:00+08:00");
+    }
+
+    #[test]
+    fn each_date_uses_its_own_daylight_saving_offset() {
+        // 纽约 2026-03-08 02:00 进入夏令时（-05:00 → -04:00）。
+        let now = chrono_tz::America::New_York
+            .with_ymd_and_hms(2026, 3, 9, 12, 0, 0)
+            .unwrap();
+        let yesterday = resolve_time("昨天早上", now).unwrap().unwrap();
+        let before = resolve_time("前天早上", now).unwrap().unwrap();
+        assert_eq!(yesterday.to_rfc3339(), "2026-03-08T08:00:00-04:00");
+        assert_eq!(before.to_rfc3339(), "2026-03-07T08:00:00-05:00");
+    }
+
+    #[test]
+    fn nonexistent_local_time_in_daylight_saving_gap_is_an_error() {
+        let now = chrono_tz::America::New_York
+            .with_ymd_and_hms(2026, 3, 9, 12, 0, 0)
+            .unwrap();
+        assert!(resolve_time("昨天凌晨2点半", now).is_err());
     }
 
     #[test]
