@@ -134,20 +134,26 @@ PLIST
 
 cmd_dev() {
     build_rust_macos
-    echo "==> Swift macOS (debug)"
-    cd "$REPO_ROOT/apple"
-    swift_build_env swift build --product BillLensMacApp
-    BIN_DIR="$(swift_build_env swift build --show-bin-path -c debug)"
-    APP_BUNDLE="$REPO_ROOT/apple/build/dev/BillLens.app"
+    xcode_generate
 
-    echo "==> Assembling debug .app"
-    assemble_macos_app "$BIN_DIR" "$APP_BUNDLE" "1.0.0"
+    # 与 xcode-mac 同一条 xcodebuild 链路（Debug 配置）：Info.plist、资源与 Bundle ID 都来自工程。
+    echo "==> xcodebuild macOS (Debug, ad-hoc)"
+    run_xcodebuild \
+        -scheme BillLens-macOS \
+        -configuration Debug \
+        -destination 'generic/platform=macOS' \
+        "${adhoc_signing_args[@]}" \
+        build
 
-    echo "==> Code signing debug .app (ad-hoc, without restricted entitlements)"
-    codesign --sign - --deep --force "$APP_BUNDLE"
+    local app="$DERIVED_DATA/Build/Products/Debug/BillLens.app"
+    # ad-hoc 签名没有 Team ID：整体重签且不开 Hardened Runtime，否则 llama.framework 会被库校验拒绝。
+    codesign --force --deep --sign - "$app"
 
-    echo "==> Launching $APP_BUNDLE"
-    "$APP_BUNDLE/Contents/MacOS/BillLensMacApp"
+    echo "==> Launching $app"
+    # 必须经 LaunchServices 启动：直接执行 Contents/MacOS 下的二进制会成为终端的子进程，
+    # 无法正常激活窗口，麦克风/语音权限也会记到终端名下。-W 等待 App 退出，-n 总是启动新实例。
+    echo "    log: $HOME/Library/Application Support/BillLensApple/billlens.log"
+    open -W -n "$app"
 }
 
 cmd_mac() {
@@ -344,7 +350,7 @@ usage() {
 Usage: ./build.sh <command>
 
 Commands:
-  dev       Compile (debug) + run macOS app
+  dev       xcodebuild Debug + run macOS app (ad-hoc signed, via LaunchServices)
   mac       Compile (release) + package .app + create dist/BillLens.dmg
   ios-sim   Compile Rust for iOS Simulator (aarch64-apple-ios-sim)
   ios       Compile Rust for iOS device (aarch64-apple-ios)

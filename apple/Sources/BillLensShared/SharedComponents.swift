@@ -1,6 +1,3 @@
-#if os(macOS)
-import AppKit
-#endif
 import SwiftUI
 
 // MARK: - Conversation
@@ -134,7 +131,7 @@ struct DraftConversationCard: View {
 
 struct ComposerPanel: View {
     @Binding var composerText: String
-    @State private var focusToken = UUID()
+    @FocusState private var isInputFocused: Bool
     let isRecording: Bool
     let onImage: () -> Void
     let onVoice: () -> Void
@@ -156,15 +153,14 @@ struct ComposerPanel: View {
             .accessibilityLabel("导入账单图片")
 
             HStack(spacing: 6) {
-                ComposerInputField(
-                    text: $composerText,
-                    placeholder: "打车花了 30 块…",
-                    focusToken: focusToken,
-                    onSubmit: onSubmit
-                )
-                #if os(macOS)
-                .onAppear { focusToken = UUID() }
-                #endif
+                TextField("打车花了 30 块…", text: $composerText)
+                    .textFieldStyle(.plain)
+                    .focused($isInputFocused)
+                    .onSubmit(onSubmit)
+                    #if os(iOS)
+                    .submitLabel(.send)
+                    #endif
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 Button(action: onVoice) {
                     Image(systemName: isRecording ? "stop.circle.fill" : "mic")
@@ -179,7 +175,12 @@ struct ComposerPanel: View {
             .padding(.leading, 14)
             .padding(.trailing, 10)
             .frame(minHeight: 36)
-            .background(.fill.tertiary, in: Capsule())
+            .background {
+                // 点击胶囊空白处聚焦输入框；手势放在背景层，不拦截输入框自身的点击。
+                Capsule()
+                    .fill(.fill.tertiary)
+                    .onTapGesture { isInputFocused = true }
+            }
 
             Button(action: onSubmit) {
                 Image(systemName: "arrow.up.circle.fill")
@@ -194,96 +195,11 @@ struct ComposerPanel: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .floatingGlass(in: Capsule())
+        #if os(macOS)
+        .onAppear { isInputFocused = true }
+        #endif
     }
 }
-
-#if os(macOS)
-struct ComposerInputField: NSViewRepresentable {
-    @Binding var text: String
-    let placeholder: String
-    let focusToken: UUID
-    let onSubmit: () -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-
-    func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField()
-        field.isBordered = false
-        field.isBezeled = false
-        field.drawsBackground = false
-        field.focusRingType = .none
-        field.font = .preferredFont(forTextStyle: .body)
-        field.textColor = .labelColor
-        field.placeholderString = placeholder
-        field.lineBreakMode = .byTruncatingTail
-        field.usesSingleLineMode = true
-        field.maximumNumberOfLines = 1
-        field.delegate = context.coordinator
-        return field
-    }
-
-    func updateNSView(_ nsView: NSTextField, context: Context) {
-        context.coordinator.parent = self
-        if nsView.stringValue != text {
-            nsView.stringValue = text
-        }
-        nsView.placeholderString = placeholder
-        if context.coordinator.lastFocusToken != focusToken {
-            context.coordinator.lastFocusToken = focusToken
-            nsView.window?.makeFirstResponder(nsView)
-        }
-    }
-
-    final class Coordinator: NSObject, NSTextFieldDelegate {
-        var parent: ComposerInputField
-        var lastFocusToken: UUID?
-
-        init(_ parent: ComposerInputField) {
-            self.parent = parent
-        }
-
-        func controlTextDidChange(_ obj: Notification) {
-            guard let field = obj.object as? NSTextField else { return }
-            parent.text = field.stringValue
-        }
-
-        func control(
-            _ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector
-        ) -> Bool {
-            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
-                parent.onSubmit()
-                return true
-            }
-            return false
-        }
-    }
-}
-#else
-struct ComposerInputField: View {
-    @Binding var text: String
-    let placeholder: String
-    let focusToken: UUID
-    let onSubmit: () -> Void
-    @FocusState private var isFocused: Bool
-    @State private var lastFocusToken: UUID?
-
-    var body: some View {
-        TextField(placeholder, text: $text)
-            .textFieldStyle(.plain)
-            .submitLabel(.send)
-            .focused($isFocused)
-            .onSubmit { onSubmit() }
-            .onChange(of: focusToken) { _, newToken in
-                if lastFocusToken != newToken {
-                    lastFocusToken = newToken
-                    isFocused = true
-                }
-            }
-    }
-}
-#endif
 
 // MARK: - Rows & labels
 

@@ -31,17 +31,17 @@ export LLM_PROVIDER=llamacpp
 
 它会做三件事：
 
-1. 编译 Rust FFI
-2. 编译 macOS App
-3. 组装并临时签名 `apple/build/dev/BillLens.app`，从 App Bundle 内启动
+1. 编译 Rust FFI（debug）
+2. 用 xcodebuild 按 `apple/project.yml` 生成的工程编译 Debug 版 App（与 `xcode-mac` 同一条链路，Bundle ID `com.shendongchun.BillLensAppleMac`），并整体 ad-hoc 重签
+3. 通过 `open`（LaunchServices）启动，终端等待 App 退出；日志在 `~/Library/Application Support/BillLensApple/billlens.log`
 
-开发启动也必须经过 `.app` Bundle。直接运行 `.build/.../BillLensMacApp` 会被 macOS 视为普通 Unix 可执行文件，Dock 将显示默认 `exec` 图标，而且 Bundle 图标、资源和身份信息不完整。
+不要直接执行 `.app/Contents/MacOS/` 下的二进制：那样 App 会成为终端的子进程，窗口无法正常获得键盘焦点，麦克风/语音权限也会记到终端名下。
 
 ## `build.sh` 子命令
 
 | 命令 | 用途 |
 |---|---|
-| `./build.sh dev` | macOS 开发构建并启动 |
+| `./build.sh dev` | macOS Debug 构建（xcodebuild）并经 LaunchServices 启动 |
 | `./build.sh mac` | macOS release 打包，输出 `.app` 和 `dist/BillLens.dmg` |
 | `./build.sh ios-sim` | 编译 iOS 模拟器 Rust 库 |
 | `./build.sh ios` | 编译 iPhone 真机 Rust 库 |
