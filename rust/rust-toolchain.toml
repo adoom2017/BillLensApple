@@ -1,0 +1,6 @@
+# 本地与 Xcode Cloud 使用同一版本工具链；rustup 会按需自动安装版本与目标。
+[toolchain]
+channel = "1.99.0"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
+targets = ["aarch64-apple-darwin", "aarch64-apple-ios", "aarch64-apple-ios-sim"]
