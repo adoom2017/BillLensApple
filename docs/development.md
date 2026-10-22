@@ -119,6 +119,7 @@ apple/BillLensApple.xcodeproj
 | `build.sh` | 统一构建入口 |
 | `apple/Package.swift` | SwiftPM 包定义；默认只构建 macOS app |
 | `apple/project.yml` | Xcode 工程唯一来源（XcodeGen） |
+| `apple/scripts/make_app_icon.swift` | 生成 macOS / iOS 全部尺寸图标与 `AppIcon.icns`：`cd apple && swift scripts/make_app_icon.swift` |
 | `apple/BillLensApple.xcodeproj/` | 由 `./build.sh xcode` 生成，不手改 |
 | `rust/migrations/` | SQLite 迁移 |
 
