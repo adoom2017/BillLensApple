@@ -1,3 +1,5 @@
+# Xcode 工程唯一来源。改完执行 `./build.sh xcode` 重新生成 BillLensApple.xcodeproj。
+# Info.plist 与 entitlements 以 Sources/ 下的文件为准，xcodegen 不改写它们。
 name: BillLensApple
 options:
   bundleIdPrefix: com.shendongchun
@@ -6,6 +8,32 @@ options:
   deploymentTarget:
     iOS: "17.0"
     macOS: "14.0"
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: YH6JCRN97J
+    DEAD_CODE_STRIPPING: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    STRING_CATALOG_GENERATE_SYMBOLS: YES
+
+# 显式命名 scheme，避免与 SwiftPM 自动生成的 BillLensMacApp 可执行产品 scheme 重名。
+schemes:
+  BillLens-macOS:
+    build:
+      targets:
+        BillLensMacApp: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+  BillLens-iOS:
+    build:
+      targets:
+        BillLensIOSApp: all
+    run:
+      config: Debug
+    archive:
+      config: Release
 
 packages:
   BillLensApple:
@@ -18,40 +46,19 @@ targets:
     platform: iOS
     deploymentTarget: "17.0"
     sources:
-      - Sources/BillLensIOSApp
-    info:
-      path: Sources/BillLensIOSApp/Info.plist
-      properties:
-        CFBundleName: 账单助手
-        CFBundleDisplayName: 账单助手
-        BillLensCloudKitEnabled: "$(BILLLENS_CLOUDKIT_ENABLED)"
-        UILaunchScreen: {}
-        UISupportedInterfaceOrientations:
-          - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
-        "UISupportedInterfaceOrientations~ipad":
-          - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationPortraitUpsideDown
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
-        NSMicrophoneUsageDescription: 账单助手需要麦克风权限来录制语音并识别账单信息。
-        NSSpeechRecognitionUsageDescription: 账单助手需要语音识别权限来将您的语音转换为文字录入账单。
-        UIBackgroundModes:
-          - remote-notification
-    entitlements:
-      path: Sources/BillLensIOSApp/BillLensIOSApp.entitlements
-      properties:
-        com.apple.developer.icloud-container-identifiers:
-          - iCloud.com.shendongchun.BillLensApple
-        com.apple.developer.icloud-services:
-          - CloudKit
-        aps-environment: development
+      - path: Sources/BillLensIOSApp
+        excludes:
+          - Info.plist
+          - BillLensIOSApp.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.shendongchun.BillLensApple
+        INFOPLIST_FILE: Sources/BillLensIOSApp/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
         SWIFT_VERSION: 6.0
         SWIFT_STRICT_CONCURRENCY: complete
+        TARGETED_DEVICE_FAMILY: "1,2"
         EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
       configs:
         Debug:
@@ -61,6 +68,7 @@ targets:
           OTHER_LDFLAGS[sdk=iphonesimulator*]: "$(inherited) -L$(SRCROOT)/../rust/target/aarch64-apple-ios-sim/debug -lbilllens_ffi"
         Release:
           BILLLENS_CLOUDKIT_ENABLED: YES
+          CODE_SIGN_ENTITLEMENTS: Sources/BillLensIOSApp/BillLensIOSApp.entitlements
           OTHER_LDFLAGS[sdk=iphoneos*]: "$(inherited) -L$(SRCROOT)/../rust/target/aarch64-apple-ios/release -lbilllens_ffi"
           OTHER_LDFLAGS[sdk=iphonesimulator*]: "$(inherited) -L$(SRCROOT)/../rust/target/aarch64-apple-ios-sim/release -lbilllens_ffi"
     dependencies:
@@ -74,22 +82,23 @@ targets:
     platform: macOS
     deploymentTarget: "14.0"
     sources:
-      - Sources/BillLensMacApp
-    entitlements:
-      path: Sources/BillLensMacApp/BillLensMacApp.entitlements
-      properties:
-        com.apple.developer.icloud-container-identifiers:
-          - iCloud.com.shendongchun.BillLensApple
-        com.apple.developer.icloud-services:
-          - CloudKit
-        aps-environment: development
+      - path: Sources/BillLensMacApp
+        excludes:
+          - Info.plist
+          - BillLensMacApp.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.shendongchun.BillLensAppleMac
+        PRODUCT_NAME: BillLens
+        # Rust 静态库只编译宿主 arm64，Intel 切片无法链接。
+        ARCHS: arm64
+        INFOPLIST_FILE: Sources/BillLensMacApp/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: Sources/BillLensMacApp/BillLensMacApp.entitlements
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: YES
         SWIFT_VERSION: 6.0
         SWIFT_STRICT_CONCURRENCY: complete
-        INFOPLIST_KEY_NSMicrophoneUsageDescription: "BillLens 需要麦克风权限以支持语音输入账单。"
-        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "BillLens 需要语音识别权限以将语音转换为文字。"
       configs:
         Debug:
           OTHER_LDFLAGS: "$(inherited) -L$(SRCROOT)/../rust/target/debug -lbilllens_ffi"

@@ -1,4 +1,9 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 enum AppPage: String, CaseIterable, Identifiable {
     case entry
@@ -10,10 +15,10 @@ enum AppPage: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .entry: "账单录入"
-        case .ledger: "账单一览"
-        case .subscriptions: "订阅管理"
-        case .assets: "资产管理"
+        case .entry: "记账"
+        case .ledger: "账单"
+        case .subscriptions: "订阅"
+        case .assets: "资产"
         }
     }
 
@@ -25,150 +30,132 @@ enum AppPage: String, CaseIterable, Identifiable {
         case .assets: "chart.line.uptrend.xyaxis"
         }
     }
+}
 
-    var tabTitle: String {
-        switch self {
-        case .entry: "记账"
-        case .ledger: "账单"
-        case .subscriptions: "订阅"
-        case .assets: "资产"
-        }
+/// 只使用系统语义色，自动适配浅色 / 深色 / 高对比度。
+enum AppColors {
+    static let income = Color.green
+    static let destructive = Color.red
+    static let warning = Color.orange
+    static let today = Color.red
+
+    static var groupedBackground: Color {
+        #if os(iOS)
+        Color(uiColor: .systemGroupedBackground)
+        #else
+        Color(nsColor: .windowBackgroundColor)
+        #endif
     }
 
-    var navigationTitle: String {
+    static var contentBackground: Color {
         #if os(iOS)
-        switch self {
-        case .entry: "记一笔"
-        case .ledger: "账单"
-        case .subscriptions: "订阅"
-        case .assets: "资产"
-        }
+        Color(uiColor: .systemBackground)
         #else
-        title
+        Color(nsColor: .textBackgroundColor)
+        #endif
+    }
+
+    static var cardBackground: Color {
+        #if os(iOS)
+        Color(uiColor: .secondarySystemGroupedBackground)
+        #else
+        Color(nsColor: .controlBackgroundColor)
         #endif
     }
 }
 
-enum LayoutMetrics {
-    static let pagePadding: CGFloat = 14
-    static let pageTopPadding: CGFloat = 12
-    static let noteHeight: CGFloat = 72
-    static let iconButtonSize: CGFloat = 28
-    static let actionButtonHeight: CGFloat = 40
-    static let messageGap: CGFloat = 14
-    static let headerSpacing: CGFloat = 12
-    static let bubbleRadius: CGFloat = 22
-    static let avatarSize: CGFloat = 32
+/// 设置 App 风格的圆角方块图标。
+struct CategoryIcon: View {
+    let systemImage: String
+    let color: Color
+    var size: CGFloat = 32
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: size * 0.48, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(color.gradient, in: RoundedRectangle(cornerRadius: size * 0.26, style: .continuous))
+            .accessibilityHidden(true)
+    }
 }
 
-enum LayoutRadii {
-    static let shell: CGFloat = 30
-    static let section: CGFloat = 24
-    static let card: CGFloat = 16
-    static let field: CGFloat = 14
-    static let compactField: CGFloat = 12
-    static let chip: CGFloat = 14
-    static let small: CGFloat = 10
-    static let micro: CGFloat = 8
-    static let tiny: CGFloat = 5
+enum CategoryStyle {
+    static func icon(for category: String) -> String {
+        switch category {
+        case "餐饮": "fork.knife"
+        case "交通": "car.fill"
+        case "日用": "basket.fill"
+        case "购物": "bag.fill"
+        case "住房": "house.fill"
+        case "医疗": "cross.case.fill"
+        case "娱乐": "gamecontroller.fill"
+        case "教育": "book.fill"
+        case "通讯": "phone.fill"
+        case "人情": "gift.fill"
+        case "订阅": "repeat"
+        case "工资收入": "briefcase.fill"
+        case "投资收益": "chart.line.uptrend.xyaxis"
+        case "报销": "doc.text.fill"
+        case "退款": "arrow.uturn.backward"
+        default: "tag.fill"
+        }
+    }
+
+    static func color(for category: String) -> Color {
+        switch category {
+        case "餐饮": .orange
+        case "交通": .blue
+        case "日用": .teal
+        case "购物": .pink
+        case "住房": .brown
+        case "医疗": .red
+        case "娱乐": .purple
+        case "教育": .indigo
+        case "通讯": .green
+        case "人情": .red
+        case "订阅": .cyan
+        case "工资收入", "投资收益": .green
+        case "报销": .mint
+        case "退款": .yellow
+        default: .gray
+        }
+    }
+
+    static func assetIcon(for category: String) -> String {
+        switch category {
+        case "存款": "building.columns.fill"
+        case "现金": "banknote.fill"
+        case "股票": "chart.bar.fill"
+        case "基金": "chart.pie.fill"
+        case "加密货币": "bitcoinsign.circle.fill"
+        case "房产": "house.fill"
+        default: "creditcard.fill"
+        }
+    }
+
+    static func assetColor(for category: String) -> Color {
+        switch category {
+        case "存款": .blue
+        case "现金": .green
+        case "股票": .red
+        case "基金": .orange
+        case "加密货币": .yellow
+        case "房产": .brown
+        default: .gray
+        }
+    }
 }
 
-enum IMColors {
-    // Text hierarchy
-    static let textPrimary = Color(red: 0.055, green: 0.086, blue: 0.145)
-    static let textSecondary = Color(red: 0.153, green: 0.212, blue: 0.306)
-    static let textMuted = Color(red: 0.306, green: 0.369, blue: 0.463)
-    static let textTertiary = Color(red: 0.447, green: 0.510, blue: 0.600)
-    static let textPlaceholder = Color(red: 0.612, green: 0.671, blue: 0.749)
-    static let textTitle = textPrimary
-    static let textBody = textSecondary
-    static let textLabel = textMuted
-    static let textMeta = textTertiary
-    static let textHint = textPlaceholder
-
-    // Accent / brand
-    static let accent = Color(red: 0.137, green: 0.357, blue: 0.545)
-    static let accentAlt = Color(red: 0.196, green: 0.467, blue: 0.655)
-    static let accentDark = Color(red: 0.082, green: 0.212, blue: 0.337)
-    static let accentBright = Color(red: 0.560, green: 0.804, blue: 0.910)
-    static let premiumGold = Color(red: 0.741, green: 0.612, blue: 0.243)
-    static let premiumGoldSoft = Color(red: 0.914, green: 0.861, blue: 0.660)
-
-    // Semantic
-    static let income = Color(red: 0.102, green: 0.251, blue: 0.216)
-    static let danger = Color(red: 0.765, green: 0.286, blue: 0.306)
-    static let dangerBg = Color(red: 0.804, green: 0.349, blue: 0.361)
-    static let dangerSubtle = Color(red: 0.706, green: 0.235, blue: 0.259)
-    static let dangerBorder = Color(red: 0.900, green: 0.827, blue: 0.835)
-    static let dangerBgLight = Color(red: 0.988, green: 0.944, blue: 0.949)
-    static let warningText = textSecondary
-
-    // Chat
-    static let chatBg = Color.white.opacity(0.70)
-    static let userBubble = Color(red: 0.899, green: 0.947, blue: 0.981).opacity(0.82)
-    static let botBubble = Color.white.opacity(0.76)
-    static let sendButton = accent
-    static let sendButtonDark = accentAlt
-    static let systemMsgBg = Color.white.opacity(0.78)
-
-    // Surfaces & borders
-    static let divider = Color.white.opacity(0.44)
-    static let panelBg = Color.white.opacity(0.62)
-    static let controlBg = Color.white.opacity(0.78)
-    static let statBg = Color.white.opacity(0.66)
-    static let surface = Color.white.opacity(0.82)
-    static let surfaceStrong = Color.white.opacity(0.92)
-    static let darkSurface = Color(red: 0.153, green: 0.153, blue: 0.161)
-    static let navGlass = Color.white.opacity(0.68)
-    static let navText = textPrimary
-    static let navTextSecondary = textSecondary
-    static let cardShadow = accentDark.opacity(0.18)
-    static let glassStroke = Color.white.opacity(0.44)
-    static let glassStrokeStrong = Color.white.opacity(0.70)
-    static let glassHighlight = Color.white.opacity(0.10)
-    static let glassHighlightStrong = Color.white.opacity(0.18)
-    static let glassCoolTint = accentBright.opacity(0.10)
-    static let glassWarmTint = premiumGoldSoft.opacity(0.12)
-
-    // Tag backgrounds
-    static let accentBgLight = Color(red: 0.884, green: 0.942, blue: 0.974).opacity(0.82)
-    static let accentBgActive = Color(red: 0.848, green: 0.917, blue: 0.965).opacity(0.88)
-    static let incomeBgLight = Color(red: 0.925, green: 0.951, blue: 0.972).opacity(0.82)
-    static let warningBg = premiumGoldSoft.opacity(0.42)
-
-    // Global background
-    static let pageBgTop = Color(red: 0.979, green: 0.988, blue: 0.998)
-    static let pageBgMid = Color(red: 0.922, green: 0.948, blue: 0.975)
-    static let pageBgBottom = Color(red: 0.872, green: 0.909, blue: 0.956)
-    static let pageBlobA = Color(red: 0.706, green: 0.878, blue: 0.948).opacity(0.56)
-    static let pageBlobB = Color(red: 0.954, green: 0.878, blue: 0.702).opacity(0.42)
-    static let pageBlobC = Color(red: 0.745, green: 0.816, blue: 0.980).opacity(0.34)
-
-    // Header / logo
-    static let logoBgTop = Color.white.opacity(0.66)
-    static let logoBorder = Color.white.opacity(0.72)
-    static let headerTabBorder = Color.white.opacity(0.58)
-    static let headerShadow = accentDark.opacity(0.28)
-    static let ghostBorder = Color.white.opacity(0.66)
-
-    // Avatars
-    static let assistantAvatarTop = darkSurface
-    static let assistantAvatarBottom = darkSurface
-
-    // Calendar selected cell
-    static let calendarSelectedTop = accent
-    static let calendarSelectedBottom = accent
-
-    // Calendar today marker
-    static let calendarToday = accent
-
-    // Button primary background (dark)
-    static let buttonPrimary = accent
-
-    // Ledger category filter pills
-    static let filterMuted = textMuted
-
-    // Ledger special stat colors
-    static let ledgerStatGoldBold = textPrimary
-    static let ledgerStatGold = Color(red: 0.431, green: 0.337, blue: 0.118)
+extension View {
+    /// 浮动控件（输入栏、提示条）使用 Liquid Glass；旧系统退回系统材质。
+    @ViewBuilder
+    func floatingGlass<S: Shape>(in shape: S) -> some View {
+        if #available(macOS 26.0, iOS 26.0, *) {
+            glassEffect(.regular, in: shape)
+        } else {
+            background(.regularMaterial, in: shape)
+                .overlay(shape.stroke(.separator, lineWidth: 0.5))
+        }
+    }
 }

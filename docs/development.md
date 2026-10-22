@@ -47,12 +47,33 @@ export LLM_PROVIDER=llamacpp
 | `./build.sh ios` | 编译 iPhone 真机 Rust 库 |
 | `./build.sh all` | 编译所有平台 Rust 库 |
 | `./build.sh test` | 跑 Rust 全量测试 |
+| `./build.sh xcode` | 由 `apple/project.yml` 重新生成 Xcode 工程并打开 |
+| `./build.sh xcode-mac` | xcodebuild 构建 macOS Release，临时签名，输出 `dist/xcode/BillLens.app` |
+| `./build.sh xcode-ios-sim` | xcodebuild 构建 iOS 模拟器 Debug；设置 `SIMULATOR=<名称或 UDID>` 自动安装启动 |
+| `./build.sh archive-ios` | Archive + 导出 iOS（自动签名），输出 `dist/xcode/ios/` |
+| `./build.sh archive-mac` | Archive + 导出 macOS（自动签名），输出 `dist/xcode/mac/` |
 
 `RUST_BUILD_MODE=release` 可切换 release：
 
 ```bash
 RUST_BUILD_MODE=release ./build.sh ios-sim
 ```
+
+## Xcode 工作流
+
+`apple/project.yml` 是 Xcode 工程的唯一来源，`BillLensApple.xcodeproj` 由 XcodeGen 生成（`brew install xcodegen`）。
+Info.plist 与 entitlements 直接使用 `apple/Sources/*/` 下的文件，改 Target 配置时改 `project.yml`，不要在 Xcode 里手改工程。
+
+所有 `xcode-*` / `archive-*` 命令都会先编译对应平台的 Rust 静态库并重新生成工程：
+
+| 场景 | 命令 | 签名 |
+|---|---|---|
+| 本机验证 macOS Release | `./build.sh xcode-mac` | ad-hoc，去掉 iCloud/推送 entitlements |
+| iOS 模拟器 | `SIMULATOR="iPhone 18 Pro" ./build.sh xcode-ios-sim` | 不签名 |
+| iOS 真机 / TestFlight | `IOS_EXPORT_METHOD=app-store-connect ./build.sh archive-ios` | 自动签名，Team `YH6JCRN97J` |
+| macOS 分发 | `MAC_EXPORT_METHOD=developer-id ./build.sh archive-mac` | 自动签名 |
+
+导出方式默认 `debugging`（开发签名）。Archive 需要 Xcode 已登录对应开发者账号；`-allowProvisioningUpdates` 会自动创建或更新描述文件。
 
 ## 手动构建
 
@@ -97,8 +118,8 @@ apple/BillLensApple.xcodeproj
 |---|---|
 | `build.sh` | 统一构建入口 |
 | `apple/Package.swift` | SwiftPM 包定义；默认只构建 macOS app |
-| `apple/project.yml` | XcodeGen 输入 |
-| `apple/BillLensApple.xcodeproj/` | 已生成的 Xcode 工程 |
+| `apple/project.yml` | Xcode 工程唯一来源（XcodeGen） |
+| `apple/BillLensApple.xcodeproj/` | 由 `./build.sh xcode` 生成，不手改 |
 | `rust/migrations/` | SQLite 迁移 |
 
 ## 测试

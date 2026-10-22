@@ -7,30 +7,26 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0D4B71531C7A4D6ABF5E9011 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0D4B71521C7A4D6ABF5E9011 /* Assets.xcassets */; };
-		13D2C9AA9EF046A0A47D03A8 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 13D2C9A99EF046A0A47D03A8 /* AppIcon.icns */; };
 		2C5A41B597C546280F2582F9 /* BillLensIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 968DF4D9C5C6410DB7CF0700 /* BillLensIOSApp.swift */; };
 		5C8073FCFA8A3DE41DC3DDCF /* BillLensShared in Frameworks */ = {isa = PBXBuildFile; productRef = D6E37C17C3A4A3256FE6A83B /* BillLensShared */; };
 		5FAAABA1B6FAE90C0D5522E7 /* BillLensAppleServices in Frameworks */ = {isa = PBXBuildFile; productRef = 9119C4F24AF97D7C891E6B46 /* BillLensAppleServices */; };
-		7A6E42CC5A9C44FBA7EFA2AA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7A6E42CB5A9C44FBA7EFA2AA /* Assets.xcassets */; };
+		AB99D9AB035EB0257D34CDBB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E34CF59112745D253300A149 /* Assets.xcassets */; };
 		CAB9E0C11D9D4F688A78F662 /* BillLensAppleServices in Frameworks */ = {isa = PBXBuildFile; productRef = 3AF36A7261AB854C4EABAA1F /* BillLensAppleServices */; };
+		E187370CCDCF509360973837 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 57FCC8A4034B8F0DA7218807 /* Assets.xcassets */; };
+		E2CDEFA3A99A923CFFEC16D7 /* BillLensMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2369E23FE7BDF40B0A1AFE3 /* BillLensMacApp.swift */; };
 		EF836DB681DCFC150E145A9D /* BillLensShared in Frameworks */ = {isa = PBXBuildFile; productRef = 7458D7AC63DB652E864D9498 /* BillLensShared */; };
-		F087F3430891856AC66F1697 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FF3181BDBF6416114DCA583 /* main.swift */; };
+		F383B4EDE4A0556F954EC470 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = A6C8413B89227E37F6C098B1 /* AppIcon.icns */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		0D4B71521C7A4D6ABF5E9011 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		13D2C9A99EF046A0A47D03A8 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
-		30C9F5D7068F7F964F10475D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		3E86FB5C63FA63F9EE21FBEC /* apple */ = {isa = PBXFileReference; lastKnownFileType = folder; name = apple; path = .; sourceTree = SOURCE_ROOT; };
-		4B5A7F40A0D448E7A1238B11 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		5FF3181BDBF6416114DCA583 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
-		6F653F9DED3ABDD79B39CC0F /* BillLensIOSApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BillLensIOSApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		7A6E42CB5A9C44FBA7EFA2AA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		87EBA2BB967BFCF4CF588E43 /* BillLensIOSApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BillLensIOSApp.entitlements; sourceTree = "<group>"; };
+		57FCC8A4034B8F0DA7218807 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		6F653F9DED3ABDD79B39CC0F /* BillLensIOSApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BillLensIOSApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		968DF4D9C5C6410DB7CF0700 /* BillLensIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillLensIOSApp.swift; sourceTree = "<group>"; };
 		97B3DA48E7488EB0FE84B575 /* BillLensMacApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BillLensMacApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		EC4026DC417A2924A359DAC3 /* BillLensMacApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BillLensMacApp.entitlements; sourceTree = "<group>"; };
+		A2369E23FE7BDF40B0A1AFE3 /* BillLensMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillLensMacApp.swift; sourceTree = "<group>"; };
+		A6C8413B89227E37F6C098B1 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
+		E34CF59112745D253300A149 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -58,10 +54,8 @@
 		0B2B26E3025DBCEB5A202978 /* BillLensIOSApp */ = {
 			isa = PBXGroup;
 			children = (
-				7A6E42CB5A9C44FBA7EFA2AA /* Assets.xcassets */,
-				87EBA2BB967BFCF4CF588E43 /* BillLensIOSApp.entitlements */,
+				E34CF59112745D253300A149 /* Assets.xcassets */,
 				968DF4D9C5C6410DB7CF0700 /* BillLensIOSApp.swift */,
-				30C9F5D7068F7F964F10475D /* Info.plist */,
 			);
 			path = BillLensIOSApp;
 			sourceTree = "<group>";
@@ -86,11 +80,9 @@
 		6F92965C9BD3B1FCEBB0917D /* BillLensMacApp */ = {
 			isa = PBXGroup;
 			children = (
-				13D2C9A99EF046A0A47D03A8 /* AppIcon.icns */,
-				0D4B71521C7A4D6ABF5E9011 /* Assets.xcassets */,
-				EC4026DC417A2924A359DAC3 /* BillLensMacApp.entitlements */,
-				4B5A7F40A0D448E7A1238B11 /* Info.plist */,
-				5FF3181BDBF6416114DCA583 /* main.swift */,
+				A6C8413B89227E37F6C098B1 /* AppIcon.icns */,
+				57FCC8A4034B8F0DA7218807 /* Assets.xcassets */,
+				A2369E23FE7BDF40B0A1AFE3 /* BillLensMacApp.swift */,
 			);
 			path = BillLensMacApp;
 			sourceTree = "<group>";
@@ -121,8 +113,8 @@
 			buildConfigurationList = 8A2EF9CD1A17B0F7E9E241AC /* Build configuration list for PBXNativeTarget "BillLensMacApp" */;
 			buildPhases = (
 				FF527EAFD3A91F6F044D897A /* Sources */,
+				938A73CF175CC0400A5F9AA3 /* Resources */,
 				D719820099568E41D4923E36 /* Frameworks */,
-				0D4B71541C7A4D6ABF5E9011 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -142,8 +134,8 @@
 			buildConfigurationList = 1E83886FECD73B35B87384EB /* Build configuration list for PBXNativeTarget "BillLensIOSApp" */;
 			buildPhases = (
 				E33E37474A904056A7AF0438 /* Sources */,
+				747BCE42EC0C8A93537A727F /* Resources */,
 				6A3B41DA4E473B0ABAC47092 /* Frameworks */,
-				7A6E42CD5A9C44FBA7EFA2AA /* Resources */,
 			);
 			buildRules = (
 			);
@@ -165,7 +157,17 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 2640;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					706DE52D7776039BEEC21A30 = {
+						DevelopmentTeam = YH6JCRN97J;
+						ProvisioningStyle = Automatic;
+					};
+					AD46254B4CA6B364EE9523EA = {
+						DevelopmentTeam = YH6JCRN97J;
+						ProvisioningStyle = Automatic;
+					};
+				};
 			};
 			buildConfigurationList = 87CC7196512B9E02BE392DF3 /* Build configuration list for PBXProject "BillLensApple" */;
 			developmentRegion = en;
@@ -191,20 +193,20 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		0D4B71541C7A4D6ABF5E9011 /* Resources */ = {
+		747BCE42EC0C8A93537A727F /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				13D2C9AA9EF046A0A47D03A8 /* AppIcon.icns in Resources */,
-				0D4B71531C7A4D6ABF5E9011 /* Assets.xcassets in Resources */,
+				AB99D9AB035EB0257D34CDBB /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		7A6E42CD5A9C44FBA7EFA2AA /* Resources */ = {
+		938A73CF175CC0400A5F9AA3 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				7A6E42CC5A9C44FBA7EFA2AA /* Assets.xcassets in Resources */,
+				F383B4EDE4A0556F954EC470 /* AppIcon.icns in Resources */,
+				E187370CCDCF509360973837 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -223,7 +225,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F087F3430891856AC66F1697 /* main.swift in Sources */,
+				E2CDEFA3A99A923CFFEC16D7 /* BillLensMacApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -233,12 +235,11 @@
 		05FEC086EF2A8CB2005025BE /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Sources/BillLensMacApp/BillLensMacApp.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEAD_CODE_STRIPPING = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Sources/BillLensMacApp/Info.plist;
@@ -247,13 +248,9 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-L$(SRCROOT)/../rust/target/release",
-					"-lbilllens_ffi",
-				);
+				OTHER_LDFLAGS = "$(inherited) -L$(SRCROOT)/../rust/target/release -lbilllens_ffi";
 				PRODUCT_BUNDLE_IDENTIFIER = com.shendongchun.BillLensAppleMac;
-				PROVISIONING_PROFILE_SPECIFIER = "";
+				PRODUCT_NAME = BillLens;
 				SDKROOT = macosx;
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
@@ -263,12 +260,11 @@
 		549B61E0B73747CEC25E2645 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Sources/BillLensMacApp/BillLensMacApp.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEAD_CODE_STRIPPING = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Sources/BillLensMacApp/Info.plist;
@@ -277,13 +273,9 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-L$(SRCROOT)/../rust/target/debug",
-					"-lbilllens_ffi",
-				);
+				OTHER_LDFLAGS = "$(inherited) -L$(SRCROOT)/../rust/target/debug -lbilllens_ffi";
 				PRODUCT_BUNDLE_IDENTIFIER = com.shendongchun.BillLensAppleMac;
-				PROVISIONING_PROFILE_SPECIFIER = "";
+				PRODUCT_NAME = BillLens;
 				SDKROOT = macosx;
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
@@ -297,24 +289,17 @@
 				BILLLENS_CLOUDKIT_ENABLED = NO;
 				CODE_SIGN_ENTITLEMENTS = "";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = YH6JCRN97J;
+				CODE_SIGN_STYLE = Automatic;
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Sources/BillLensIOSApp/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
-					"$(inherited)",
-					"-L$(SRCROOT)/../rust/target/aarch64-apple-ios/debug",
-					"-lbilllens_ffi",
-				);
-				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
-					"$(inherited)",
-					"-L$(SRCROOT)/../rust/target/aarch64-apple-ios-sim/debug",
-					"-lbilllens_ffi",
-				);
+				"OTHER_LDFLAGS[sdk=iphoneos*]" = "$(inherited) -L$(SRCROOT)/../rust/target/aarch64-apple-ios/debug -lbilllens_ffi";
+				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = "$(inherited) -L$(SRCROOT)/../rust/target/aarch64-apple-ios-sim/debug -lbilllens_ffi";
 				PRODUCT_BUNDLE_IDENTIFIER = com.shendongchun.BillLensApple;
 				SDKROOT = iphoneos;
 				SWIFT_STRICT_CONCURRENCY = complete;
@@ -390,23 +375,17 @@
 				BILLLENS_CLOUDKIT_ENABLED = YES;
 				CODE_SIGN_ENTITLEMENTS = Sources/BillLensIOSApp/BillLensIOSApp.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Sources/BillLensIOSApp/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
-					"$(inherited)",
-					"-L$(SRCROOT)/../rust/target/aarch64-apple-ios/release",
-					"-lbilllens_ffi",
-				);
-				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
-					"$(inherited)",
-					"-L$(SRCROOT)/../rust/target/aarch64-apple-ios-sim/release",
-					"-lbilllens_ffi",
-				);
+				"OTHER_LDFLAGS[sdk=iphoneos*]" = "$(inherited) -L$(SRCROOT)/../rust/target/aarch64-apple-ios/release -lbilllens_ffi";
+				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = "$(inherited) -L$(SRCROOT)/../rust/target/aarch64-apple-ios-sim/release -lbilllens_ffi";
 				PRODUCT_BUNDLE_IDENTIFIER = com.shendongchun.BillLensApple;
 				SDKROOT = iphoneos;
 				SWIFT_STRICT_CONCURRENCY = complete;

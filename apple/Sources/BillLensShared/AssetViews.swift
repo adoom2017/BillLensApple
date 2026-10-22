@@ -1,696 +1,454 @@
 import Charts
 import SwiftUI
 
-private let assetCategories = ["存款", "现金", "股票", "基金", "加密货币", "房产", "其他"]
-
 // MARK: - Asset Management Shell
 
 struct AssetShell: View {
+    static let categories = ["存款", "现金", "股票", "基金", "加密货币", "房产", "其他"]
+
     @EnvironmentObject private var store: BillLensStore
     @Environment(\.horizontalSizeClass) private var sizeClass
-    @State private var assetToDelete: AssetItem? = nil
-    @State private var isEditing = false
-    @State private var editForm = AssetEditFormState()
-    @State private var isDetailPresented = false
-    private let shellCornerRadius: CGFloat = LayoutRadii.shell
+    @State private var assetToDelete: AssetItem?
+    @State private var editingAsset: AssetItem?
+
+    private var usesCompactLayout: Bool {
+        sizeClass == .compact
+    }
 
     var body: some View {
         Group {
-            if sizeClass == .compact {
-                compactBody
-            } else {
-                splitBody
-            }
-        }
-        .adaptivePageSurface(cornerRadius: shellCornerRadius)
-        .onAppear {
-            Task { try? await store.loadAssets() }
-        }
-        .alert("确认删除资产", isPresented: .init(
-            get: { assetToDelete != nil },
-            set: { if !$0 { assetToDelete = nil } }
-        )) {
-            Button("取消", role: .cancel) { assetToDelete = nil }
-            Button("删除", role: .destructive) {
-                if let asset = assetToDelete {
-                    store.deleteAsset(asset.id)
-                    assetToDelete = nil
-                    isDetailPresented = false
-                }
-            }
-        } message: {
-            Text("删除资产将同时移除所有历史余额快照，操作不可撤销。")
-        }
-        .onChange(of: store.selectedAssetId) {
-            isEditing = false
-            if store.selectedAssetId == nil {
-                isDetailPresented = false
-            }
-        }
-    }
-
-    // MARK: Compact (iPhone): full-width list + sheet detail
-
-    private var compactBody: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            CollectionOverviewCard(
-                icon: "chart.line.uptrend.xyaxis",
-                title: "资产概览",
-                value: compactAssetValue,
-                detail: "\(store.assets.count) 个资产账户"
-            )
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, 14)
-
-            HStack {
-                Text("资产账户")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(IMColors.textPrimary)
-                Spacer()
-                Text("\(store.assets.count) 项")
-                    .font(.system(size: 12))
-                    .foregroundStyle(IMColors.textMuted)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 12)
-
-            Divider().opacity(0.3)
-
-            if store.assets.isEmpty {
-                assetEmptyState
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        ForEach(store.assets) { asset in
-                            AssetCard(
-                                asset: asset,
-                                isSelected: store.selectedAssetId == asset.id,
-                                onSelect: {
-                                    store.selectedAssetId = asset.id
-                                    isDetailPresented = true
-                                },
-                                onDelete: { assetToDelete = asset }
-                            )
-                        }
+            if usesCompactLayout {
+                assetList
+                    .navigationDestination(item: $store.selectedAssetId) { _ in
+                        detail
                     }
-                    .padding(14)
+            } else {
+                HStack(spacing: 0) {
+                    assetList
+                        .frame(width: 340)
+                    Divider()
+                    detail
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.clear)
-        .sheet(isPresented: $isDetailPresented, onDismiss: { store.selectedAssetId = nil }) {
-            compactDetailSheet
+        .task {
+            do {
+                try await store.loadAssets()
+            } catch {
+                store.errorText = error.localizedDescription
+            }
+        }
+        .sheet(item: $editingAsset) { asset in
+            AssetEditSheet(asset: asset) { update in
+                store.updateAsset(asset.id, update: update)
+            }
+        }
+        .alert(
+            "删除这个资产？",
+            isPresented: Binding(
+                get: { assetToDelete != nil },
+                set: { if !$0 { assetToDelete = nil } }
+            ),
+            presenting: assetToDelete
+        ) { asset in
+            Button("删除", role: .destructive) {
+                store.deleteAsset(asset.id)
+                assetToDelete = nil
+            }
+            Button("取消", role: .cancel) { assetToDelete = nil }
+        } message: { _ in
+            Text("所有历史余额快照将一并移除，操作不可撤销。")
         }
     }
 
-    private var compactAssetValue: String {
-        let valuedAssets = store.assets.compactMap { asset -> (Double, String)? in
-            guard let amount = asset.latestAmount else { return nil }
-            return (amount, asset.currency)
+    // MARK: List
+
+    private var assetList: some View {
+        List(selection: usesCompactLayout ? nil : $store.selectedAssetId) {
+            Section {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("资产合计")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(totalValueText)
+                        .font(.system(.title, design: .rounded).weight(.semibold))
+                        .monospacedDigit()
+                    Text("\(store.assets.count) 个账户")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+            .selectionDisabled()
+
+            Section("资产账户") {
+                if store.assets.isEmpty {
+                    ContentUnavailableView {
+                        Label("暂无资产", systemImage: "chart.line.uptrend.xyaxis")
+                    } description: {
+                        Text("在「记账」中输入「招商银行存款还有 54000 元」即可自动创建资产。")
+                    }
+                    .frame(maxWidth: .infinity)
+                    .selectionDisabled()
+                } else {
+                    ForEach(store.assets) { asset in
+                        row(asset)
+                            .tag(asset.id)
+                    }
+                }
+            }
         }
-        guard let currency = valuedAssets.first?.1 else { return "暂无余额" }
-        guard valuedAssets.allSatisfy({ $0.1 == currency }) else {
-            return "\(valuedAssets.count) 项有余额"
-        }
-        return BillLensFormatters.currencyString(
-            valuedAssets.reduce(0) { $0 + $1.0 },
-            currencyCode: currency
-        )
+        .appListStyle()
     }
 
     @ViewBuilder
-    private var compactDetailSheet: some View {
-        if let asset = store.selectedAsset {
-            if isEditing {
-                AssetEditPanel(
-                    asset: asset,
-                    form: $editForm,
-                    onSave: {
-                        let update = AssetUpdateInput(
-                            name: editForm.name.isEmpty ? nil : editForm.name,
-                            category: editForm.category,
-                            currency: editForm.currency.isEmpty ? nil : editForm.currency,
-                            note: editForm.note.isEmpty ? nil : editForm.note
-                        )
-                        store.updateAsset(asset.id, update: update)
-                        isEditing = false
-                    },
-                    onCancel: { isEditing = false }
-                )
-                .environmentObject(store)
-            } else {
-                AssetDetailPanel(
-                    asset: asset,
-                    onEdit: {
-                        editForm = AssetEditFormState(
-                            name: asset.name,
-                            category: asset.category,
-                            currency: asset.currency,
-                            note: asset.note ?? ""
-                        )
-                        isEditing = true
-                    },
-                    onDelete: { assetToDelete = asset },
-                    onDeleteSnapshot: { store.deleteAssetSnapshot($0) }
-                )
-                .environmentObject(store)
+    private func row(_ asset: AssetItem) -> some View {
+        let content = AssetRow(asset: asset)
+            .swipeActions(edge: .trailing) {
+                Button(role: .destructive) {
+                    assetToDelete = asset
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
             }
-        }
-    }
-
-    // MARK: Regular (iPad/macOS): side-by-side split
-
-    private var splitBody: some View {
-        HStack(spacing: 0) {
-            // Left: Asset list
-            VStack(alignment: .leading, spacing: 0) {
+            .contextMenu {
+                Button {
+                    editingAsset = asset
+                } label: {
+                    Label("编辑", systemImage: "pencil")
+                }
+                Button(role: .destructive) {
+                    assetToDelete = asset
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
+            }
+        if usesCompactLayout {
+            Button {
+                store.selectedAssetId = asset.id
+            } label: {
                 HStack {
-                    Text("资产列表")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(IMColors.textPrimary)
-                    Spacer()
-                    Text("\(store.assets.count) 项")
-                        .font(.system(size: 12))
-                        .foregroundStyle(IMColors.textMuted)
+                    content
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 16)
-                .padding(.bottom, 12)
-
-                Divider().opacity(0.3)
-
-                if store.assets.isEmpty {
-                    assetEmptyState
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 10) {
-                            ForEach(store.assets) { asset in
-                                AssetCard(
-                                    asset: asset,
-                                    isSelected: store.selectedAssetId == asset.id,
-                                    onSelect: { store.selectedAssetId = asset.id },
-                                    onDelete: { assetToDelete = asset }
-                                )
-                            }
-                        }
-                        .padding(14)
-                    }
-                }
+                .contentShape(Rectangle())
             }
-            .frame(width: 420)
-            .frame(maxHeight: .infinity)
-            .background(IMColors.panelBg.opacity(0.74))
-
-            // Divider
-            ZStack {
-                IMColors.divider.frame(width: 1)
-                IMColors.surface.opacity(0.72).frame(width: 1).offset(x: 1)
-            }
-            .frame(width: 2)
-
-            // Right: Detail / Edit panel
-            VStack {
-                if let asset = store.selectedAsset {
-                    if isEditing {
-                        AssetEditPanel(
-                            asset: asset,
-                            form: $editForm,
-                            onSave: {
-                                let update = AssetUpdateInput(
-                                    name: editForm.name.isEmpty ? nil : editForm.name,
-                                    category: editForm.category,
-                                    currency: editForm.currency.isEmpty ? nil : editForm.currency,
-                                    note: editForm.note.isEmpty ? nil : editForm.note
-                                )
-                                store.updateAsset(asset.id, update: update)
-                                isEditing = false
-                            },
-                            onCancel: { isEditing = false }
-                        )
-                    } else {
-                        AssetDetailPanel(
-                            asset: asset,
-                            onEdit: {
-                                editForm = AssetEditFormState(
-                                    name: asset.name,
-                                    category: asset.category,
-                                    currency: asset.currency,
-                                    note: asset.note ?? ""
-                                )
-                                isEditing = true
-                            },
-                            onDelete: { assetToDelete = asset },
-                            onDeleteSnapshot: { store.deleteAssetSnapshot($0) }
-                        )
-                    }
-                } else {
-                    VStack(spacing: 12) {
-                        Image(systemName: "arrow.left")
-                            .font(.system(size: 28))
-                            .foregroundStyle(IMColors.textPlaceholder)
-                        Text("从左侧选择一个资产查看详情")
-                            .font(.system(size: 14))
-                            .foregroundStyle(IMColors.textMuted)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(IMColors.surface.opacity(0.74))
+            .buttonStyle(.plain)
+        } else {
+            content
         }
     }
 
-    private var assetEmptyState: some View {
-        VStack(spacing: 14) {
-            Spacer()
-            Image(systemName: "chart.line.uptrend.xyaxis")
-                .font(.system(size: 44))
-                .foregroundStyle(IMColors.textPlaceholder)
-            Text("暂无资产记录")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(IMColors.textSecondary)
-            Text("在「账单录入」中输入类似\n「招商银行存款还有 54000 元」\n即可自动创建资产项")
-                .font(.system(size: 13))
-                .foregroundStyle(IMColors.textMuted)
-                .multilineTextAlignment(.center)
-                .lineSpacing(3)
-            Spacer()
+    /// 多币种无法直接相加时只显示有余额的账户数，不做隐式换算。
+    private var totalValueText: String {
+        let valued = store.assets.compactMap { asset -> (Double, String)? in
+            guard let amount = asset.latestAmount else { return nil }
+            return (amount, asset.currency)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        guard let currency = valued.first?.1 else { return "暂无余额" }
+        guard valued.allSatisfy({ $0.1 == currency }) else {
+            return "\(valued.count) 项有余额"
+        }
+        return BillLensFormatters.currencyString(valued.reduce(0) { $0 + $1.0 }, currencyCode: currency)
+    }
+
+    // MARK: Detail
+
+    @ViewBuilder
+    private var detail: some View {
+        if let asset = store.selectedAsset {
+            AssetDetailView(
+                asset: asset,
+                onEdit: { editingAsset = asset },
+                onDelete: { assetToDelete = asset },
+                onDeleteSnapshot: { store.deleteAssetSnapshot($0) }
+            )
+        } else {
+            ContentUnavailableView("选择一个资产", systemImage: "chart.line.uptrend.xyaxis", description: Text("在左侧列表中选择资产查看趋势。"))
+        }
     }
 }
 
-struct AssetEditFormState {
-    var name = ""
-    var category = "存款"
-    var currency = "CNY"
-    var note = ""
-}
+// MARK: - Row
 
-// MARK: - Asset Card
-
-struct AssetCard: View {
+struct AssetRow: View {
     let asset: AssetItem
-    let isSelected: Bool
-    let onSelect: () -> Void
-    let onDelete: () -> Void
 
     var body: some View {
-        Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .top) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: LayoutRadii.micro, style: .continuous)
-                            .fill(IMColors.accentBgLight)
-                            .frame(width: 36, height: 36)
-                        Image(systemName: assetIcon(for: asset.category))
-                            .font(.system(size: 17))
-                            .foregroundStyle(IMColors.accent)
-                    }
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(asset.name)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(IMColors.textTitle)
-                            .lineLimit(1)
-                        Text("\(asset.category) · \(asset.snapshots.count) 条记录")
-                            .font(.system(size: 11))
-                            .foregroundStyle(IMColors.textLabel)
-                    }
-
-                    Spacer()
-
-                    VStack(alignment: .trailing, spacing: 3) {
-                        if let amount = asset.latestAmount {
-                            Text(BillLensFormatters.currencyString(amount, currencyCode: asset.currency))
-                                .font(.system(size: 14, weight: .bold, design: .rounded))
-                                .foregroundStyle(IMColors.textTitle)
-                        } else {
-                            Text("—")
-                                .font(.system(size: 14))
-                                .foregroundStyle(IMColors.textLabel)
-                        }
-                        if let day = asset.latestRecordedOn {
-                            Text(BillLensFormatters.displayDay(day))
-                                .font(.system(size: 10))
-                                .foregroundStyle(IMColors.textMeta)
-                        }
-                    }
-                }
-
-                HStack(spacing: 6) {
-                    Label(asset.currency, systemImage: "banknote")
-                        .font(.system(size: 11))
-                        .foregroundStyle(IMColors.textMeta)
-                    Spacer()
-                    smallDeleteButton(action: onDelete)
+        HStack(spacing: 12) {
+            CategoryIcon(
+                systemImage: CategoryStyle.assetIcon(for: asset.category),
+                color: CategoryStyle.assetColor(for: asset.category)
+            )
+            VStack(alignment: .leading, spacing: 2) {
+                Text(asset.name)
+                    .lineLimit(1)
+                Text("\(asset.category) · \(asset.snapshots.count) 条记录")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(asset.latestAmount.map { BillLensFormatters.currencyString($0, currencyCode: asset.currency) } ?? "—")
+                    .font(.body.weight(.medium))
+                    .monospacedDigit()
+                if let day = asset.latestRecordedOn {
+                    Text(BillLensFormatters.displayDay(day))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
-            .padding(12)
-            .appRoundedGlass(
-                cornerRadius: LayoutRadii.card,
-                prominence: isSelected ? .prominent : .regular,
-                tint: isSelected ? IMColors.accentBright.opacity(0.18) : IMColors.accentBright.opacity(0.08),
-                fallbackFill: isSelected ? IMColors.accentBgActive : IMColors.surfaceStrong
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: LayoutRadii.small, style: .continuous)
-                    .stroke(isSelected ? IMColors.accent.opacity(0.4) : IMColors.divider, lineWidth: 1)
-            )
         }
-        .buttonStyle(.plain)
-    }
-
-    private func smallDeleteButton(action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 3) {
-                Image(systemName: "trash")
-                    .font(.system(size: 10))
-                Text("删除")
-                    .font(.system(size: 10, weight: .medium))
-            }
-            .foregroundStyle(IMColors.dangerSubtle)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .appCapsuleGlass(
-                prominence: .regular,
-                interactive: true,
-                tint: IMColors.danger.opacity(0.12),
-                fallbackFill: IMColors.dangerSubtle.opacity(0.08)
-            )
-        }
-        .buttonStyle(.plain)
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
     }
 }
 
-private func assetIcon(for category: String) -> String {
-    switch category {
-    case "存款": return "building.columns.fill"
-    case "现金": return "banknote.fill"
-    case "股票": return "chart.bar.fill"
-    case "基金": return "chart.pie.fill"
-    case "加密货币": return "bitcoinsign.circle.fill"
-    case "房产": return "house.fill"
-    default: return "creditcard.fill"
-    }
-}
+// MARK: - Detail
 
-// MARK: - Asset Detail Panel
-
-struct AssetDetailPanel: View {
+struct AssetDetailView: View {
     let asset: AssetItem
     let onEdit: () -> Void
     let onDelete: () -> Void
     let onDeleteSnapshot: (String) -> Void
-    @State private var snapshotToDelete: AssetSnapshotItem? = nil
+    @State private var snapshotToDelete: AssetSnapshotItem?
 
     private var sortedSnapshots: [AssetSnapshotItem] {
         asset.snapshots.sorted { $0.recordedOn < $1.recordedOn }
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                // Header
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: LayoutRadii.compactField, style: .continuous)
-                                .fill(IMColors.accentBgLight)
-                                .frame(width: 48, height: 48)
-                            Image(systemName: assetIcon(for: asset.category))
-                                .font(.system(size: 24))
-                                .foregroundStyle(IMColors.accent)
-                        }
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(asset.name)
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundStyle(IMColors.textTitle)
-                            HStack(spacing: 6) {
-                                categoryPill(asset.category)
-                                categoryPill(asset.currency)
-                            }
-                        }
-                        Spacer()
-                    }
-
-                    if let amount = asset.latestAmount {
-                        Text(BillLensFormatters.currencyString(amount, currencyCode: asset.currency))
-                            .font(.system(size: 32, weight: .bold, design: .rounded))
-                            .foregroundStyle(IMColors.textTitle)
-                            .padding(.top, 4)
-                        if let day = asset.latestRecordedOn {
-                            Text("截至 \(BillLensFormatters.displayDay(day))")
-                                .font(.system(size: 12))
-                                .foregroundStyle(IMColors.textLabel)
-                        }
-                    }
+        Form {
+            Section {
+                DetailHeader(
+                    icon: CategoryStyle.assetIcon(for: asset.category),
+                    color: CategoryStyle.assetColor(for: asset.category),
+                    title: asset.name,
+                    amount: asset.latestAmount.map { BillLensFormatters.currencyString($0, currencyCode: asset.currency) },
+                    caption: asset.latestRecordedOn.map { "截至 \(BillLensFormatters.displayDay($0))" }
+                ) {
+                    StatusTag(title: asset.category, color: .accentColor)
+                    StatusTag(title: asset.currency, color: .secondary)
                 }
-                .padding(20)
+            }
 
-                Divider().opacity(0.2).padding(.horizontal, 16)
+            Section("余额趋势") {
+                trendChart
+            }
 
-                // Chart
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("余额趋势")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(IMColors.textTitle)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 16)
-
-                    if sortedSnapshots.isEmpty {
-                        Text("暂无快照数据")
-                            .font(.system(size: 13))
-                            .foregroundStyle(IMColors.textBody)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 40)
-                    } else if sortedSnapshots.count == 1 {
-                        let snap = sortedSnapshots[0]
-                        VStack(spacing: 4) {
-                            Image(systemName: "circle.fill")
-                                .font(.system(size: 10))
-                                .foregroundStyle(IMColors.accent)
-                            Text(BillLensFormatters.currencyString(snap.amount, currencyCode: asset.currency))
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(IMColors.textBody)
-                            Text(BillLensFormatters.displayDay(snap.recordedOn))
-                                .font(.system(size: 11))
-                                .foregroundStyle(IMColors.textLabel)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 24)
-                    } else {
-                        Chart(sortedSnapshots) { snap in
-                            AreaMark(
-                                x: .value("日期", snap.recordedOn),
-                                y: .value("金额", snap.amount)
-                            )
-                            .foregroundStyle(IMColors.accent.opacity(0.12))
-                            .interpolationMethod(.monotone)
-
-                            LineMark(
-                                x: .value("日期", snap.recordedOn),
-                                y: .value("金额", snap.amount)
-                            )
-                            .foregroundStyle(IMColors.accent)
-                            .lineStyle(StrokeStyle(lineWidth: 2))
-                            .interpolationMethod(.monotone)
-
-                            PointMark(
-                                x: .value("日期", snap.recordedOn),
-                                y: .value("金额", snap.amount)
-                            )
-                            .foregroundStyle(IMColors.accent)
-                            .symbolSize(36)
-                        }
-                        .chartXAxis {
-                            AxisMarks(values: .automatic) { _ in
-                                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
-                                    .foregroundStyle(IMColors.divider)
-                                AxisTick(length: 0)
-                                AxisValueLabel()
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(IMColors.textMuted)
-                            }
-                        }
-                        .chartYAxis {
-                            AxisMarks(values: .automatic) { _ in
-                                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
-                                    .foregroundStyle(IMColors.divider)
-                                AxisTick(length: 0)
-                                AxisValueLabel()
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(IMColors.textMuted)
-                            }
-                        }
-                        .frame(height: 180)
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 8)
-                    }
+            Section("历史记录") {
+                if sortedSnapshots.isEmpty {
+                    Text("暂无快照")
+                        .foregroundStyle(.secondary)
                 }
-
-                Divider().opacity(0.2).padding(.horizontal, 16)
-
-                // Snapshot list
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("历史记录")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(IMColors.textTitle)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 16)
-                        .padding(.bottom, 8)
-
-                    ForEach(sortedSnapshots.reversed()) { snap in
-                        snapshotRow(snap)
-                        if snap.id != sortedSnapshots.reversed().last?.id {
-                            Divider().opacity(0.15).padding(.horizontal, 20)
-                        }
-                    }
+                ForEach(sortedSnapshots.reversed()) { snapshot in
+                    snapshotRow(snapshot)
                 }
+            }
 
-                Divider().opacity(0.2).padding(.horizontal, 16).padding(.top, 8)
-
-                // Action buttons
-                HStack(spacing: 10) {
-                    ActionButton(title: "编辑", kind: .ghost, action: onEdit)
-                    ActionButton(title: "删除资产", kind: .dangerGhost, action: onDelete)
-                }
-                .padding(20)
+            Section {
+                Button("编辑资产", action: onEdit)
+                Button("删除资产", role: .destructive, action: onDelete)
             }
         }
-        .alert("删除快照", isPresented: .init(
-            get: { snapshotToDelete != nil },
-            set: { if !$0 { snapshotToDelete = nil } }
-        )) {
-            Button("取消", role: .cancel) { snapshotToDelete = nil }
+        .formStyle(.grouped)
+        .navigationTitle(asset.name)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .alert(
+            "删除这条快照？",
+            isPresented: Binding(
+                get: { snapshotToDelete != nil },
+                set: { if !$0 { snapshotToDelete = nil } }
+            ),
+            presenting: snapshotToDelete
+        ) { snapshot in
             Button("删除", role: .destructive) {
-                if let snap = snapshotToDelete {
-                    onDeleteSnapshot(snap.id)
-                    snapshotToDelete = nil
-                }
+                onDeleteSnapshot(snapshot.id)
+                snapshotToDelete = nil
             }
-        } message: {
-            Text("删除后该日期的余额记录将消失，折线图将相应更新。")
+            Button("取消", role: .cancel) { snapshotToDelete = nil }
+        } message: { _ in
+            Text("删除后该日期的余额记录将消失，趋势图将相应更新。")
         }
     }
 
-    private func snapshotRow(_ snap: AssetSnapshotItem) -> some View {
+    @ViewBuilder
+    private var trendChart: some View {
+        if sortedSnapshots.count < 2 {
+            Text(sortedSnapshots.isEmpty ? "暂无快照数据" : "至少需要两条快照才能显示趋势")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 80)
+        } else {
+            Chart(sortedSnapshots) { snapshot in
+                AreaMark(
+                    x: .value("日期", snapshot.recordedOn),
+                    y: .value("金额", snapshot.amount)
+                )
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [Color.accentColor.opacity(0.25), Color.accentColor.opacity(0)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .interpolationMethod(.monotone)
+
+                LineMark(
+                    x: .value("日期", snapshot.recordedOn),
+                    y: .value("金额", snapshot.amount)
+                )
+                .foregroundStyle(Color.accentColor)
+                .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
+                .interpolationMethod(.monotone)
+
+                PointMark(
+                    x: .value("日期", snapshot.recordedOn),
+                    y: .value("金额", snapshot.amount)
+                )
+                .foregroundStyle(Color.accentColor)
+                .symbolSize(30)
+            }
+            .chartXAxis {
+                AxisMarks { _ in
+                    AxisValueLabel()
+                        .font(.caption2)
+                }
+            }
+            .chartYAxis {
+                AxisMarks(position: .leading) { _ in
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2, 3]))
+                    AxisValueLabel()
+                        .font(.caption2)
+                }
+            }
+            .frame(height: 200)
+            .padding(.vertical, 8)
+        }
+    }
+
+    private func snapshotRow(_ snapshot: AssetSnapshotItem) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(BillLensFormatters.displayDay(snap.recordedOn))
-                    .font(.system(size: 13))
-                    .foregroundStyle(IMColors.textBody)
-                if let note = snap.note, !note.isEmpty {
+                Text(BillLensFormatters.displayDay(snapshot.recordedOn))
+                if let note = snapshot.note, !note.isEmpty {
                     Text(note)
-                        .font(.system(size: 11))
-                        .foregroundStyle(IMColors.textLabel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             Spacer()
-            Text(BillLensFormatters.currencyString(snap.amount, currencyCode: asset.currency))
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(IMColors.textTitle)
+            Text(BillLensFormatters.currencyString(snapshot.amount, currencyCode: asset.currency))
+                .monospacedDigit()
+            #if os(macOS)
             Button {
-                snapshotToDelete = snap
+                snapshotToDelete = snapshot
             } label: {
                 Image(systemName: "trash")
-                    .font(.system(size: 11))
-                    .foregroundStyle(IMColors.dangerSubtle)
-                    .padding(6)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .help("删除快照")
+            .accessibilityLabel("删除快照")
+            #endif
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 9)
-    }
-
-    private func categoryPill(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(IMColors.accent)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .appCapsuleGlass(
-                prominence: .regular,
-                tint: IMColors.glassCoolTint,
-                fallbackFill: IMColors.accentBgLight
-            )
+        .swipeActions(edge: .trailing) {
+            Button(role: .destructive) {
+                snapshotToDelete = snapshot
+            } label: {
+                Label("删除", systemImage: "trash")
+            }
+        }
+        .contextMenu {
+            Button(role: .destructive) {
+                snapshotToDelete = snapshot
+            } label: {
+                Label("删除快照", systemImage: "trash")
+            }
+        }
     }
 }
 
-// MARK: - Asset Edit Panel
+// MARK: - Edit
 
-struct AssetEditPanel: View {
-    let asset: AssetItem
-    @Binding var form: AssetEditFormState
-    let onSave: () -> Void
-    let onCancel: () -> Void
+struct AssetEditFormState {
+    var name: String
+    var category: String
+    var currency: String
+    var note: String
 
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Text("编辑资产")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(IMColors.textPrimary)
-                    Spacer()
-                }
-                .padding(20)
-
-                Divider().opacity(0.2).padding(.horizontal, 16)
-
-                VStack(spacing: 14) {
-                    editFieldRow("名称") {
-                        TextField("资产名称", text: $form.name)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 200)
-                    }
-
-                    editFieldRow("类别") {
-                        Picker("", selection: $form.category) {
-                            ForEach(assetCategories, id: \.self) { cat in
-                                Text(cat).tag(cat)
-                            }
-                        }
-                        .frame(width: 140)
-                    }
-
-                    editFieldRow("币种") {
-                        TextField("CNY", text: $form.currency)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 100)
-                    }
-
-                    editFieldRow("备注") {
-                        TextField("可选", text: $form.note)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 200)
-                    }
-                }
-                .padding(20)
-
-                Divider().opacity(0.2).padding(.horizontal, 16)
-
-                HStack(spacing: 10) {
-                    ActionButton(title: "取消", kind: .ghost, action: onCancel)
-                    ActionButton(title: "保存", kind: .primary, action: onSave)
-                }
-                .padding(20)
-            }
-        }
+    init(asset: AssetItem) {
+        name = asset.name
+        category = asset.category
+        currency = asset.currency
+        note = asset.note ?? ""
     }
 
-    private func editFieldRow<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
-        HStack(alignment: .center) {
-            Text(label)
-                .font(.system(size: 13))
-                .foregroundStyle(IMColors.textMuted)
-                .frame(width: 60, alignment: .leading)
-            content()
-            Spacer()
+    var updateInput: AssetUpdateInput {
+        AssetUpdateInput(
+            name: name.isEmpty ? nil : name,
+            category: category,
+            currency: currency.isEmpty ? nil : currency,
+            note: note.isEmpty ? nil : note
+        )
+    }
+}
+
+struct AssetEditSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var form: AssetEditFormState
+    let onSave: (AssetUpdateInput) -> Void
+
+    init(asset: AssetItem, onSave: @escaping (AssetUpdateInput) -> Void) {
+        _form = State(initialValue: AssetEditFormState(asset: asset))
+        self.onSave = onSave
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                LabeledContent("名称") {
+                    TextField("名称", text: $form.name, prompt: Text("资产名称"))
+                        .labelsHidden()
+                        .multilineTextAlignment(.trailing)
+                }
+                Picker("类别", selection: $form.category) {
+                    ForEach(AssetShell.categories, id: \.self) { category in
+                        Label(category, systemImage: CategoryStyle.assetIcon(for: category)).tag(category)
+                    }
+                }
+                LabeledContent("币种") {
+                    TextField("币种", text: $form.currency, prompt: Text("CNY"))
+                        .labelsHidden()
+                        .multilineTextAlignment(.trailing)
+                }
+                TextField("备注", text: $form.note, prompt: Text("备注"), axis: .vertical)
+                    .lineLimit(1...4)
+            }
+            .formStyle(.grouped)
+            .navigationTitle("编辑资产")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        onSave(form.updateInput)
+                        dismiss()
+                    }
+                }
+            }
         }
+        #if os(macOS)
+        .frame(minWidth: 420, minHeight: 360)
+        #endif
     }
 }

@@ -74,7 +74,6 @@ struct SettingsShell: View {
     @State private var cloudThinkingMode: CloudThinkingMode = .providerDefault
     @State private var showApiKey = false
     @State private var isSaving = false
-    @State private var saveSuccess = false
     @State private var saveError: String?
     @State private var fetchedModels: [LlmModelItem] = []
     @State private var isLoadingModels = false
@@ -83,11 +82,6 @@ struct SettingsShell: View {
     @ObservedObject private var localModels = LocalModelManager.shared
     @State private var localModelError: String?
     @State private var cellularDownloadModel: LocalModelDescriptor?
-
-    #if os(iOS)
-    @FocusState private var focusedField: Field?
-    private enum Field { case baseUrl, apiKey, model }
-    #endif
 
     private var selectedProvider: ProviderOption {
         knownProviders.first { $0.id == provider } ?? knownProviders.last!
@@ -105,197 +99,53 @@ struct SettingsShell: View {
         baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var selectedFetchedModel: LlmModelItem? {
-        fetchedModels.first { $0.id == normalizedModel }
-    }
-
-    private var modelMenuTitle: String {
-        if let selectedFetchedModel {
-            return modelMenuLabel(for: selectedFetchedModel)
-        }
-        if isLoadingModels {
-            return "加载中…"
-        }
-        if hasLoadedModels && fetchedModels.isEmpty {
-            return "未返回可选模型"
-        }
-        return "从列表选择"
-    }
-
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("模型与解析设置")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(IMColors.textPrimary)
-                Spacer()
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundStyle(IMColors.textMuted)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 24)
-            .padding(.top, 22)
-            .padding(.bottom, 16)
+        NavigationStack {
+            Form {
+                localModelSection
+                cloudModelSection
 
-            Divider().opacity(0.3)
-
-            ScrollView {
-                VStack(spacing: 16) {
-                    settingsCard {
-                        localModeRow
-                        ForEach(localModels.models) { descriptor in
-                            Divider().opacity(0.25)
-                            localModelRow(descriptor)
+                Section {
+                    Toggle(isOn: $store.autoConfirm) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("自动入库")
+                            Text("解析完成后跳过草稿审核直接入库")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
-                        Divider().opacity(0.25)
-                        Text("模型来源：Hugging Face 固定 revision（Apache-2.0）· 推理运行时：llama.cpp b9632（MIT）")
-                            .font(.system(size: 10))
-                            .foregroundStyle(IMColors.textMuted)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                } header: {
+                    Text("记账")
+                }
 
-                    if let error = localModelError ?? localModels.lastError {
-                        statusRow(
-                            icon: "exclamationmark.triangle.fill",
-                            color: IMColors.danger,
-                            message: error
-                        )
-                    }
-
-                    settingsCard {
-                        providerPickerRow
-                        Divider().opacity(0.25)
-                        baseURLRow
-                        Divider().opacity(0.25)
-                        apiKeyRow
-                        Divider().opacity(0.25)
-                        modelFieldRow
-                        Divider().opacity(0.25)
-                        modelPickerRow
-                        Divider().opacity(0.25)
-                        cloudThinkingModeRow
-                    }
-
-                    settingsCard {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("自动保存")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(IMColors.textPrimary)
-                                Text("解析完成后跳过草稿直接入库")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(IMColors.textMuted)
-                            }
-                            Spacer()
-                            Toggle("", isOn: $store.autoConfirm)
-                                .toggleStyle(.switch)
-                                .controlSize(.small)
-                                .labelsHidden()
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                    }
-
-                    if let modelLoadError {
-                        statusRow(
-                            icon: "exclamationmark.triangle.fill",
-                            color: IMColors.danger,
-                            message: modelLoadError
-                        )
-                    } else if hasLoadedModels {
-                        statusRow(
-                            icon: fetchedModels.isEmpty ? "tray" : "checkmark.circle.fill",
-                            color: fetchedModels.isEmpty ? IMColors.textMuted : IMColors.accent,
-                            message: fetchedModels.isEmpty
-                                ? "当前接口没有返回可选模型，可直接手填模型 ID。"
-                                : "已拉取 \(fetchedModels.count) 个模型，可下拉选择，也可继续手填模型 ID。"
-                        )
-                    }
-
-                    if let saveError {
-                        statusRow(
-                            icon: "exclamationmark.triangle.fill",
-                            color: IMColors.danger,
-                            message: saveError
-                        )
-                    }
-
-                    if saveSuccess {
-                        statusRow(
-                            icon: "checkmark.circle.fill",
-                            color: IMColors.accent,
-                            message: "配置已保存并立即生效"
-                        )
+                if let saveError {
+                    Section {
+                        statusLabel(saveError, systemImage: "exclamationmark.triangle.fill", color: AppColors.destructive)
                     }
                 }
-                .padding(20)
             }
-
-            Divider().opacity(0.3)
-
-            HStack(spacing: 12) {
-                Button {
-                    dismiss()
-                } label: {
-                    Text("取消")
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(IMColors.accentAlt)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 36)
-                        .background(Color.clear)
-                        .clipShape(RoundedRectangle(cornerRadius: LayoutRadii.micro, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: LayoutRadii.micro, style: .continuous)
-                                .stroke(IMColors.accentAlt, lineWidth: 1)
-                                .allowsHitTesting(false)
-                        )
-                        .contentShape(
-                            RoundedRectangle(cornerRadius: LayoutRadii.micro, style: .continuous)
-                        )
+            .formStyle(.grouped)
+            .navigationTitle("设置")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
                 }
-                .buttonStyle(.plain)
-
-                Button {
-                    saveConfig()
-                } label: {
-                    HStack(spacing: 6) {
-                        if isSaving {
-                            ProgressView().controlSize(.small)
-                        }
-                        Text(isSaving ? "保存中…" : "保存")
-                            .font(.system(size: 14, weight: .regular))
-                            .foregroundStyle(.white)
+                ToolbarItem(placement: .confirmationAction) {
+                    if isSaving {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Button("保存") { saveConfig() }
                     }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 36)
-                    .background(IMColors.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: LayoutRadii.micro, style: .continuous))
                 }
-                .buttonStyle(.plain)
-                .disabled(isSaving)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
         }
         #if os(macOS)
-        .frame(width: 540)
-        #else
-        .presentationDetents(focusedField == nil ? [.height(520)] : [.large])
-        .presentationDragIndicator(.visible)
+        .frame(minWidth: 560, idealWidth: 600, minHeight: 620, idealHeight: 720)
         #endif
-        .appRoundedGlass(
-            cornerRadius: LayoutRadii.shell,
-            prominence: .prominent,
-            tint: IMColors.glassCoolTint,
-            fallbackFill: IMColors.surface
-        )
         .task {
             do {
                 if store.llmConfig == nil {
@@ -325,17 +175,10 @@ struct SettingsShell: View {
         }
     }
 
-    private var localModeRow: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("解析模式")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(IMColors.textPrimary)
-                Text(localModels.mode == .localFirst ? "优先使用已选择的本地模型" : "不加载或调用本地模型")
-                    .font(.system(size: 11))
-                    .foregroundStyle(IMColors.textMuted)
-            }
-            Spacer()
+    // MARK: Local model
+
+    private var localModelSection: some View {
+        Section {
             Picker("解析模式", selection: Binding(
                 get: { localModels.mode },
                 set: { mode in
@@ -351,10 +194,22 @@ struct SettingsShell: View {
                 Text("仅云端").tag(LocalModelMode.cloudOnly)
             }
             .pickerStyle(.segmented)
-            .frame(maxWidth: 220)
+
+            ForEach(localModels.models) { descriptor in
+                localModelRow(descriptor)
+            }
+
+            if let error = localModelError ?? localModels.lastError {
+                statusLabel(error, systemImage: "exclamationmark.triangle.fill", color: AppColors.destructive)
+            }
+        } header: {
+            Text("本地模型")
+        } footer: {
+            Text(
+                (localModels.mode == .localFirst ? "优先使用已选择的本地模型，失败时交给云端。" : "不加载或调用本地模型。")
+                    + "\n模型来源：Hugging Face 固定 revision（Apache-2.0）· 推理运行时：llama.cpp b9632（MIT）"
+            )
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
     }
 
     private func localModelRow(_ descriptor: LocalModelDescriptor) -> some View {
@@ -363,39 +218,36 @@ struct SettingsShell: View {
         let isInstalled = installedState != nil
         let isUpdate = isInstalled && installedState?.revision != descriptor.revision
         let isSelected = localModels.selectedModelId == descriptor.modelId
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 3) {
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(descriptor.displayName)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(IMColors.textPrimary)
+                            .font(.body.weight(.medium))
                         #if os(iOS)
                         if descriptor.experimentalOnIPhone && UIDevice.current.userInterfaceIdiom == .phone {
-                            Text("实验性")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(IMColors.danger)
+                            StatusTag(title: "实验性", color: .orange)
                         }
                         #endif
                     }
                     Text("\(formattedBytes(descriptor.byteCount)) · \(descriptor.license) · \(descriptor.revision.prefix(8))")
-                        .font(.system(size: 10))
-                        .foregroundStyle(IMColors.textMuted)
-                    Text("加载要求：当前可用内存至少 \(formattedBytes(Int64(descriptor.minimumAvailableMemory)))")
-                        .font(.system(size: 10))
-                        .foregroundStyle(IMColors.textMuted)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("需要可用内存 \(formattedBytes(Int64(descriptor.minimumAvailableMemory)))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     if let installedState, isUpdate {
-                        Text("已安装版本 \(installedState.revision.prefix(8))，可手动更新")
-                            .font(.system(size: 10))
-                            .foregroundStyle(IMColors.warningText)
+                        Text("已安装 \(installedState.revision.prefix(8))，可更新")
+                            .font(.caption)
+                            .foregroundStyle(AppColors.warning)
                     }
                 }
                 .accessibilityElement(children: .combine)
                 Spacer()
                 if isSelected {
-                    Text("当前")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(IMColors.accent)
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color.accentColor)
+                        .accessibilityLabel("当前模型")
                 }
             }
 
@@ -414,8 +266,8 @@ struct SettingsShell: View {
                     )
                 }
                 Text(downloadStatusText(download))
-                    .font(.system(size: 10))
-                    .foregroundStyle(IMColors.textMuted)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             HStack(spacing: 8) {
@@ -433,7 +285,7 @@ struct SettingsShell: View {
                 } else {
                     if isInstalled {
                         if !isSelected {
-                            Button("选择") { selectLocalModel(descriptor) }
+                            Button("使用") { selectLocalModel(descriptor) }
                         }
                         Button("删除", role: .destructive) { deleteLocalModel(descriptor) }
                     }
@@ -458,12 +310,11 @@ struct SettingsShell: View {
 
             if let error = download.visibleError {
                 Text(error)
-                    .font(.system(size: 10))
-                    .foregroundStyle(IMColors.danger)
+                    .font(.caption)
+                    .foregroundStyle(AppColors.destructive)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.vertical, 4)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(descriptor.displayName)
     }
@@ -519,20 +370,16 @@ struct SettingsShell: View {
         ByteCountFormatter.string(fromByteCount: value, countStyle: .file)
     }
 
-    private var providerPickerRow: some View {
-        HStack(alignment: .center) {
-            Text("服务商")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(IMColors.textMuted)
-                .frame(width: 90, alignment: .leading)
+    // MARK: Cloud model
 
-            Picker("", selection: Binding(
+    private var cloudModelSection: some View {
+        Section {
+            Picker("服务商", selection: Binding(
                 get: { provider },
                 set: { newValue in
                     provider = newValue
                     applyProviderDefaults()
                     clearModelFetchState()
-                    saveSuccess = false
                     saveError = nil
                 }
             )) {
@@ -540,151 +387,99 @@ struct SettingsShell: View {
                     Text(item.displayName).tag(item.id)
                 }
             }
-            .pickerStyle(.menu)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
 
-    private var baseURLRow: some View {
-        fieldRow(label: "Base URL") {
-            TextField("https://api.openai.com/v1", text: $baseUrl)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .foregroundStyle(urlIsEditable ? IMColors.textPrimary : IMColors.textMuted)
-                .disabled(!urlIsEditable)
-                #if os(iOS)
-                .focused($focusedField, equals: .baseUrl)
-                #endif
-        }
-    }
-
-    @ViewBuilder private var apiKeyFieldContent: some View {
-        if showApiKey {
-            TextField("留空则不鉴权", text: $apiKey)
-        } else {
-            SecureField("留空则不鉴权", text: $apiKey)
-        }
-    }
-
-    private var apiKeyRow: some View {
-        fieldRow(label: "API Key") {
-            HStack(spacing: 6) {
-                apiKeyFieldContent
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .foregroundStyle(IMColors.textPrimary)
-                    #if os(iOS)
-                    .focused($focusedField, equals: .apiKey)
-                    #endif
-                Button {
-                    showApiKey.toggle()
-                } label: {
-                    Image(systemName: showApiKey ? "eye.slash" : "eye")
-                        .font(.system(size: 12))
-                        .foregroundStyle(IMColors.textMuted)
-                }
-                .buttonStyle(.plain)
+            LabeledContent("Base URL") {
+                TextField("Base URL", text: $baseUrl, prompt: Text("https://api.openai.com/v1"))
+                    .labelsHidden()
+                    .multilineTextAlignment(.trailing)
+                    .foregroundStyle(urlIsEditable ? .primary : .secondary)
+                    .disabled(!urlIsEditable)
+                    .urlFieldTraits()
             }
-        }
-    }
 
-    private var modelFieldRow: some View {
-        fieldRow(label: "模型 ID") {
-            TextField(selectedProvider.modelHint, text: $model)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .foregroundStyle(IMColors.textPrimary)
-                #if os(iOS)
-                .focused($focusedField, equals: .model)
-                #endif
-        }
-    }
+            LabeledContent("API Key") {
+                HStack(spacing: 6) {
+                    Group {
+                        if showApiKey {
+                            TextField("API Key", text: $apiKey, prompt: Text("留空则不鉴权"))
+                        } else {
+                            SecureField("API Key", text: $apiKey, prompt: Text("留空则不鉴权"))
+                        }
+                    }
+                    .labelsHidden()
+                    .multilineTextAlignment(.trailing)
+                    .urlFieldTraits()
+                    Button {
+                        showApiKey.toggle()
+                    } label: {
+                        Image(systemName: showApiKey ? "eye.slash" : "eye")
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel(showApiKey ? "隐藏 API Key" : "显示 API Key")
+                }
+            }
 
-    private var cloudThinkingModeRow: some View {
-        fieldRow(label: "思考模式") {
-            Picker("", selection: $cloudThinkingMode) {
+            LabeledContent("模型 ID") {
+                TextField("模型 ID", text: $model, prompt: Text(selectedProvider.modelHint))
+                    .labelsHidden()
+                    .multilineTextAlignment(.trailing)
+                    .urlFieldTraits()
+            }
+
+            LabeledContent("可用模型") {
+                HStack(spacing: 8) {
+                    if !fetchedModels.isEmpty {
+                        Menu {
+                            ForEach(fetchedModels) { item in
+                                Button {
+                                    model = item.id
+                                } label: {
+                                    if let subtitle = modelMenuSubtitle(for: item) {
+                                        Text(modelMenuLabel(for: item))
+                                        Text(subtitle)
+                                    } else {
+                                        Text(modelMenuLabel(for: item))
+                                    }
+                                }
+                            }
+                        } label: {
+                            Text("选择…")
+                        }
+                        .fixedSize()
+                    }
+                    Button {
+                        fetchModelList()
+                    } label: {
+                        if isLoadingModels {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text(hasLoadedModels ? "重新获取" : "获取列表")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(isLoadingModels || isSaving)
+                }
+            }
+
+            Picker("思考模式", selection: $cloudThinkingMode) {
                 ForEach(CloudThinkingMode.allCases) { mode in
                     Text(mode.title).tag(mode)
                 }
             }
-            .pickerStyle(.menu)
-            .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityLabel("云端模型思考模式")
-        }
-    }
-
-    private var modelPickerRow: some View {
-        fieldRow(label: "模型列表") {
-            HStack(spacing: 10) {
-                Menu {
-                    if isLoadingModels {
-                        Text("加载中…")
-                    } else if fetchedModels.isEmpty {
-                        Text(hasLoadedModels ? "未返回可选模型" : "先获取模型列表")
-                    } else {
-                        ForEach(fetchedModels) { item in
-                            Button {
-                                model = item.id
-                                saveSuccess = false
-                            } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(modelMenuLabel(for: item))
-                                    if let subtitle = modelMenuSubtitle(for: item) {
-                                        Text(subtitle)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        Text(modelMenuTitle)
-                            .font(.system(size: 13))
-                            .foregroundStyle(fetchedModels.isEmpty ? IMColors.textMuted : IMColors.textPrimary)
-                            .lineLimit(1)
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(IMColors.textMuted)
-                    }
-                    .padding(.horizontal, 12)
-                    .frame(height: 34)
-                    .appRoundedGlass(
-                        cornerRadius: LayoutRadii.compactField,
-                        prominence: .regular,
-                        interactive: true,
-                        tint: IMColors.glassCoolTint.opacity(0.72),
-                        fallbackFill: IMColors.surface
-                    )
-                }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity)
-
-                Button {
-                    fetchModelList()
-                } label: {
-                    HStack(spacing: 6) {
-                        if isLoadingModels {
-                            ProgressView().controlSize(.small)
-                        }
-                        Text(isLoadingModels ? "拉取中…" : "获取模型列表")
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .foregroundStyle(IMColors.accentAlt)
-                    .padding(.horizontal, 12)
-                    .frame(height: 34)
-                    .appRoundedGlass(
-                        cornerRadius: LayoutRadii.compactField,
-                        prominence: .regular,
-                        interactive: true,
-                        tint: IMColors.accent.opacity(0.22),
-                        fallbackFill: IMColors.accent.opacity(0.10)
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(isLoadingModels || isSaving)
+        } header: {
+            Text("云端模型")
+        } footer: {
+            if let modelLoadError {
+                statusLabel(modelLoadError, systemImage: "exclamationmark.triangle.fill", color: AppColors.destructive)
+            } else if hasLoadedModels {
+                Text(fetchedModels.isEmpty
+                    ? "接口没有返回可选模型，可直接填写模型 ID。"
+                    : "已获取 \(fetchedModels.count) 个模型，可从列表选择或直接填写模型 ID。")
+            } else {
+                Text("配置只保存在本机，不会通过 iCloud 同步。")
             }
         }
     }
@@ -702,7 +497,6 @@ struct SettingsShell: View {
         }
         clearModelFetchState()
         saveError = nil
-        saveSuccess = false
     }
 
     private func applyProviderDefaults() {
@@ -731,7 +525,6 @@ struct SettingsShell: View {
 
         isLoadingModels = true
         modelLoadError = nil
-        saveSuccess = false
 
         Task {
             defer { isLoadingModels = false }
@@ -761,11 +554,9 @@ struct SettingsShell: View {
         )
         isSaving = true
         saveError = nil
-        saveSuccess = false
         Task {
             do {
                 try await store.updateLlmConfig(cfg)
-                saveSuccess = true
                 isSaving = false
                 dismiss()
             } catch {
@@ -786,46 +577,22 @@ struct SettingsShell: View {
         return item.ownedBy
     }
 
-    @ViewBuilder
-    private func settingsCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(spacing: 0) {
-            content()
-        }
-        .appRoundedGlass(
-            cornerRadius: LayoutRadii.field,
-            prominence: .regular,
-            tint: IMColors.glassCoolTint.opacity(0.80),
-            fallbackFill: IMColors.surface
-        )
+    private func statusLabel(_ message: String, systemImage: String, color: Color) -> some View {
+        Label(message, systemImage: systemImage)
+            .font(.footnote)
+            .foregroundStyle(color)
     }
+}
 
-    @ViewBuilder
-    private func fieldRow<Content: View>(
-        label: String,
-        @ViewBuilder field: () -> Content
-    ) -> some View {
-        HStack(alignment: .center) {
-            Text(label)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(IMColors.textMuted)
-                .frame(width: 90, alignment: .leading)
-            field()
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
-
-    @ViewBuilder
-    private func statusRow(icon: String, color: Color, message: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 12))
-                .foregroundStyle(color)
-            Text(message)
-                .font(.system(size: 12))
-                .foregroundStyle(color)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 4)
+private extension View {
+    /// URL / Key / 模型 ID 字段不做自动大写和纠错。
+    func urlFieldTraits() -> some View {
+        #if os(iOS)
+        self
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+        #else
+        self.autocorrectionDisabled()
+        #endif
     }
 }

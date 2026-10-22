@@ -5,104 +5,181 @@ import SwiftUI
 struct SubscriptionShell: View {
     @EnvironmentObject private var store: BillLensStore
     @Environment(\.horizontalSizeClass) private var sizeClass
-    @State private var subscriptionToDelete: SubscriptionItem? = nil
-    @State private var isEditing = false
-    @State private var editForm = SubscriptionEditFormState()
-    @State private var isDetailPresented = false
-    private let shellCornerRadius: CGFloat = LayoutRadii.shell
+    @State private var subscriptionToDelete: SubscriptionItem?
+    @State private var editingSubscription: SubscriptionItem?
+
+    private var usesCompactLayout: Bool {
+        sizeClass == .compact
+    }
 
     var body: some View {
         Group {
-            if sizeClass == .compact {
-                compactBody
+            if usesCompactLayout {
+                subscriptionList
+                    .navigationDestination(item: $store.selectedSubscriptionId) { _ in
+                        detail
+                    }
             } else {
-                splitBody
+                HStack(spacing: 0) {
+                    subscriptionList
+                        .frame(width: 340)
+                    Divider()
+                    detail
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
         }
-        .adaptivePageSurface(cornerRadius: shellCornerRadius)
         .onAppear {
             store.loadSubscriptionsReportingErrors()
         }
-        .alert("确认删除", isPresented: .init(
-            get: { subscriptionToDelete != nil },
-            set: { if !$0 { subscriptionToDelete = nil } }
-        )) {
-            Button("取消", role: .cancel) { subscriptionToDelete = nil }
-            Button("删除", role: .destructive) {
-                if let sub = subscriptionToDelete {
-                    store.deleteSubscription(sub.id)
-                    subscriptionToDelete = nil
-                    isDetailPresented = false
-                }
+        .sheet(item: $editingSubscription) { subscription in
+            SubscriptionEditSheet(subscription: subscription) { update in
+                store.updateSubscription(subscription.id, update: update)
             }
-        } message: {
-            Text("删除后将停止自动记账，已生成的账单不会受影响。")
         }
-        .onChange(of: store.selectedSubscriptionId) {
-            isEditing = false
+        .alert(
+            "删除这个订阅？",
+            isPresented: Binding(
+                get: { subscriptionToDelete != nil },
+                set: { if !$0 { subscriptionToDelete = nil } }
+            ),
+            presenting: subscriptionToDelete
+        ) { subscription in
+            Button("删除", role: .destructive) {
+                store.deleteSubscription(subscription.id)
+                subscriptionToDelete = nil
+            }
+            Button("取消", role: .cancel) { subscriptionToDelete = nil }
+        } message: { _ in
+            Text("删除后将停止自动记账，已生成的账单不会受影响。")
         }
     }
 
-    // MARK: Compact (iPhone): full-width list + sheet detail
+    // MARK: List
 
-    private var compactBody: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            CollectionOverviewCard(
-                icon: "repeat",
-                title: "订阅服务",
-                value: "\(activeSubscriptionCount) 项",
-                detail: nextRenewalText
-            )
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, 14)
-
-            subscriptionReminderRow
-                .padding(.horizontal, 14)
-                .padding(.bottom, 14)
-
-            HStack {
-                Text("全部订阅")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(IMColors.textPrimary)
-                Spacer()
-                Text("\(store.subscriptions.count) 项")
-                    .font(.system(size: 12))
-                    .foregroundStyle(IMColors.textMuted)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 12)
-
-            Divider().opacity(0.3)
-
-            if store.subscriptions.isEmpty {
-                subscriptionEmptyState
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        ForEach(store.subscriptions) { sub in
-                            SubscriptionCard(
-                                subscription: sub,
-                                isSelected: store.selectedSubscriptionId == sub.id,
-                                onSelect: {
-                                    store.selectedSubscriptionId = sub.id
-                                    isDetailPresented = true
-                                },
-                                onPause: { store.pauseSubscription(sub.id) },
-                                onResume: { store.resumeSubscription(sub.id) },
-                                onDelete: { subscriptionToDelete = sub }
-                            )
-                        }
+    private var subscriptionList: some View {
+        List(selection: usesCompactLayout ? nil : $store.selectedSubscriptionId) {
+            Section {
+                LabeledContent("活跃订阅", value: "\(activeSubscriptionCount) 项")
+                if let next = nextRenewal {
+                    LabeledContent("最近续费") {
+                        Text("\(next.merchant ?? next.category) · \(BillLensFormatters.displayDateTime(next.nextDueAt))")
+                            .lineLimit(1)
                     }
-                    .padding(14)
+                }
+                Toggle(isOn: Binding(
+                    get: { store.subscriptionRemindersEnabled },
+                    set: { store.setSubscriptionRemindersEnabled($0) }
+                )) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("扣款提醒")
+                            Text("在扣款日发送本地通知")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "bell.badge")
+                    }
+                }
+            }
+            .selectionDisabled()
+
+            Section("全部订阅") {
+                if store.subscriptions.isEmpty {
+                    emptyState
+                        .selectionDisabled()
+                } else {
+                    ForEach(store.subscriptions) { subscription in
+                        row(subscription)
+                            .tag(subscription.id)
+                    }
                 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.clear)
-        .sheet(isPresented: $isDetailPresented, onDismiss: { store.selectedSubscriptionId = nil }) {
-            compactDetailSheet
+        .appListStyle()
+    }
+
+    @ViewBuilder
+    private func row(_ subscription: SubscriptionItem) -> some View {
+        let content = SubscriptionRow(subscription: subscription)
+            .swipeActions(edge: .trailing) {
+                Button(role: .destructive) {
+                    subscriptionToDelete = subscription
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
+                pauseResumeButton(subscription)
+            }
+            .contextMenu {
+                pauseResumeButton(subscription)
+                Button(role: .destructive) {
+                    subscriptionToDelete = subscription
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
+            }
+        if usesCompactLayout {
+            Button {
+                store.selectedSubscriptionId = subscription.id
+            } label: {
+                HStack {
+                    content
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        } else {
+            content
+        }
+    }
+
+    private func pauseResumeButton(_ subscription: SubscriptionItem) -> some View {
+        Group {
+            if subscription.isActive {
+                Button {
+                    store.pauseSubscription(subscription.id)
+                } label: {
+                    Label("暂停", systemImage: "pause.circle")
+                }
+                .tint(.orange)
+            } else {
+                Button {
+                    store.resumeSubscription(subscription.id)
+                } label: {
+                    Label("恢复", systemImage: "play.circle")
+                }
+                .tint(.green)
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        ContentUnavailableView {
+            Label("暂无订阅", systemImage: "repeat.circle")
+        } description: {
+            Text("在「记账」中输入「订阅了 Netflix 每月 15.99 美元」即可自动创建订阅。")
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: Detail
+
+    @ViewBuilder
+    private var detail: some View {
+        if let subscription = store.selectedSubscription {
+            SubscriptionDetailView(
+                subscription: subscription,
+                onEdit: { editingSubscription = subscription },
+                onPause: { store.pauseSubscription(subscription.id) },
+                onResume: { store.resumeSubscription(subscription.id) },
+                onDelete: { subscriptionToDelete = subscription }
+            )
+        } else {
+            ContentUnavailableView("选择一个订阅", systemImage: "repeat", description: Text("在左侧列表中选择订阅查看详情。"))
         }
     }
 
@@ -110,233 +187,112 @@ struct SubscriptionShell: View {
         store.subscriptions.filter(\.isActive).count
     }
 
-    private var nextRenewalText: String {
-        guard let next = store.subscriptions
+    private var nextRenewal: SubscriptionItem? {
+        store.subscriptions
             .filter(\.isActive)
-            .min(by: { $0.nextDueAt < $1.nextDueAt }) else {
-            return "暂无即将续费项目"
-        }
-        return "最近续费：\(next.merchant ?? next.category) · \(BillLensFormatters.displayDateTime(next.nextDueAt))"
-    }
-
-    @ViewBuilder
-    private var compactDetailSheet: some View {
-        if let sub = store.selectedSubscription {
-            if isEditing {
-                SubscriptionEditPanel(
-                    subscription: sub,
-                    form: $editForm,
-                    onSave: {
-                        let update = SubscriptionUpdateInput(
-                            direction: editForm.direction,
-                            amount: Double(editForm.amount),
-                            currency: editForm.currency.isEmpty ? nil : editForm.currency,
-                            category: editForm.category.isEmpty ? nil : editForm.category,
-                            merchant: editForm.merchant.isEmpty ? nil : editForm.merchant,
-                            note: editForm.note.isEmpty ? nil : editForm.note,
-                            cycle: editForm.cycle,
-                            anchorDay: Int(editForm.anchorDay),
-                            anchorMonth: editForm.cycle == "yearly" ? Int(editForm.anchorMonth) : nil
-                        )
-                        store.updateSubscription(sub.id, update: update)
-                        isEditing = false
-                    },
-                    onCancel: { isEditing = false }
-                )
-                .environmentObject(store)
-            } else {
-                SubscriptionDetailPanel(
-                    subscription: sub,
-                    onEdit: {
-                        hydrateEditForm(from: sub)
-                        isEditing = true
-                    },
-                    onPause: { store.pauseSubscription(sub.id) },
-                    onResume: { store.resumeSubscription(sub.id) },
-                    onDelete: { subscriptionToDelete = sub }
-                )
-                .environmentObject(store)
-            }
-        }
-    }
-
-    // MARK: Regular (iPad/macOS): side-by-side split
-
-    private var splitBody: some View {
-        HStack(spacing: 0) {
-            // Left: Subscription list
-            VStack(alignment: .leading, spacing: 0) {
-                subscriptionReminderRow
-                    .padding(14)
-
-                Divider().opacity(0.3)
-
-                HStack {
-                    Text("订阅列表")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(IMColors.textPrimary)
-                    Spacer()
-                    Text("\(store.subscriptions.count) 项")
-                        .font(.system(size: 12))
-                        .foregroundStyle(IMColors.textMuted)
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 16)
-                .padding(.bottom, 12)
-
-                Divider().opacity(0.3)
-
-                if store.subscriptions.isEmpty {
-                    subscriptionEmptyState
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 10) {
-                            ForEach(store.subscriptions) { sub in
-                                SubscriptionCard(
-                                    subscription: sub,
-                                    isSelected: store.selectedSubscriptionId == sub.id,
-                                    onSelect: { store.selectedSubscriptionId = sub.id },
-                                    onPause: { store.pauseSubscription(sub.id) },
-                                    onResume: { store.resumeSubscription(sub.id) },
-                                    onDelete: { subscriptionToDelete = sub }
-                                )
-                            }
-                        }
-                        .padding(14)
-                    }
-                }
-            }
-            .frame(width: 420)
-            .frame(maxHeight: .infinity)
-            .background(IMColors.panelBg.opacity(0.74))
-
-            // Divider
-            ZStack {
-                IMColors.divider.frame(width: 1)
-                IMColors.surface.opacity(0.72).frame(width: 1).offset(x: 1)
-            }
-            .frame(width: 2)
-
-            // Right: Detail / Edit panel
-            VStack {
-                if let sub = store.selectedSubscription {
-                    if isEditing {
-                        SubscriptionEditPanel(
-                            subscription: sub,
-                            form: $editForm,
-                            onSave: {
-                                let update = SubscriptionUpdateInput(
-                                    direction: editForm.direction,
-                                    amount: Double(editForm.amount),
-                                    currency: editForm.currency.isEmpty ? nil : editForm.currency,
-                                    category: editForm.category.isEmpty ? nil : editForm.category,
-                                    merchant: editForm.merchant.isEmpty ? nil : editForm.merchant,
-                                    note: editForm.note.isEmpty ? nil : editForm.note,
-                                    cycle: editForm.cycle,
-                                    anchorDay: Int(editForm.anchorDay),
-                                    anchorMonth: editForm.cycle == "yearly" ? Int(editForm.anchorMonth) : nil
-                                )
-                                store.updateSubscription(sub.id, update: update)
-                                isEditing = false
-                            },
-                            onCancel: { isEditing = false }
-                        )
-                    } else {
-                        SubscriptionDetailPanel(
-                            subscription: sub,
-                            onEdit: {
-                                hydrateEditForm(from: sub)
-                                isEditing = true
-                            },
-                            onPause: { store.pauseSubscription(sub.id) },
-                            onResume: { store.resumeSubscription(sub.id) },
-                            onDelete: { subscriptionToDelete = sub }
-                        )
-                    }
-                } else {
-                    VStack(spacing: 12) {
-                        Image(systemName: "arrow.left")
-                            .font(.system(size: 28))
-                            .foregroundStyle(IMColors.textPlaceholder)
-                        Text("从左侧选择一个订阅查看详情")
-                            .font(.system(size: 14))
-                            .foregroundStyle(IMColors.textMuted)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(IMColors.surface.opacity(0.74))
-        }
-    }
-
-    private var subscriptionEmptyState: some View {
-        VStack(spacing: 14) {
-            Spacer()
-            Image(systemName: "repeat.circle")
-                .font(.system(size: 44))
-                .foregroundStyle(IMColors.textPlaceholder)
-            Text("暂无订阅")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(IMColors.textSecondary)
-            Text("在「账单录入」中输入类似\n「订阅了 Netflix 每月 15.99 美元」\n即可自动创建订阅任务")
-                .font(.system(size: 13))
-                .foregroundStyle(IMColors.textMuted)
-                .multilineTextAlignment(.center)
-                .lineSpacing(3)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var subscriptionReminderRow: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "bell.badge")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(IMColors.accent)
-                .frame(width: 34, height: 34)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("扣款提醒")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(IMColors.textPrimary)
-                Text("在下次订阅扣款日发送本地通知")
-                    .font(.system(size: 11))
-                    .foregroundStyle(IMColors.textMuted)
-            }
-
-            Spacer(minLength: 8)
-
-            Toggle("", isOn: Binding(
-                get: { store.subscriptionRemindersEnabled },
-                set: { store.setSubscriptionRemindersEnabled($0) }
-            ))
-            .labelsHidden()
-            .toggleStyle(.switch)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(IMColors.surface.opacity(0.84), in: RoundedRectangle(cornerRadius: 12))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(IMColors.divider.opacity(0.6), lineWidth: 1)
-        }
-    }
-
-    private func hydrateEditForm(from sub: SubscriptionItem) {
-        editForm = SubscriptionEditFormState(
-            direction: sub.direction,
-            amount: String(format: "%.2f", sub.amount),
-            currency: sub.currency,
-            category: sub.category,
-            merchant: sub.merchant ?? "",
-            note: sub.note ?? "",
-            cycle: sub.cycle,
-            anchorDay: String(sub.anchorDay),
-            anchorMonth: String(sub.anchorMonth ?? 1)
-        )
+            .min(by: { $0.nextDueAt < $1.nextDueAt })
     }
 }
+
+// MARK: - Row
+
+struct SubscriptionRow: View {
+    let subscription: SubscriptionItem
+
+    var body: some View {
+        HStack(spacing: 12) {
+            CategoryIcon(
+                systemImage: "repeat",
+                color: subscription.isActive ? CategoryStyle.color(for: "订阅") : .gray
+            )
+            VStack(alignment: .leading, spacing: 2) {
+                Text(subscription.merchant ?? subscription.category)
+                    .lineLimit(1)
+                Text("\(subscription.cycleDisplayText) · 下次 \(BillLensFormatters.displayDateTime(subscription.nextDueAt))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 2) {
+                AmountText(amount: subscription.amount, currency: subscription.currency, direction: subscription.direction)
+                    .font(.body.weight(.medium))
+                if !subscription.isActive {
+                    Text(subscription.statusDisplayText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - Detail
+
+struct SubscriptionDetailView: View {
+    let subscription: SubscriptionItem
+    let onEdit: () -> Void
+    let onPause: () -> Void
+    let onResume: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        Form {
+            Section {
+                DetailHeader(
+                    icon: "repeat",
+                    color: subscription.isActive ? CategoryStyle.color(for: "订阅") : .gray,
+                    title: subscription.merchant ?? subscription.category,
+                    amount: BillLensFormatters.currencyString(subscription.amount, currencyCode: subscription.currency),
+                    caption: "下次扣费 \(BillLensFormatters.displayDateTime(subscription.nextDueAt))"
+                ) {
+                    StatusTag(title: subscription.cycleDisplayText, color: .accentColor)
+                    StatusTag(
+                        title: subscription.statusDisplayText,
+                        color: subscription.isActive ? AppColors.income : .secondary
+                    )
+                }
+            }
+
+            Section("详情") {
+                LabeledContent("类型", value: subscription.direction == "income" ? "收入" : "支出")
+                LabeledContent("分类", value: subscription.category)
+                LabeledContent("币种", value: subscription.currency)
+                if let merchant = subscription.merchant, !merchant.isEmpty {
+                    LabeledContent("商户", value: merchant)
+                }
+                if let note = subscription.note, !note.isEmpty {
+                    LabeledContent("备注", value: note)
+                }
+                LabeledContent("扣费日", value: subscription.cycle == "monthly"
+                    ? "每月 \(subscription.anchorDay) 日"
+                    : "每年 \(subscription.anchorMonth ?? 1) 月 \(subscription.anchorDay) 日")
+                if let last = subscription.lastChargedAt {
+                    LabeledContent("上次记账", value: BillLensFormatters.displayDateTime(last))
+                }
+            }
+
+            Section {
+                Button("编辑订阅", action: onEdit)
+                if subscription.isActive {
+                    Button("暂停订阅", action: onPause)
+                } else {
+                    Button("恢复订阅", action: onResume)
+                }
+                Button("删除订阅", role: .destructive, action: onDelete)
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle(subscription.merchant ?? subscription.category)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+    }
+}
+
+// MARK: - Edit
 
 struct SubscriptionEditFormState {
     var direction = "expense"
@@ -348,355 +304,118 @@ struct SubscriptionEditFormState {
     var cycle = "monthly"
     var anchorDay = "1"
     var anchorMonth = "1"
-}
 
-// MARK: - Subscription Card
-
-struct SubscriptionCard: View {
-    let subscription: SubscriptionItem
-    let isSelected: Bool
-    let onSelect: () -> Void
-    let onPause: () -> Void
-    let onResume: () -> Void
-    let onDelete: () -> Void
-
-    var body: some View {
-        Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .top) {
-                    // Icon
-                    ZStack {
-                        RoundedRectangle(cornerRadius: LayoutRadii.micro, style: .continuous)
-                            .fill(subscription.isActive ? IMColors.accentBgLight : IMColors.controlBg)
-                            .frame(width: 36, height: 36)
-                        Image(systemName: "repeat.circle.fill")
-                            .font(.system(size: 18))
-                            .foregroundStyle(subscription.isActive ? IMColors.accent : IMColors.textMuted)
-                    }
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(subscription.merchant ?? subscription.category)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(IMColors.textTitle)
-                            .lineLimit(1)
-                        Text("\(subscription.cycleDisplayText) · \(subscription.category)")
-                            .font(.system(size: 11))
-                            .foregroundStyle(IMColors.textLabel)
-                    }
-
-                    Spacer()
-
-                    VStack(alignment: .trailing, spacing: 3) {
-                        Text(BillLensFormatters.currencyString(subscription.amount, currencyCode: subscription.currency))
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(IMColors.textTitle)
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(subscription.isActive ? IMColors.textPrimary : IMColors.textPlaceholder)
-                                .frame(width: 6, height: 6)
-                            Text(subscription.statusDisplayText)
-                                .font(.system(size: 10))
-                                .foregroundStyle(IMColors.textLabel)
-                        }
-                    }
-                }
-
-                HStack(spacing: 6) {
-                    Label("下次: \(subscription.nextDueAt)", systemImage: "calendar")
-                        .font(.system(size: 11))
-                        .foregroundStyle(IMColors.textMeta)
-
-                    Spacer()
-
-                    // Quick action buttons
-                    if subscription.isActive {
-                        smallActionButton("暂停", icon: "pause.circle", action: onPause)
-                    } else {
-                        smallActionButton("恢复", icon: "play.circle", action: onResume)
-                    }
-                    smallActionButton("删除", icon: "trash", color: IMColors.dangerSubtle, action: onDelete)
-                }
-            }
-            .padding(12)
-            .appRoundedGlass(
-                cornerRadius: LayoutRadii.card,
-                prominence: isSelected ? .prominent : .regular,
-                tint: isSelected ? IMColors.accentBright.opacity(0.18) : IMColors.accentBright.opacity(0.08),
-                fallbackFill: isSelected ? IMColors.accentBgActive : IMColors.surfaceStrong
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: LayoutRadii.small, style: .continuous)
-                    .stroke(isSelected ? IMColors.accent.opacity(0.4) : IMColors.divider, lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
+    init(subscription: SubscriptionItem) {
+        direction = subscription.direction
+        amount = String(format: "%.2f", subscription.amount)
+        currency = subscription.currency
+        category = subscription.category
+        merchant = subscription.merchant ?? ""
+        note = subscription.note ?? ""
+        cycle = subscription.cycle
+        anchorDay = String(subscription.anchorDay)
+        anchorMonth = String(subscription.anchorMonth ?? 1)
     }
 
-    private func smallActionButton(_ title: String, icon: String, color: Color = IMColors.textMuted, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 3) {
-                Image(systemName: icon)
-                    .font(.system(size: 10))
-                Text(title)
-                    .font(.system(size: 10, weight: .medium))
-            }
-            .foregroundStyle(color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .appCapsuleGlass(
-                prominence: .regular,
-                interactive: true,
-                tint: color.opacity(0.14),
-                fallbackFill: color.opacity(0.08)
-            )
-        }
-        .buttonStyle(.plain)
+    var updateInput: SubscriptionUpdateInput {
+        SubscriptionUpdateInput(
+            direction: direction,
+            amount: Double(amount),
+            currency: currency.isEmpty ? nil : currency,
+            category: category.isEmpty ? nil : category,
+            merchant: merchant.isEmpty ? nil : merchant,
+            note: note.isEmpty ? nil : note,
+            cycle: cycle,
+            anchorDay: Int(anchorDay),
+            anchorMonth: cycle == "yearly" ? Int(anchorMonth) : nil
+        )
     }
 }
 
-// MARK: - Subscription Detail Panel
+struct SubscriptionEditSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var form: SubscriptionEditFormState
+    let onSave: (SubscriptionUpdateInput) -> Void
 
-struct SubscriptionDetailPanel: View {
-    let subscription: SubscriptionItem
-    let onEdit: () -> Void
-    let onPause: () -> Void
-    let onResume: () -> Void
-    let onDelete: () -> Void
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                // Header
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: LayoutRadii.compactField, style: .continuous)
-                                .fill(subscription.isActive ? IMColors.accentBgLight : IMColors.controlBg)
-                                .frame(width: 48, height: 48)
-                            Image(systemName: "repeat.circle.fill")
-                                .font(.system(size: 24))
-                                .foregroundStyle(subscription.isActive ? IMColors.accent : IMColors.textMuted)
-                        }
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(subscription.merchant ?? subscription.category)
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundStyle(IMColors.textTitle)
-                            HStack(spacing: 6) {
-                                Text(subscription.cycleDisplayText)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(IMColors.accent)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 3)
-                                    .appCapsuleGlass(
-                                        prominence: .regular,
-                                        tint: IMColors.glassCoolTint,
-                                        fallbackFill: IMColors.accentBgLight
-                                    )
-                                Text(subscription.isActive ? "活跃" : "已暂停")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(subscription.isActive ? IMColors.textTitle : IMColors.textLabel)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 3)
-                                    .appCapsuleGlass(
-                                        prominence: .regular,
-                                        tint: IMColors.glassWarmTint.opacity(0.48),
-                                        fallbackFill: IMColors.controlBg
-                                    )
-                            }
-                        }
-                        Spacer()
-                    }
-
-                    // Amount display
-                    Text(BillLensFormatters.currencyString(subscription.amount, currencyCode: subscription.currency))
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
-                        .foregroundStyle(IMColors.textTitle)
-                        .padding(.top, 4)
-                }
-                .padding(20)
-
-                Divider().opacity(0.2).padding(.horizontal, 16)
-
-                // Detail fields
-                VStack(spacing: 0) {
-                    detailRow("类型", value: subscription.direction == "income" ? "收入" : "支出")
-                    detailRow("分类", value: subscription.category)
-                    detailRow("币种", value: subscription.currency)
-                    if let merchant = subscription.merchant, !merchant.isEmpty {
-                        detailRow("商户", value: merchant)
-                    }
-                    if let note = subscription.note, !note.isEmpty {
-                        detailRow("备注", value: note)
-                    }
-                    detailRow("周期", value: subscription.cycleDisplayText)
-                    detailRow("扣费日", value: subscription.cycle == "monthly"
-                        ? "每月 \(subscription.anchorDay) 日"
-                        : "\(subscription.anchorMonth ?? 1) 月 \(subscription.anchorDay) 日")
-                    detailRow("下次扣费", value: subscription.nextDueAt)
-                    if let last = subscription.lastChargedAt {
-                        detailRow("上次记账", value: last)
-                    }
-                }
-                .padding(.vertical, 8)
-
-                Divider().opacity(0.2).padding(.horizontal, 16)
-
-                // Action buttons
-                HStack(spacing: 10) {
-                    ActionButton(title: "编辑", kind: .ghost, action: onEdit)
-                    if subscription.isActive {
-                        ActionButton(title: "暂停", kind: .ghost, action: onPause)
-                    } else {
-                        ActionButton(title: "恢复", kind: .primary, action: onResume)
-                    }
-                    ActionButton(title: "删除", kind: .dangerGhost, action: onDelete)
-                }
-                .padding(20)
-            }
-        }
+    init(subscription: SubscriptionItem, onSave: @escaping (SubscriptionUpdateInput) -> Void) {
+        _form = State(initialValue: SubscriptionEditFormState(subscription: subscription))
+        self.onSave = onSave
     }
 
-    private func detailRow(_ label: String, value: String) -> some View {
-        HStack {
-            Text(label)
-                .font(.system(size: 13))
-                .foregroundStyle(IMColors.textLabel)
-                .frame(width: 72, alignment: .leading)
-            Text(value)
-                .font(.system(size: 13))
-                .foregroundStyle(IMColors.textBody)
-            Spacer()
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 9)
-    }
-}
-
-// MARK: - Subscription Edit Panel
-
-struct SubscriptionEditPanel: View {
-    let subscription: SubscriptionItem
-    @Binding var form: SubscriptionEditFormState
-    let onSave: () -> Void
-    let onCancel: () -> Void
-
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Text("编辑订阅")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(IMColors.textPrimary)
-                    Spacer()
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("类型", selection: $form.direction) {
+                        Text("支出").tag("expense")
+                        Text("收入").tag("income")
+                    }
+                    .pickerStyle(.segmented)
+                    LabeledContent("金额") {
+                        TextField("金额", text: $form.amount, prompt: Text("0.00"))
+                            .labelsHidden()
+                            .multilineTextAlignment(.trailing)
+                            #if os(iOS)
+                            .keyboardType(.decimalPad)
+                            #endif
+                    }
+                    LabeledContent("币种") {
+                        TextField("币种", text: $form.currency, prompt: Text("CNY"))
+                            .labelsHidden()
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Picker("分类", selection: $form.category) {
+                        ForEach(BillLensStore.categories(for: form.direction), id: \.self) { category in
+                            Text(category).tag(category)
+                        }
+                    }
                 }
-                .padding(20)
 
-                Divider().opacity(0.2).padding(.horizontal, 16)
-
-                VStack(spacing: 14) {
-                    // Direction picker
-                    editFieldRow("类型") {
-                        Picker("", selection: $form.direction) {
-                            Text("支出").tag("expense")
-                            Text("收入").tag("income")
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 160)
+                Section {
+                    LabeledContent("商户") {
+                        TextField("商户", text: $form.merchant, prompt: Text("可选"))
+                            .labelsHidden()
+                            .multilineTextAlignment(.trailing)
                     }
+                    TextField("备注", text: $form.note, prompt: Text("备注"), axis: .vertical)
+                        .lineLimit(1...4)
+                }
 
-                    // Amount
-                    editFieldRow("金额") {
-                        TextField("0.00", text: $form.amount)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 140)
+                Section("扣费周期") {
+                    Picker("周期", selection: $form.cycle) {
+                        Text("每月").tag("monthly")
+                        Text("每年").tag("yearly")
                     }
-
-                    // Currency
-                    editFieldRow("币种") {
-                        TextField("CNY", text: $form.currency)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 100)
-                    }
-
-                    // Category
-                    editFieldRow("分类") {
-                        let categories = form.direction == "income"
-                            ? BillLensStore.incomeCategories
-                            : BillLensStore.expenseCategories
-                        Picker("", selection: $form.category) {
-                            ForEach(categories, id: \.self) { cat in
-                                Text(cat).tag(cat)
-                            }
-                        }
-                        .frame(width: 140)
-                    }
-
-                    // Merchant
-                    editFieldRow("商户") {
-                        TextField("可选", text: $form.merchant)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 200)
-                    }
-
-                    // Note
-                    editFieldRow("备注") {
-                        TextField("可选", text: $form.note)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 200)
-                    }
-
-                    // Cycle
-                    editFieldRow("周期") {
-                        Picker("", selection: $form.cycle) {
-                            Text("每月").tag("monthly")
-                            Text("每年").tag("yearly")
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 160)
-                    }
-
-                    // Anchor day
-                    editFieldRow("扣费日") {
-                        TextField("1", text: $form.anchorDay)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 60)
-                        Text("日")
-                            .font(.system(size: 13))
-                            .foregroundStyle(IMColors.textMuted)
-                    }
-
+                    .pickerStyle(.segmented)
                     if form.cycle == "yearly" {
-                        editFieldRow("扣费月") {
-                            TextField("1", text: $form.anchorMonth)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(width: 60)
-                            Text("月")
-                                .font(.system(size: 13))
-                                .foregroundStyle(IMColors.textMuted)
+                        Picker("扣费月", selection: $form.anchorMonth) {
+                            ForEach(1...12, id: \.self) { Text("\($0) 月").tag(String($0)) }
                         }
                     }
+                    Picker("扣费日", selection: $form.anchorDay) {
+                        ForEach(1...31, id: \.self) { Text("\($0) 日").tag(String($0)) }
+                    }
                 }
-                .padding(20)
-
-                Divider().opacity(0.2).padding(.horizontal, 16)
-
-                HStack(spacing: 10) {
-                    ActionButton(title: "取消", kind: .ghost, action: onCancel)
-                    ActionButton(title: "保存", kind: .primary, action: onSave)
+            }
+            .formStyle(.grouped)
+            .navigationTitle("编辑订阅")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
                 }
-                .padding(20)
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        onSave(form.updateInput)
+                        dismiss()
+                    }
+                }
             }
         }
-    }
-
-    private func editFieldRow<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
-        HStack(alignment: .center) {
-            Text(label)
-                .font(.system(size: 13))
-                .foregroundStyle(IMColors.textMuted)
-                .frame(width: 60, alignment: .leading)
-            content()
-            Spacer()
-        }
+        #if os(macOS)
+        .frame(minWidth: 440, minHeight: 520)
+        #endif
     }
 }

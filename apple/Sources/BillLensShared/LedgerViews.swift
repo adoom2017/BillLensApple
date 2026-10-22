@@ -1,18 +1,18 @@
 import SwiftUI
 
+enum LedgerViewMode: Hashable {
+    case calendar
+    case detail
+}
+
 struct LedgerShell: View {
     @EnvironmentObject private var store: BillLensStore
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var ledgerMode: LedgerViewMode = .calendar
     @State private var selectedLedgerDate: String?
-    @State private var cachedCalendarCells: [LedgerCalendarCell] = []
-    @State private var cachedCalendarKey: String = ""
-    @State private var selectedCategoryFilter: String? = nil
-    @State private var recordToDelete: RecordItem? = nil
-    let availableHeight: CGFloat
-    private let shellCornerRadius: CGFloat = LayoutRadii.shell
+    @State private var selectedCategoryFilter: String?
+    @State private var recordToDelete: RecordItem?
 
-    private let masterWidth: CGFloat = 340
     private var usesCompactLayout: Bool {
         #if os(iOS)
         horizontalSizeClass == .compact
@@ -25,603 +25,289 @@ struct LedgerShell: View {
         Group {
             if let ledger = store.ledger {
                 ledgerContent(ledger)
-                .onAppear {
-                    syncCalendarState(for: ledger)
-                    rebuildCalendarCellsIfNeeded(for: ledger)
-                }
-                .onChange(of: ledgerSignature(ledger)) {
-                    syncCalendarState(for: ledger)
-                    rebuildCalendarCellsIfNeeded(for: ledger)
-                }
-                .onChange(of: selectedLedgerDate) {
-                    updateCalendarCellSelection()
-                }
+                    .onAppear { syncSelectedDate(for: ledger) }
+                    .onChange(of: ledgerSignature(ledger)) { syncSelectedDate(for: ledger) }
+                    .toolbar { toolbarContent(ledger) }
             } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("正在加载账单视图")
-                        .font(.system(size: 16, weight: .semibold))
-                    Text("首次启动后会自动读取本地账本数据。")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(IMColors.textMuted)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                ProgressView("正在加载账单…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(maxHeight: availableHeight)
-        .adaptivePageSurface(cornerRadius: shellCornerRadius)
         .alert(
-            "确认删除",
+            "删除这笔账单？",
             isPresented: Binding(
                 get: { recordToDelete != nil },
                 set: { if !$0 { recordToDelete = nil } }
-            )
-        ) {
-            Button("取消", role: .cancel) { recordToDelete = nil }
+            ),
+            presenting: recordToDelete
+        ) { record in
             Button("删除", role: .destructive) {
-                if let record = recordToDelete {
-                    store.deleteRecord(record.id)
-                    recordToDelete = nil
-                }
+                store.deleteRecord(record.id)
+                recordToDelete = nil
             }
-        } message: {
-            if let record = recordToDelete {
-                Text("确定要删除「\(record.merchant ?? record.category) \(BillLensFormatters.currencyString(record.amount, currencyCode: record.currency))」吗？")
-            }
+            Button("取消", role: .cancel) { recordToDelete = nil }
+        } message: { record in
+            Text("「\(record.merchant ?? record.category) \(BillLensFormatters.currencyString(record.amount, currencyCode: record.currency))」将被删除。")
         }
     }
+
+    // MARK: Layouts
 
     @ViewBuilder
     private func ledgerContent(_ ledger: LedgerSnapshot) -> some View {
         if usesCompactLayout {
-            compactLedgerContent(ledger)
-        } else {
-            regularLedgerContent(ledger)
-        }
-    }
-
-    private func regularLedgerContent(_ ledger: LedgerSnapshot) -> some View {
-        HStack(spacing: 0) {
-            masterPanel(ledger)
-                .frame(width: masterWidth)
-                .padding(14)
-                .frame(maxHeight: .infinity, alignment: .top)
-                .background(IMColors.panelBg.opacity(0.82))
-
-            groovedDivider
-
-            detailPanel(ledger)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(IMColors.surface.opacity(0.74))
-        }
-    }
-
-    private func compactLedgerContent(_ ledger: LedgerSnapshot) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                masterPanel(ledger)
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .background(IMColors.panelBg.opacity(0.82))
-
-                Divider().opacity(0.2)
-
-                detailPanel(ledger)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .background(IMColors.surface.opacity(0.74))
-            }
-        }
-        .scrollIndicators(.automatic)
-        .background(Color.clear)
-    }
-
-    private func masterPanel(_ ledger: LedgerSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 4) {
-                ForEach(LedgerPreset.allCases) { preset in
-                    Button {
-                        store.applyPreset(preset)
-                    } label: {
-                        Text(preset.title)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(
-                                store.selectedPreset == preset
-                                    ? IMColors.textPrimary
-                                    : IMColors.textSecondary
-                            )
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
-                            .background(
-                                RoundedRectangle(cornerRadius: LayoutRadii.tiny, style: .continuous)
-                                    .fill(
-                                        store.selectedPreset == preset
-                                            ? IMColors.controlBg
-                                            : Color.clear)
-                            )
+            List {
+                Section {
+                    periodControls
+                }
+                Section {
+                    summary(ledger)
+                }
+                Section {
+                    periodNavigator(ledger)
+                        .buttonStyle(.plain)
+                }
+                if store.selectedPreset != .year {
+                    Section {
+                        modePicker
                     }
-                    .buttonStyle(.plain)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
+                }
+                recordSections(ledger)
+            }
+            .appListStyle()
+        } else {
+            HStack(spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        periodControls
+                        card { summary(ledger) }
+                        card { periodNavigator(ledger) }
+                    }
+                    .padding(16)
+                }
+                .frame(width: 344)
+                .background(AppColors.groupedBackground)
+
+                Divider()
+
+                List {
+                    recordSections(ledger)
+                }
+                .appListStyle()
+                .overlay {
+                    if visibleDays(in: ledger).isEmpty {
+                        emptyRecordsView
+                    }
                 }
             }
+        }
+    }
+
+    private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppColors.cardBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    @ToolbarContentBuilder
+    private func toolbarContent(_ ledger: LedgerSnapshot) -> some ToolbarContent {
+        if !usesCompactLayout && store.selectedPreset != .year {
+            ToolbarItem(placement: .principal) {
+                modePicker
+                    .fixedSize()
+            }
+        }
+        ToolbarItem(placement: .primaryAction) {
+            categoryFilterMenu(ledger)
+        }
+    }
+
+    // MARK: Controls
+
+    private var periodControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Picker(
+                "统计周期",
+                selection: Binding(
+                    get: { store.selectedPreset },
+                    set: { store.applyPreset($0) }
+                )
+            ) {
+                ForEach(LedgerPreset.allCases) { preset in
+                    Text(preset.title).tag(preset)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
 
             if store.selectedPreset == .custom {
-                HStack(spacing: 6) {
-                    DatePicker("", selection: $store.customStart, displayedComponents: .date)
+                HStack(spacing: 8) {
+                    DatePicker("开始", selection: $store.customStart, displayedComponents: .date)
                         .labelsHidden()
-                        .frame(width: 100)
-                    Text("–")
-                        .foregroundStyle(IMColors.textMuted)
-                        .font(.system(size: 12))
-                    DatePicker("", selection: $store.customEnd, displayedComponents: .date)
+                    Text("至")
+                        .foregroundStyle(.secondary)
+                    DatePicker("结束", selection: $store.customEnd, displayedComponents: .date)
                         .labelsHidden()
-                        .frame(width: 100)
-                    ActionButton(title: "应用", kind: .ghost) {
+                    Spacer(minLength: 0)
+                    Button("应用") {
                         store.applyPreset(.custom)
                     }
+                    .buttonStyle(.bordered)
                 }
             }
-
-            statBar(ledger)
-
-            if store.selectedPreset == .year {
-                monthlyAggregationGrid(ledger)
-            } else {
-                calendarPanel(ledger)
-            }
-
-            quickCategoryFilters(ledger)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var groovedDivider: some View {
-        ZStack {
-            IMColors.divider
-                .frame(width: 1)
-            IMColors.surface.opacity(0.72)
-                .frame(width: 1)
-                .offset(x: 1)
-        }
-        .frame(width: 2)
-    }
-
-    private func detailPanel(_ ledger: LedgerSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if store.selectedPreset != .year {
-                HStack(spacing: 4) {
-                    ledgerModeButton(.calendar, title: "按日")
-                    ledgerModeButton(.detail, title: "全部明细")
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-
-                Divider().opacity(0.2)
-            }
-
-            Group {
-                if store.selectedPreset == .year {
-                    if usesCompactLayout {
-                        detailLedgerContent(ledger)
-                    } else {
-                        detailLedgerView(ledger)
-                    }
-                } else {
-                    switch ledgerMode {
-                    case .calendar:
-                        rightPanelCalendarDetail(ledger)
-                    case .detail:
-                        if usesCompactLayout {
-                            detailLedgerContent(ledger)
-                        } else {
-                            detailLedgerView(ledger)
-                        }
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: usesCompactLayout ? nil : .infinity)
         }
     }
 
-    private func statBar(_ ledger: LedgerSnapshot) -> some View {
+    private var modePicker: some View {
+        Picker("视图", selection: $ledgerMode) {
+            Text("按日").tag(LedgerViewMode.calendar)
+            Text("全部明细").tag(LedgerViewMode.detail)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+    }
+
+    private func categoryFilterMenu(_ ledger: LedgerSnapshot) -> some View {
+        let categories = Array(Set(ledger.byDay.flatMap { $0.records.map(\.category) })).sorted()
+        return Menu {
+            Picker("分类", selection: $selectedCategoryFilter) {
+                Text("全部分类").tag(String?.none)
+                ForEach(categories, id: \.self) { category in
+                    Label(category, systemImage: CategoryStyle.icon(for: category)).tag(String?.some(category))
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Label(
+                selectedCategoryFilter ?? "筛选",
+                systemImage: selectedCategoryFilter == nil
+                    ? "line.3.horizontal.decrease.circle"
+                    : "line.3.horizontal.decrease.circle.fill"
+            )
+        }
+        .help("按分类筛选")
+    }
+
+    private func summary(_ ledger: LedgerSnapshot) -> some View {
         let billCount = ledger.byDay.reduce(0) { $0 + $1.records.count }
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 0) {
-                LedgerSummaryCard(
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                SummaryStat(
                     title: "支出",
                     value: BillLensFormatters.currencyString(
                         ledger.summary.summary.expenseAmount,
                         currencyCode: ledger.statsCurrency
-                    ),
-                    accent: .expense
+                    )
                 )
-                Divider().frame(height: 24).opacity(0.2).padding(.horizontal, 8)
-                LedgerSummaryCard(
+                SummaryStat(
                     title: "收入",
                     value: BillLensFormatters.currencyString(
                         ledger.summary.summary.incomeAmount,
                         currencyCode: ledger.statsCurrency
                     ),
-                    accent: .income
+                    tint: AppColors.income
                 )
-                Divider().frame(height: 24).opacity(0.2).padding(.horizontal, 8)
-                LedgerSummaryCard(title: "笔数", value: "\(billCount)", accent: .neutral)
-                Divider().frame(height: 24).opacity(0.2).padding(.horizontal, 8)
-                LedgerSummaryCard(title: "同步", value: "\(ledger.pendingSyncCount)", accent: .neutral)
+                SummaryStat(title: "笔数", value: "\(billCount)")
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .appRoundedGlass(
-                cornerRadius: LayoutRadii.field,
-                prominence: .regular,
-                tint: IMColors.glassCoolTint,
-                fallbackFill: IMColors.statBg
-            )
+
+            if ledger.pendingSyncCount > 0 {
+                Label("\(ledger.pendingSyncCount) 条待同步", systemImage: "arrow.triangle.2.circlepath.icloud")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             if let warning = ledger.fxWarning {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(IMColors.ledgerStatGoldBold)
-                    Text(warning)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(IMColors.ledgerStatGold)
-                        .lineLimit(2)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .appRoundedGlass(
-                    cornerRadius: LayoutRadii.field,
-                    prominence: .regular,
-                    tint: IMColors.glassWarmTint,
-                    fallbackFill: IMColors.warningBg
-                )
+                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(AppColors.warning)
             }
         }
     }
 
-    private func ledgerModeButton(_ mode: LedgerViewMode, title: String) -> some View {
-        Button {
-            ledgerMode = mode
-        } label: {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(
-                    ledgerMode == mode
-                        ? IMColors.textPrimary
-                        : IMColors.textSecondary
-                )
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: LayoutRadii.tiny, style: .continuous)
-                        .fill(
-                            ledgerMode == mode
-                                ? IMColors.controlBg
-                                : Color.clear)
-                )
-                .contentShape(RoundedRectangle(cornerRadius: LayoutRadii.tiny, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func rightPanelCalendarDetail(_ ledger: LedgerSnapshot) -> some View {
-        Group {
-            if let selectedGroup = selectedLedgerGroup(in: ledger) {
-                if usesCompactLayout {
-                    ledgerDayDetail(selectedGroup, statsCurrency: ledger.statsCurrency)
-                } else {
-                    ScrollView {
-                        ledgerDayDetail(selectedGroup, statsCurrency: ledger.statsCurrency)
-                    }
-                    .scrollIndicators(.automatic)
-                }
-            } else {
-                VStack(spacing: 10) {
-                    Spacer()
-                    Image(systemName: "calendar.day.timeline.left")
-                        .font(.system(size: 28, weight: .light))
-                        .foregroundStyle(IMColors.textPlaceholder)
-                    Text("请在月历中选择一天查看明细")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(IMColors.textSecondary)
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-    }
-
-    private func quickCategoryFilters(_ ledger: LedgerSnapshot) -> some View {
-        let allCategories = Array(Set(ledger.byDay.flatMap { $0.records.map(\.category) })).sorted()
-        return VStack(alignment: .leading, spacing: 8) {
-            Text("筛选分类")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(IMColors.textSecondary)
-            WrappingHStack(alignment: .leading, spacing: 6) {
-                categoryPill(title: "全部", isSelected: selectedCategoryFilter == nil) {
-                    selectedCategoryFilter = nil
-                }
-                ForEach(allCategories, id: \.self) { cat in
-                    categoryPill(title: cat, isSelected: selectedCategoryFilter == cat) {
-                        selectedCategoryFilter = (selectedCategoryFilter == cat) ? nil : cat
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .appRoundedGlass(
-            cornerRadius: LayoutRadii.field,
-            prominence: .regular,
-            tint: IMColors.glassWarmTint.opacity(0.72),
-            fallbackFill: IMColors.surfaceStrong.opacity(0.48)
-        )
-    }
-
-    private func categoryPill(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 11, weight: isSelected ? .bold : .medium))
-                .foregroundStyle(
-                    isSelected
-                        ? IMColors.textPrimary
-                        : IMColors.filterMuted
-                )
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .appCapsuleGlass(
-                    prominence: isSelected ? .prominent : .regular,
-                    interactive: true,
-                    tint: isSelected ? IMColors.glassCoolTint : IMColors.glassWarmTint.opacity(0.60),
-                    fallbackFill: isSelected ? IMColors.accentBgLight : IMColors.statBg
-                )
-                .overlay(
-                    Capsule()
-                        .strokeBorder(isSelected ? IMColors.accent.opacity(0.20) : IMColors.divider, lineWidth: 1)
-                )
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func calendarPanel(_ ledger: LedgerSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Button {
-                    store.shiftLedgerMonth(by: -1)
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(IMColors.textMuted)
-                        .frame(width: 36, height: 36)
-                        .appCircleGlass(
-                            interactive: true,
-                            tint: IMColors.accentBright.opacity(0.08),
-                            fallbackFill: IMColors.surfaceStrong
-                        )
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(store.selectedYear)年\(store.selectedMonth)月")
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(IMColors.textPrimary)
-                    Text(calendarMetaText(ledger))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(IMColors.textMuted)
-                }
-
-                Spacer()
-
-                Button {
-                    store.shiftLedgerMonth(by: 1)
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(IMColors.textMuted)
-                        .frame(width: 36, height: 36)
-                        .appCircleGlass(
-                            interactive: true,
-                            tint: IMColors.accentBright.opacity(0.08),
-                            fallbackFill: IMColors.surfaceStrong
-                        )
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-            }
-
-            LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 4
-            ) {
-                ForEach(["日", "一", "二", "三", "四", "五", "六"], id: \.self) { label in
-                    Text(label)
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(IMColors.textMuted)
-                        .frame(maxWidth: .infinity)
-                }
-            }
-
-            LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 4
-            ) {
-                ForEach(cachedCalendarCells) { cell in
-                    if let day = cell.dayNumber, let date = cell.date {
-                        CalendarDayCellButton(
-                            day: day,
-                            date: date,
-                            amountText: cell.amountText,
-                            isSelected: cell.isSelected,
-                            isHot: cell.isHot,
-                            isToday: cell.isToday,
-                            backgroundStyle: calendarCellBackground(for: cell)
-                        ) {
-                            selectedLedgerDate = date
-                        }
-                    } else {
-                        Color.clear
-                            .frame(minHeight: 54)
-                            .allowsHitTesting(false)
-                    }
-                }
-            }
-        }
-        .padding(12)
-        .appRoundedGlass(
-            cornerRadius: LayoutRadii.section,
-            prominence: .regular,
-            tint: IMColors.glassCoolTint.opacity(0.88),
-            fallbackFill: IMColors.surfaceStrong.opacity(0.38)
-        )
-    }
-
-    private func monthlyAggregationGrid(_ ledger: LedgerSnapshot) -> some View {
-        let monthlyData = buildMonthlyAggregation(from: ledger)
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Button {
-                    store.shiftLedgerYear(by: -1)
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(IMColors.textMuted)
-                        .frame(width: 36, height: 36)
-                        .appCircleGlass(
-                            interactive: true,
-                            tint: IMColors.accentBright.opacity(0.08),
-                            fallbackFill: IMColors.surfaceStrong
-                        )
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(store.selectedYear)年")
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(IMColors.textPrimary)
-                    Text("按月聚合 · \(monthlyData.filter { $0.hasData }.count) 个月有账单")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(IMColors.textMuted)
-                }
-
-                Spacer()
-
-                Button {
-                    store.shiftLedgerYear(by: 1)
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(IMColors.textMuted)
-                        .frame(width: 36, height: 36)
-                        .appCircleGlass(
-                            interactive: true,
-                            tint: IMColors.accentBright.opacity(0.08),
-                            fallbackFill: IMColors.surfaceStrong
-                        )
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-            }
-
-            LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8
-            ) {
-                ForEach(monthlyData) { item in
-                    MonthAggregationCard(item: item)
-                }
-            }
-        }
-        .padding(12)
-        .appRoundedGlass(
-            cornerRadius: LayoutRadii.section,
-            prominence: .regular,
-            tint: IMColors.glassWarmTint.opacity(0.80),
-            fallbackFill: IMColors.surfaceStrong.opacity(0.34)
-        )
-    }
-
-    struct MonthlyAggregationItem: Identifiable {
-        let id: Int
-        let month: Int
-        let expenseAmount: Double
-        let incomeAmount: Double
-        let recordCount: Int
-        let statsCurrency: String
-        var hasData: Bool { recordCount > 0 }
-    }
-
-    private func buildMonthlyAggregation(from ledger: LedgerSnapshot) -> [MonthlyAggregationItem] {
-        var byMonth: [Int: (expense: Double, income: Double, count: Int)] = [:]
-        for m in 1...12 { byMonth[m] = (0, 0, 0) }
-
-        for day in ledger.byDay {
-            let parts = day.day.split(separator: "-")
-            guard parts.count >= 2, let month = Int(parts[1]) else { continue }
-            let existing = byMonth[month] ?? (0, 0, 0)
-            byMonth[month] = (
-                existing.expense + day.expenseAmount,
-                existing.income + day.incomeAmount,
-                existing.count + day.records.count
+    @ViewBuilder
+    private func periodNavigator(_ ledger: LedgerSnapshot) -> some View {
+        if store.selectedPreset == .year {
+            LedgerYearGrid(
+                year: store.selectedYear,
+                items: monthlyAggregation(from: ledger),
+                onShift: { store.shiftLedgerYear(by: $0) }
             )
-        }
-
-        return (1...12).map { m in
-            let data = byMonth[m]!
-            return MonthlyAggregationItem(
-                id: m,
-                month: m,
-                expenseAmount: data.expense,
-                incomeAmount: data.income,
-                recordCount: data.count,
-                statsCurrency: ledger.statsCurrency
+        } else {
+            LedgerCalendarView(
+                year: store.selectedYear,
+                month: store.selectedMonth,
+                ledger: ledger,
+                selectedDate: $selectedLedgerDate,
+                onShift: { store.shiftLedgerMonth(by: $0) }
             )
         }
     }
 
-    private func detailLedgerView(_ ledger: LedgerSnapshot) -> some View {
-        ScrollView {
-            detailLedgerContent(ledger)
-        }
-        .scrollIndicators(.hidden)
-    }
+    // MARK: Records
 
-    private func detailLedgerContent(_ ledger: LedgerSnapshot) -> some View {
-        LazyVStack(spacing: 0) {
-            ForEach(ledger.byDay) { day in
-                let records = filteredRecords(day.records)
-                if !records.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(BillLensFormatters.displayDay(day.day))
-                                .font(.system(size: 15, weight: .bold))
-                                .foregroundStyle(IMColors.textPrimary)
-                            Spacer()
-                            Text(
-                                "净额 \(BillLensFormatters.currencyString(day.netAmount, currencyCode: ledger.statsCurrency))"
-                            )
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(
-                                    day.netAmount >= 0
-                                        ? IMColors.income
-                                        : IMColors.accentDark)
+    @ViewBuilder
+    private func recordSections(_ ledger: LedgerSnapshot) -> some View {
+        let days = visibleDays(in: ledger)
+        if usesCompactLayout && days.isEmpty {
+            Section {
+                emptyRecordsView
+                    .frame(maxWidth: .infinity)
+            }
+            .listRowBackground(Color.clear)
+        }
+        ForEach(days) { day in
+            Section {
+                ForEach(filteredRecords(day.records)) { record in
+                    RecordRowView(record: record)
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                recordToDelete = record
+                            } label: {
+                                Label("删除", systemImage: "trash")
+                            }
                         }
-                        ForEach(records) { record in
-                            RecordRowView(record: record) { recordToDelete = record }
-                                .padding(.vertical, 6)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                recordToDelete = record
+                            } label: {
+                                Label("删除", systemImage: "trash")
+                            }
                         }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .appRoundedGlass(
-                        cornerRadius: LayoutRadii.section,
-                        prominence: .regular,
-                        tint: IMColors.glassCoolTint.opacity(0.62),
-                        fallbackFill: IMColors.surfaceStrong.opacity(0.40)
-                    )
-                    .padding(.horizontal, 6)
+                }
+            } header: {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(BillLensFormatters.displayDay(day.day))
+                    Spacer()
+                    Text(dayTotals(day, currency: ledger.statsCurrency))
+                        .monospacedDigit()
                 }
             }
         }
+    }
+
+    private var emptyRecordsView: some View {
+        let isCalendarDay = store.selectedPreset != .year && ledgerMode == .calendar
+        return ContentUnavailableView {
+            Label(
+                isCalendarDay ? "这一天没有账单" : "暂无账单",
+                systemImage: isCalendarDay ? "calendar" : "list.bullet.rectangle"
+            )
+        } description: {
+            Text(selectedCategoryFilter.map { "当前仅显示「\($0)」分类。" } ?? (isCalendarDay ? "在月历中选择有金额的日期查看明细。" : "在「记账」中添加第一笔账单。"))
+        }
+    }
+
+    private func visibleDays(in ledger: LedgerSnapshot) -> [LedgerDayGroup] {
+        let days: [LedgerDayGroup]
+        if store.selectedPreset == .year || ledgerMode == .detail {
+            days = Array(ledger.byDay.reversed())
+        } else {
+            days = ledger.byDay.filter { $0.day == selectedLedgerDate }
+        }
+        return days.filter { !filteredRecords($0.records).isEmpty }
     }
 
     private func filteredRecords(_ records: [RecordItem]) -> [RecordItem] {
@@ -629,176 +315,175 @@ struct LedgerShell: View {
         return records.filter { $0.category == filter }
     }
 
-    private func ledgerDayDetail(_ day: LedgerDayGroup, statsCurrency: String) -> some View {
-        let records = filteredRecords(day.records)
-        return VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(BillLensFormatters.displayDay(day.day))
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(IMColors.textPrimary)
-                    Spacer()
-                    Text(
-                        "支出 \(BillLensFormatters.currencyString(day.expenseAmount, currencyCode: statsCurrency))"
-                    )
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(IMColors.textMuted)
-                }
-            }
-
-            ForEach(Array(records.enumerated()), id: \.element.id) { index, record in
-                if index > 0 {
-                    Divider().opacity(0.4)
-                }
-                RecordRowView(record: record) { recordToDelete = record }
-                    .padding(.vertical, 8)
-            }
+    private func dayTotals(_ day: LedgerDayGroup, currency: String) -> String {
+        var parts: [String] = []
+        if day.expenseAmount > 0 {
+            parts.append("支出 \(BillLensFormatters.currencyString(day.expenseAmount, currencyCode: currency))")
         }
-        .padding(16)
-        .appRoundedGlass(
-            cornerRadius: LayoutRadii.section,
-            prominence: .regular,
-            tint: IMColors.glassCoolTint.opacity(0.78),
-            fallbackFill: IMColors.surfaceStrong.opacity(0.46)
-        )
+        if day.incomeAmount > 0 {
+            parts.append("收入 \(BillLensFormatters.currencyString(day.incomeAmount, currencyCode: currency))")
+        }
+        return parts.joined(separator: " · ")
     }
 
-    private func syncCalendarState(for ledger: LedgerSnapshot) {
+    private func syncSelectedDate(for ledger: LedgerSnapshot) {
         let validDates = Set(ledger.byDay.map(\.day))
-        if selectedLedgerDate == nil || !validDates.contains(selectedLedgerDate!) {
-            selectedLedgerDate = ledger.byDay.last?.day
+        if let selectedLedgerDate, validDates.contains(selectedLedgerDate) {
+            return
         }
+        selectedLedgerDate = ledger.byDay.last?.day
     }
 
     private func ledgerSignature(_ ledger: LedgerSnapshot) -> String {
         ledger.byDay.map(\.day).joined(separator: "|")
     }
 
-    private func calendarMetaText(_ ledger: LedgerSnapshot) -> String {
-        let daysWithData = ledger.byDay.count
-        return daysWithData == 0 ? "暂无账单" : "按天聚合 · \(daysWithData) 天"
-    }
-
-    private func selectedLedgerGroup(in ledger: LedgerSnapshot) -> LedgerDayGroup? {
-        guard let selectedLedgerDate else { return nil }
-        return ledger.byDay.first(where: { $0.day == selectedLedgerDate })
-    }
-
-    private func rebuildCalendarCellsIfNeeded(for ledger: LedgerSnapshot) {
-        let key = "\(store.selectedYear)-\(store.selectedMonth)|\(ledgerSignature(ledger))"
-        guard key != cachedCalendarKey else { return }
-        cachedCalendarKey = key
-        cachedCalendarCells = buildCalendarCells(for: ledger)
-    }
-
-    private func updateCalendarCellSelection() {
-        cachedCalendarCells = cachedCalendarCells.map { cell in
-            guard cell.dayNumber != nil else { return cell }
-            let selected = cell.date == selectedLedgerDate
-            guard selected != cell.isSelected else { return cell }
-            return LedgerCalendarCell(
-                id: cell.id,
-                date: cell.date,
-                dayNumber: cell.dayNumber,
-                amountText: cell.amountText,
-                isSelected: selected,
-                isHot: cell.isHot,
-                isToday: cell.isToday
+    private func monthlyAggregation(from ledger: LedgerSnapshot) -> [LedgerMonthItem] {
+        var byMonth: [Int: (expense: Double, income: Double, count: Int)] = [:]
+        for day in ledger.byDay {
+            let parts = day.day.split(separator: "-")
+            guard parts.count >= 2, let month = Int(parts[1]) else {
+                preconditionFailure("账单日期格式错误：\(day.day)")
+            }
+            let existing = byMonth[month] ?? (0, 0, 0)
+            byMonth[month] = (
+                existing.expense + day.expenseAmount,
+                existing.income + day.incomeAmount,
+                existing.count + day.records.count
+            )
+        }
+        return (1...12).map { month in
+            let data = byMonth[month] ?? (0, 0, 0)
+            return LedgerMonthItem(
+                month: month,
+                expenseAmount: data.expense,
+                incomeAmount: data.income,
+                recordCount: data.count,
+                statsCurrency: ledger.statsCurrency
             )
         }
     }
+}
 
-    private func buildCalendarCells(for ledger: LedgerSnapshot) -> [LedgerCalendarCell] {
-        let year = store.selectedYear
-        let month = store.selectedMonth
+extension View {
+    @ViewBuilder
+    func appListStyle() -> some View {
+        #if os(iOS)
+        listStyle(.insetGrouped)
+        #else
+        listStyle(.inset)
+        #endif
+    }
+}
 
-        let hottestDate = ledger.byDay.max(by: { $0.expenseAmount < $1.expenseAmount })?.day
-        let groupMap = Dictionary(uniqueKeysWithValues: ledger.byDay.map { ($0.day, $0) })
-        let todayString: String = {
-            let now = Date()
-            let y = Calendar.current.component(.year, from: now)
-            let m = Calendar.current.component(.month, from: now)
-            let d = Calendar.current.component(.day, from: now)
-            return String(format: "%04d-%02d-%02d", y, m, d)
-        }()
-        let firstWeekday =
-            Calendar.current.component(.weekday, from: dateFrom(year: year, month: month, day: 1))
-            - 1
-        let daysInMonth =
-            Calendar.current.range(
-                of: .day, in: .month, for: dateFrom(year: year, month: month, day: 1))?.count ?? 0
+// MARK: - Calendar
 
-        var cells: [LedgerCalendarCell] = []
-        for i in 0..<firstWeekday {
-            cells.append(LedgerCalendarCell(
-                id: i, date: nil, dayNumber: nil, amountText: "", isSelected: false, isHot: false, isToday: false
-            ))
+struct LedgerCalendarView: View {
+    let year: Int
+    let month: Int
+    let ledger: LedgerSnapshot
+    @Binding var selectedDate: String?
+    let onShift: (Int) -> Void
+
+    private static let weekdays = ["日", "一", "二", "三", "四", "五", "六"]
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 7)
+
+    var body: some View {
+        VStack(spacing: 12) {
+            PeriodHeader(
+                title: "\(year)年\(month)月",
+                subtitle: ledger.byDay.isEmpty ? "暂无账单" : "\(ledger.byDay.count) 天有账单",
+                onShift: onShift
+            )
+
+            LazyVGrid(columns: columns, spacing: 2) {
+                ForEach(Self.weekdays, id: \.self) { label in
+                    Text(label)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                }
+                ForEach(cells) { cell in
+                    if let day = cell.dayNumber, let date = cell.date {
+                        Button {
+                            selectedDate = date
+                        } label: {
+                            CalendarDayCell(
+                                day: day,
+                                amountText: cell.amountText,
+                                isSelected: date == selectedDate,
+                                isHot: cell.isHot,
+                                isToday: cell.isToday
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(month)月\(day)日 \(cell.amountText)")
+                        .accessibilityAddTraits(date == selectedDate ? .isSelected : [])
+                    } else {
+                        Color.clear.frame(height: 46)
+                    }
+                }
+            }
         }
-        for day in 1...daysInMonth {
+    }
+
+    private struct Cell: Identifiable {
+        let id: Int
+        let date: String?
+        let dayNumber: Int?
+        let amountText: String
+        let isHot: Bool
+        let isToday: Bool
+    }
+
+    private var cells: [Cell] {
+        let calendar = Calendar.current
+        guard let firstDay = calendar.date(from: DateComponents(year: year, month: month, day: 1)),
+              let dayRange = calendar.range(of: .day, in: .month, for: firstDay) else {
+            preconditionFailure("无效的年月：\(year)-\(month)")
+        }
+        let leading = calendar.component(.weekday, from: firstDay) - 1
+        let groups = Dictionary(uniqueKeysWithValues: ledger.byDay.map { ($0.day, $0) })
+        let hottest = ledger.byDay.max(by: { $0.expenseAmount < $1.expenseAmount })?.day
+        let now = Date.now
+        let today = String(
+            format: "%04d-%02d-%02d",
+            calendar.component(.year, from: now),
+            calendar.component(.month, from: now),
+            calendar.component(.day, from: now)
+        )
+
+        var result = (0..<leading).map {
+            Cell(id: $0, date: nil, dayNumber: nil, amountText: "", isHot: false, isToday: false)
+        }
+        for day in dayRange {
             let date = String(format: "%04d-%02d-%02d", year, month, day)
-            let group = groupMap[date]
-            let amount = group.map {
+            let amount = groups[date].map {
                 $0.expenseAmount > 0 ? $0.expenseAmount : max($0.incomeAmount, abs($0.netAmount))
             }
-            cells.append(
-                LedgerCalendarCell(
-                    id: firstWeekday + day - 1,
-                    date: date,
-                    dayNumber: day,
-                    amountText: amount.map { compactAmount($0, currencyCode: ledger.statsCurrency) } ?? "",
-                    isSelected: date == selectedLedgerDate,
-                    isHot: date == hottestDate && amount != nil,
-                    isToday: date == todayString
-                )
-            )
-        }
-        while cells.count % 7 != 0 {
-            let idx = cells.count
-            cells.append(LedgerCalendarCell(
-                id: idx, date: nil, dayNumber: nil, amountText: "", isSelected: false, isHot: false, isToday: false
+            result.append(Cell(
+                id: leading + day - 1,
+                date: date,
+                dayNumber: day,
+                amountText: amount.map { compactAmount($0) } ?? "",
+                isHot: date == hottest && amount != nil,
+                isToday: date == today
             ))
         }
-        return cells
+        return result
     }
 
-    private func calendarCellBackground(for cell: LedgerCalendarCell) -> some ShapeStyle {
-        if cell.isSelected {
-            return AnyShapeStyle(IMColors.calendarSelectedTop)
-        }
-        return AnyShapeStyle(Color.clear)
-    }
-
-    private func compactAmount(_ amount: Double, currencyCode: String) -> String {
-        let code = BillLensFormatters.normalizedCurrencyCode(currencyCode) ?? "CNY"
+    private func compactAmount(_ amount: Double) -> String {
+        let code = BillLensFormatters.normalizedCurrencyCode(ledger.statsCurrency) ?? "CNY"
         let prefix = code == "CNY" ? "¥" : "\(code) "
         if amount >= 1000 {
             return prefix + String(format: "%.1fk", amount / 1000)
         }
         return "\(prefix)\(Int(amount.rounded()))"
     }
-
-    private func dateFrom(year: Int, month: Int, day: Int) -> Date {
-        let components = DateComponents(year: year, month: month, day: day)
-        return Calendar.current.date(from: components) ?? .now
-    }
 }
 
-enum LedgerViewMode {
-    case calendar
-    case detail
-}
-
-struct LedgerCalendarCell: Identifiable {
-    let id: Int
-    let date: String?
-    let dayNumber: Int?
-    let amountText: String
-    let isSelected: Bool
-    let isHot: Bool
-    let isToday: Bool
-}
-
-struct CalendarCellLabel: View {
+private struct CalendarDayCell: View {
     let day: Int
     let amountText: String
     let isSelected: Bool
@@ -807,148 +492,123 @@ struct CalendarCellLabel: View {
 
     var body: some View {
         VStack(spacing: 1) {
-            ZStack(alignment: .top) {
-                Text("\(day)")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(dayTextColor)
-                if isToday && !isSelected {
-                    Circle()
-                        .fill(IMColors.calendarToday)
-                        .frame(width: 4, height: 4)
-                        .offset(y: -2)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                }
-            }
-            Text(amountText)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(amountTextColor)
-                .lineLimit(1)
-        }
-    }
-
-    private var dayTextColor: Color {
-        isSelected ? .white : IMColors.textPrimary
-    }
-
-    private var amountTextColor: Color {
-        if isSelected {
-            return IMColors.surface.opacity(0.96)
-        }
-        if isHot {
-            return IMColors.income
-        }
-        return IMColors.textMuted
-    }
-}
-
-struct CalendarDayCellButton<Background: ShapeStyle>: View {
-    let day: Int
-    let date: String
-    let amountText: String
-    let isSelected: Bool
-    let isHot: Bool
-    let isToday: Bool
-    let backgroundStyle: Background
-    let action: () -> Void
-
-    var body: some View {
-        let cellShape = RoundedRectangle(cornerRadius: LayoutRadii.micro, style: .continuous)
-
-        Button(action: action) {
-            CalendarCellLabel(day: day, amountText: amountText, isSelected: isSelected, isHot: isHot, isToday: isToday)
-                .frame(maxWidth: .infinity, minHeight: 54)
-                .background(cellShape.fill(backgroundStyle))
-                .appRoundedGlass(
-                    cornerRadius: LayoutRadii.micro,
-                    prominence: isSelected ? .prominent : .regular,
-                    interactive: true,
-                    tint: isSelected ? IMColors.accent.opacity(0.32) : IMColors.glassCoolTint.opacity(0.58),
-                    fallbackFill: isSelected ? IMColors.accentBgActive : IMColors.surface.opacity(0.26)
-                )
-                .overlay {
+            Text("\(day)")
+                .font(.callout.weight(isToday || isSelected ? .semibold : .regular))
+                .monospacedDigit()
+                .foregroundStyle(dayColor)
+                .frame(width: 30, height: 30)
+                .background {
                     if isSelected {
-                        cellShape
-                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                            .clipShape(cellShape)
-                    } else if isToday {
-                        cellShape.stroke(IMColors.calendarToday, lineWidth: 1.5)
-                    } else {
-                        cellShape.stroke(Color.black.opacity(0.08), lineWidth: 1)
+                        Circle().fill(isToday ? AppColors.today : Color.accentColor)
                     }
                 }
-                .contentShape(cellShape)
+            Text(amountText.isEmpty ? " " : amountText)
+                .font(.system(size: 9, weight: .medium))
+                .monospacedDigit()
+                .foregroundStyle(isHot ? AnyShapeStyle(AppColors.warning) : AnyShapeStyle(.secondary))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
-        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, minHeight: 46)
+        .contentShape(Rectangle())
+    }
+
+    private var dayColor: AnyShapeStyle {
+        if isSelected { return AnyShapeStyle(.white) }
+        if isToday { return AnyShapeStyle(AppColors.today) }
+        return AnyShapeStyle(.primary)
     }
 }
 
-struct MonthAggregationCard: View {
-    let item: LedgerShell.MonthlyAggregationItem
-
-    private static let monthNames = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"]
-
-    private var titleColor: Color { item.hasData ? IMColors.textPrimary : IMColors.textPlaceholder }
-    private var bgColor: Color { item.hasData ? IMColors.surfaceStrong : IMColors.statBg }
-    private var borderColor: Color { item.hasData ? Color.black.opacity(0.08) : Color.black.opacity(0.04) }
+private struct PeriodHeader: View {
+    let title: String
+    let subtitle: String
+    let onShift: (Int) -> Void
 
     var body: some View {
-        cardContent
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(8)
-            .appRoundedGlass(
-                cornerRadius: LayoutRadii.field,
-                prominence: .regular,
-                tint: item.hasData ? IMColors.glassWarmTint.opacity(0.58) : IMColors.glassCoolTint.opacity(0.40),
-                fallbackFill: bgColor
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: LayoutRadii.field, style: .continuous)
-                    .stroke(borderColor, lineWidth: 1)
-            )
-    }
-
-    @ViewBuilder
-    private var cardContent: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(Self.monthNames[item.month - 1])
-                .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(titleColor)
-
-            if item.hasData {
-                expenseRow
-                incomeRow
-                Text("\(item.recordCount) 笔")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(IMColors.textMuted)
-            } else {
-                Text("暂无")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(IMColors.textPlaceholder)
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.title3.weight(.bold))
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
+            Spacer()
+            HStack(spacing: 18) {
+                Button { onShift(-1) } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .accessibilityLabel("上一页")
+                Button { onShift(1) } label: {
+                    Image(systemName: "chevron.right")
+                }
+                .accessibilityLabel("下一页")
+            }
+            .font(.body.weight(.semibold))
+            .foregroundStyle(Color.accentColor)
+            .buttonStyle(.borderless)
         }
     }
+}
 
-    private var expenseRow: some View {
-        HStack(spacing: 2) {
-            Text("支")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(IMColors.textSecondary)
-            Text(BillLensFormatters.currencyString(item.expenseAmount, currencyCode: item.statsCurrency))
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(IMColors.textSecondary)
-                .lineLimit(1)
-        }
-    }
+// MARK: - Year grid
 
-    private var incomeRow: some View {
-        HStack(spacing: 2) {
-            Text("收")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(IMColors.textSecondary)
-            Text(BillLensFormatters.currencyString(item.incomeAmount, currencyCode: item.statsCurrency))
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(IMColors.textSecondary)
-                .lineLimit(1)
+struct LedgerMonthItem: Identifiable {
+    var id: Int { month }
+    let month: Int
+    let expenseAmount: Double
+    let incomeAmount: Double
+    let recordCount: Int
+    let statsCurrency: String
+    var hasData: Bool { recordCount > 0 }
+}
+
+private struct LedgerYearGrid: View {
+    let year: Int
+    let items: [LedgerMonthItem]
+    let onShift: (Int) -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            PeriodHeader(
+                title: "\(year)年",
+                subtitle: "\(items.filter(\.hasData).count) 个月有账单",
+                onShift: onShift
+            )
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+                ForEach(items) { item in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("\(item.month)月")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(item.hasData ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                        if item.hasData {
+                            Text(BillLensFormatters.currencyString(item.expenseAmount, currencyCode: item.statsCurrency))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            if item.incomeAmount > 0 {
+                                Text("+" + BillLensFormatters.currencyString(item.incomeAmount, currencyCode: item.statsCurrency))
+                                    .font(.caption2)
+                                    .foregroundStyle(AppColors.income)
+                            }
+                            Text("\(item.recordCount) 笔")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        } else {
+                            Text("暂无")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
+                    .padding(8)
+                    .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .accessibilityElement(children: .combine)
+                }
+            }
         }
     }
 }

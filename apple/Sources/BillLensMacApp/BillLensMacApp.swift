@@ -64,6 +64,10 @@ struct BillLensMacApp: App {
         .windowToolbarStyle(.unified)
         .defaultSize(width: 1240, height: 820)
         .windowResizability(.contentMinSize)
+        .commands {
+            SidebarCommands()
+            InspectorCommands()
+        }
     }
 }
 #endif
