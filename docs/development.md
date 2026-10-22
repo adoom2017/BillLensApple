@@ -89,6 +89,20 @@ swift test --disable-sandbox \
 
 `--disable-sandbox` 仅用于宿主沙盒不允许 SwiftPM 嵌套 sandbox-exec 的环境。
 
+## Xcode Cloud
+
+云端构建机没有 Rust。`apple/ci_scripts/ci_post_clone.sh` 在克隆后安装 rustup，并按 Xcode Cloud 的
+`CI_PRODUCT_PLATFORM` 与 `CI_XCODEBUILD_ACTION` 编译工程链接所需的 `libbilllens_ffi.a`：
+
+| 平台 | `archive` | 其他动作（build / test） |
+|---|---|---|
+| iOS | `aarch64-apple-ios` release | `aarch64-apple-ios` + `aarch64-apple-ios-sim` debug |
+| macOS | `aarch64-apple-darwin` release | `aarch64-apple-darwin` debug |
+
+- 工具链版本与目标固定在 `rust/rust-toolchain.toml`，依赖版本固定在已提交的 `rust/Cargo.lock`（脚本使用 `--locked`）。升级依赖后需提交新的 `Cargo.lock`。
+- 工作流选择 `BillLens-iOS` / `BillLens-macOS` scheme。
+- 本地验证脚本：`CI_PRIMARY_REPOSITORY_PATH=$PWD CI_PRODUCT_PLATFORM=iOS CI_XCODEBUILD_ACTION=archive ./apple/ci_scripts/ci_post_clone.sh`
+
 ## 签名与 CloudKit
 
 | 构建方式 | CloudKit |
