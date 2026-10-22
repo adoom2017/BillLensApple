@@ -32,6 +32,19 @@ public struct EngineEnvelope<T: Decodable>: Decodable {
     public let ok: Bool
     public let data: T?
     public let error: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case ok, data, error
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        ok = try container.decode(Bool.self, forKey: .ok)
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+        // Decode success data as T: a null Optional<T> is a valid result, while
+        // an absent data key or null non-optional result violates the FFI contract.
+        data = ok ? .some(try container.decode(T.self, forKey: .data)) : nil
+    }
 }
 
 public struct DraftInput: Codable {

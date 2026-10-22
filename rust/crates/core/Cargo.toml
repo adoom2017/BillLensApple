@@ -17,3 +17,6 @@ thiserror.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 base64.workspace = true
+
+[dev-dependencies]
+sqlx.workspace = true

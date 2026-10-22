@@ -1,184 +1,148 @@
 # 开发与运行
 
-## 前置条件
+## 工具与平台
 
-| 工具 | 要求 |
+| 工具 / 平台 | 要求 |
 |---|---|
-| Rust / Cargo | 能构建 `billlens_ffi` |
-| Xcode | 需要 Swift 6.1 toolchain，iOS 运行必须用 Xcode |
-| Apple 平台 SDK | macOS 14+ / iOS 17+ |
+| Xcode | 提供 Swift 6.1+ 与 Apple SDK；`xcode-select -p` 指向完整 Xcode |
+| Rust / Cargo / rustup | 构建 `billlens_ffi`；脚本安装 iOS arm64 target |
+| XcodeGen | `brew install xcodegen` |
+| 部署目标 | macOS 14+、iOS 17+ |
+| 构建主机 | Apple Silicon；macOS 工程与 iOS 模拟器配置使用 arm64 |
 
-## 环境变量
+SwiftPM 会获取固定 URL 和 checksum 的 llama.cpp b9632 XCFramework。首次构建需要网络；GGUF 权重不参与构建。
 
-账单解析依赖 LLM。启动前至少准备这四个变量：
-
-```bash
-export LLM_BASE_URL=http://127.0.0.1:8080/v1
-export LLM_API_KEY=
-export LLM_MODEL=qwen-local
-export LLM_PROVIDER=llamacpp
-```
-
-也可以在应用内「设置 -> LLM 连接配置」里修改。配置会落到本地 `app_settings`，不会同步到 CloudKit。
-
-## 推荐入口
-
-最简单的开发命令：
+## 启动与模型配置
 
 ```bash
 ./build.sh dev
 ```
 
-它会做三件事：
+该命令固定构建 Rust Debug 与 Xcode Debug，以不含受限 entitlement 的 ad-hoc 签名通过 `open -W -n` 启动 App。退出 App 后命令结束。直接运行 `.app/Contents/MacOS/` 内二进制不能替代 LaunchServices，键盘焦点和权限归属可能异常。
 
-1. 编译 Rust FFI（debug）
-2. 用 xcodebuild 按 `apple/project.yml` 生成的工程编译 Debug 版 App（与 `xcode-mac` 同一条链路，Bundle ID `com.shendongchun.BillLensAppleMac`），并整体 ad-hoc 重签
-3. 通过 `open`（LaunchServices）启动，终端等待 App 退出；日志在 `~/Library/Application Support/BillLensApple/billlens.log`
+启动不要求预先配置模型。设置页可下载本地模型，或保存独立的云端配置；能完整匹配规则的单笔文本不需要模型。
 
-不要直接执行 `.app/Contents/MacOS/` 下的二进制：那样 App 会成为终端的子进程，窗口无法正常获得键盘焦点，麦克风/语音权限也会记到终端名下。
-
-## `build.sh` 子命令
-
-| 命令 | 用途 |
+| 变量 | 合同 |
 |---|---|
-| `./build.sh dev` | macOS Debug 构建（xcodebuild）并经 LaunchServices 启动 |
-| `./build.sh mac` | macOS release 打包，输出 `.app` 和 `dist/BillLens.dmg` |
-| `./build.sh ios-sim` | 编译 iOS 模拟器 Rust 库 |
-| `./build.sh ios` | 编译 iPhone 真机 Rust 库 |
-| `./build.sh all` | 编译所有平台 Rust 库 |
-| `./build.sh test` | 跑 Rust 全量测试 |
-| `./build.sh xcode` | 由 `apple/project.yml` 重新生成 Xcode 工程并打开 |
-| `./build.sh xcode-mac` | xcodebuild 构建 macOS Release，临时签名，输出 `dist/xcode/BillLens.app` |
-| `./build.sh xcode-ios-sim` | xcodebuild 构建 iOS 模拟器 Debug；设置 `SIMULATOR=<名称或 UDID>` 自动安装启动 |
-| `./build.sh archive-ios` | Archive + 导出 iOS（自动签名），输出 `dist/xcode/ios/` |
-| `./build.sh archive-mac` | Archive + 导出 macOS（自动签名），输出 `dist/xcode/mac/` |
+| `LLM_BASE_URL` | HTTP(S) API 基址 |
+| `LLM_MODEL` | 非空模型 ID |
+| `LLM_PROVIDER` | `openai`、`openai_compatible`、`llamacpp`、`anthropic`，或代码支持的 OpenAI 兼容别名 |
+| `LLM_API_KEY` | 可省略或为空，供无需鉴权的本地服务使用 |
 
-`RUST_BUILD_MODE=release` 可切换 release：
+四个变量全部未设置时不注入云端配置；只设置部分时，基址、模型和 provider 仍必须完整。例：
 
 ```bash
-RUST_BUILD_MODE=release ./build.sh ios-sim
+export LLM_BASE_URL=http://127.0.0.1:8080/v1
+export LLM_MODEL=qwen-local
+export LLM_PROVIDER=llamacpp
+export LLM_API_KEY=
+./build.sh dev
 ```
 
-## Xcode 工作流
+App 经 LaunchServices 启动，不能假定会继承终端环境变量。日常使用优先在设置页填写配置；验证环境变量注入时应先检查启动后的设置与日志。已有本地配置优先于环境变量；环境配置只在数据库尚无配置时写入。配置保存到 SQLite 的 `app_settings`，不通过 CloudKit 同步；它不是 Keychain 加密存储。不要提交包含真实密钥的环境文件、数据库或 HTTP 请求文件。
 
-`apple/project.yml` 是 Xcode 工程的唯一来源，`BillLensApple.xcodeproj` 由 XcodeGen 生成（`brew install xcodegen`）。
-Info.plist 与 entitlements 直接使用 `apple/Sources/*/` 下的文件，改 Target 配置时改 `project.yml`，不要在 Xcode 里手改工程。
+云端 thinking 模式通过设置页显式选择；未设置时保留 provider 默认行为。模型把思考文本混入 JSON 时会报合同错误，不会自动删除该文本。
 
-所有 `xcode-*` / `archive-*` 命令都会先编译对应平台的 Rust 静态库并重新生成工程：
+## 构建命令
 
-| 场景 | 命令 | 签名 |
-|---|---|---|
-| 本机验证 macOS Release | `./build.sh xcode-mac` | ad-hoc，去掉 iCloud/推送 entitlements |
-| iOS 模拟器 | `SIMULATOR="iPhone 18 Pro" ./build.sh xcode-ios-sim` | 不签名 |
-| iOS 真机 / TestFlight | `IOS_EXPORT_METHOD=app-store-connect ./build.sh archive-ios` | 自动签名，Team `YH6JCRN97J` |
-| macOS 分发 | `MAC_EXPORT_METHOD=developer-id ./build.sh archive-mac` | 自动签名 |
+所有命令从仓库根目录运行。
 
-导出方式默认 `debugging`（开发签名）。Archive 需要 Xcode 已登录对应开发者账号；`-allowProvisioningUpdates` 会自动创建或更新描述文件。
+| 命令 | 行为与输出 |
+|---|---|
+| `./build.sh dev` | macOS Debug，`apple/build/DerivedData/Build/Products/Debug/BillLens.app`，构建并启动 |
+| `./build.sh mac` | 复用 `xcode-mac` 生成 Release App，并打包 `dist/BillLens.dmg` |
+| `./build.sh ios-sim` | Rust `aarch64-apple-ios-sim` 静态库 |
+| `./build.sh ios` | Rust `aarch64-apple-ios` 静态库 |
+| `./build.sh all` | macOS、iOS 模拟器、iOS 真机三份 Rust 库 |
+| `./build.sh test` | Rust workspace 测试 |
+| `./build.sh xcode` | 重新生成工程并打开 Xcode |
+| `./build.sh xcode-mac` | macOS Release、ad-hoc 签名，`dist/xcode/BillLens.app` |
+| `./build.sh xcode-ios-sim` | iOS 模拟器 Debug；设置 `SIMULATOR=<名称或 UDID>` 时安装启动 |
+| `./build.sh archive-ios` | iOS Release archive 与自动签名导出，`dist/xcode/ios/` |
+| `./build.sh archive-mac` | macOS Release archive 与自动签名导出，`dist/xcode/mac/` |
 
-## 手动构建
+`RUST_BUILD_MODE` 只接受 `debug` / `release`。Rust 单独构建命令及 `all` 使用该值；`dev`、`xcode-ios-sim` 固定 Debug，`mac`、`xcode-mac`、`archive-*` 固定 Release，保证静态库路径与 Xcode configuration 一致。
 
-### macOS
+`apple/project.yml` 是工程唯一来源，`BillLensApple.xcodeproj` 由 XcodeGen 生成并纳入版本控制。修改 target 配置后重新生成工程，不在 Xcode 手工修改生成结果。Info.plist 与 entitlements 来源均在 `apple/Sources/`。
+
+### SwiftPM 编译与测试
 
 ```bash
 cd rust
 cargo build -p billlens_ffi
-
 cd ../apple
-swift build --product BillLensMacApp
-swift run BillLensMacApp
+swift build
+swift test
 ```
 
-### iOS
+SwiftPM 默认构建宿主 macOS，不是 iOS 启动入口。高级 iOS SwiftPM 使用需设置 `BILLLENS_INCLUDE_IOS_SPM=1` 与合法 `RUST_TARGET=ios|ios-sim`，并指定实际 SDK 和 target；日常使用 Xcode。
 
-先准备 Rust 静态库：
+受限执行环境中若默认缓存目录不可写，可使用临时缓存路径：
 
 ```bash
-./build.sh ios-sim
-# 或
-./build.sh ios
+CLANG_MODULE_CACHE_PATH=/private/tmp/billlens-clang-cache \
+swift test --disable-sandbox \
+  --cache-path /private/tmp/billlens-swift-cache \
+  --config-path /private/tmp/billlens-swift-config \
+  --security-path /private/tmp/billlens-swift-security
 ```
 
-然后用 Xcode 打开：
+`--disable-sandbox` 仅用于宿主沙盒不允许 SwiftPM 嵌套 sandbox-exec 的环境。
 
-```text
-apple/BillLensApple.xcodeproj
-```
+## 签名与 CloudKit
 
-不要直接拿 `swift build` 代替 iOS 运行，它默认只构建宿主 macOS target。  
-如果你强行用 SwiftPM 带出 iOS target，需要显式设置：
-
-- `BILLLENS_INCLUDE_IOS_SPM=1`
-- `RUST_TARGET=ios-sim` 或 `RUST_TARGET=ios`
-
-但日常 iOS 开发仍然建议直接走 Xcode。
-
-## 仓库里的几个关键文件
-
-| 文件 | 用途 |
+| 构建方式 | CloudKit |
 |---|---|
-| `build.sh` | 统一构建入口 |
-| `apple/Package.swift` | SwiftPM 包定义；默认只构建 macOS app |
-| `apple/project.yml` | Xcode 工程唯一来源（XcodeGen） |
-| `apple/scripts/make_app_icon.swift` | 生成 macOS / iOS 全部尺寸图标与 `AppIcon.icns`：`cd apple && swift scripts/make_app_icon.swift` |
-| `apple/BillLensApple.xcodeproj/` | 由 `./build.sh xcode` 生成，不手改 |
-| `rust/migrations/` | SQLite 迁移 |
+| macOS `dev` / `mac` / `xcode-mac` | ad-hoc，不携带 iCloud / 推送 entitlement，不用于同步验证 |
+| iOS Debug | `BILLLENS_CLOUDKIT_ENABLED=NO`，无受限 entitlement |
+| iOS Release / 正式 macOS Archive | 需要完整开发者权限、正确容器和 provisioning profile |
 
-## 测试
+容器为 `iCloud.com.shendongchun.BillLensApple`，工程中的 Team 为 `YH6JCRN97J`。其他开发者应在 `project.yml` 配置自己的签名身份和匹配容器后重新生成工程。
 
-当前自动化测试主要在 Rust：
+导出默认 `debugging`；可设置 `IOS_EXPORT_METHOD=app-store-connect` 或 `MAC_EXPORT_METHOD=developer-id`。Archive 使用 `-allowProvisioningUpdates`，要求 Xcode 已登录具备相应能力的开发者账号。
+
+## 检查与冒烟
 
 ```bash
 cd rust
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cd ..
+zsh -n build.sh
+./build.sh all
+cd apple
+swift build
+swift test
 ```
 
-Swift 侧目前没有独立 test target。UI 或共享视图改动至少要做：
+Swift 测试分为 `BillLensAppleServicesTests`（清单、下载配置、运行时、FFI 内存）与 `BillLensSharedTests`（同步页面、响应可空值、提醒日期）。Rust 测试覆盖解析、规则时间、路由、数据库迁移、事务回滚、订阅与同步。
 
-1. `swift build`
-2. 相关页面手动冒烟
+跨层改动还须构建 iOS 模拟器。人工冒烟检查文本/OCR、三类草稿保存与确认、订阅重复检查、时区切换。真实模型下载/取消/更新、iOS 后台恢复、语音权限与录音、CloudKit 多设备冲突必须使用对应设备与签名环境验证；自动化通过不替代这些检查。
 
-## 数据位置
+## 数据与清理
 
-| 类型 | 路径 |
+| 内容 | 位置 |
 |---|---|
-| SQLite | `~/Library/Application Support/BillLensApple/billlens.sqlite` |
-| 日志 | `~/Library/Application Support/BillLensApple/billlens.log` |
+| 数据库 | `Application Support/BillLensApple/billlens.sqlite` |
+| 日志 | `Application Support/BillLensApple/billlens.log` |
+| 权重 / 下载状态 | `Application Support/BillLensApple/LocalModels/` |
+| Rust 构建产物 | `rust/target/` |
+| SwiftPM 产物 | `apple/.build/` |
+| Xcode 产物 | `apple/build/` |
+| 分发产物 | `dist/` |
 
-## 常见问题
+macOS 非沙盒运行的 Application Support 为 `~/Library/Application Support/`；iOS 及沙盒构建使用各自容器。删除构建产物可重新编译，不要把运行数据目录当缓存删除。SQLite 迁移只能升级；测试旧版本或回滚 App 前应另行备份数据库及 WAL 文件。
 
-### 1. `swift build` 链接警告：Rust 库是用更高 macOS 版本构建的
+本地模型合同错误的诊断日志可能包含完整模型输出，分享日志前需检查票据信息。API Key 不应写入日志。
 
-现象类似：
+## 排错
 
-```text
-ld: warning: object file ... was built for newer 'macOS' version ...
-```
-
-这通常是 Rust 静态库和 Swift 目标的 deployment target 没对齐。处理方式是重编 Rust 库，并统一构建目标版本。
-
-### 2. CloudKit 不工作
-
-先检查：
-
-- 是否用了带 entitlements 的 Xcode / 打包产物
-- 当前设备是否登录了可用 iCloud
-- 容器是否还是 `iCloud.com.shendongchun.BillLensApple`
-
-Personal Team 不支持 CloudKit 和远程推送。iOS Debug 配置会明确设置
-`BILLLENS_CLOUDKIT_ENABLED=NO` 并清空签名 entitlements，因此仍可测试本地模型、
-SQLite、OCR 和后台模型下载，但不会创建 `CKContainer` 或注册远程通知。
-具备完整开发者权限的 Release 配置必须同时满足：
-
-- `BILLLENS_CLOUDKIT_ENABLED=YES`
-- 签名 entitlements 包含目标 iCloud container 与 `CloudKit` service
-- Provisioning Profile 支持 CloudKit 与 Push Notifications
-
-### 3. iOS 工程打不开或 entitlements 不生效
-
-优先打开：
-
-```text
-apple/BillLensApple.xcodeproj
-```
-
-不要把 `Package.swift` 当成 iOS 日常入口。
+| 问题 | 检查 |
+|---|---|
+| Swift 链接找不到 Rust 库 | 先构建对应 target 和 Debug/Release 库，检查 `OTHER_LDFLAGS` |
+| macOS deployment target 警告 | Rust `.cargo/config.toml` 与 Xcode/SwiftPM 均需 macOS 14 |
+| iOS 模拟器/设备链接混用 | 分别链接 `aarch64-apple-ios-sim` / `aarch64-apple-ios`，不能互换 |
+| CloudKit 不启动 | 检查 build flag、实际签名 entitlement、容器、iCloud 账号；ad-hoc/Personal Debug 不具备同步能力 |
+| 模型下载失败 | 保留日志中的错误域、错误码和底层原因；大小或摘要不匹配直接失败，不切换镜像 |
+| 图标需要更新 | `cd apple && swift scripts/make_app_icon.swift` 后重新构建 |

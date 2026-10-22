@@ -1,222 +1,100 @@
 # BillLens 架构
 
-## 系统概览
-
-BillLens 是一套 **Rust 核心 + SwiftUI 前端** 的账单应用，当前同时支持 **macOS 14+** 和 **iOS 17+**。
-
-核心链路：
+## 模块边界
 
 ```text
-文本 / 票据图片 / 语音
-  -> SwiftUI 视图
-  -> BillLensStore
-  -> RustBridge
-  -> C FFI
-  -> Rust AppService
-  -> SQLite / LLM / CloudKit 同步
+SwiftUI → BillLensStore → RustBridge → JSON C FFI → AppService → SQLite
+                │                                  │
+                ├─ Vision OCR / Speech             ├─ 文本规则 / 云端 HTTP
+                ├─ CloudKit 传输                   └─ 本地推理 C 回调 → Swift llama.cpp
+                └─ 模型下载、校验、文件管理
 ```
 
-三种输入最终都会先变成 `RecordDraft`，用户确认后再写入正式账单。没有“猜一把再悄悄兜底”的降级路径。
+| 目录 | 职责 |
+|---|---|
+| `apple/Sources/BillLensMacApp/` / `BillLensIOSApp/` | 平台入口、权限、通知与生命周期 |
+| `apple/Sources/BillLensShared/` | 共享视图、MainActor 状态、FFI DTO、CloudKit、订阅提醒 |
+| `apple/Sources/BillLensAppleServices/` | OCR、Speech、日志、本地模型文件与推理运行时 |
+| `apple/Sources/CBillLensRustBridge/` | C 头文件，Swift/Rust 之间的所有权合同 |
+| `rust/crates/core/` | 解析、路由、字段验证、业务编排、汇率和订阅补算 |
+| `rust/crates/db/` | SQLx Repository、持久化模型和事务 |
+| `rust/crates/ffi/` | 版本化输入的 JSON 分发、运行时与后端注册 |
+| `rust/migrations/` | 0001–0011 顺序迁移；已发布迁移必须保留 |
 
-## 仓库结构
+主界面由 `RootView` 分发记账、账单、订阅、资产页面：iOS 使用 TabView，macOS 使用侧栏。系统语义色、分类图标和浮动控件材质集中在 `DesignTokens.swift`；Liquid Glass 仅用于受支持系统的浮动控件。
 
-```text
-BillLensApple/
-├── apple/
-│   ├── Package.swift
-│   ├── project.yml
-│   ├── BillLensApple.xcodeproj/
-│   └── Sources/
-│       ├── BillLensMacApp/
-│       ├── BillLensIOSApp/
-│       ├── BillLensShared/
-│       ├── BillLensAppleServices/
-│       └── CBillLensRustBridge/
-├── rust/
-│   ├── crates/
-│   │   ├── core/
-│   │   ├── db/
-│   │   └── ffi/
-│   └── migrations/
-├── docs/
-├── AGENTS.md
-└── README.md
+## 输入、规则与模型
+
+1. 语音停止后将转写放入输入框，用户发送后进入文本链路；图片先由 Vision 转为 OCR 文本。
+2. 文本先经过 `rule_parser.rs`。能够完整确定单笔账单时返回 `parser_source=rule`，不调用模型；否则确定字段作为 prompt 约束，并覆盖对应的单笔模型字段。资产、多笔、订阅和 OCR 交给模型。
+3. 模型只输出原文 `time_text`，时间换算由 Rust 完成。外部模型输出不接受旧 `transaction_at` 字段、Markdown 包装或未知字段，不做文本修补。
+4. `cloud_only` 只调用云端；`local_first` 优先选择已安装模型。未选择模型或发生允许转交的类型化本地错误时，最多调用云端一次，并返回来源与失败原因。取消、后台、内存压力、忙碌状态不转云端。
+5. 本地和云端共用提示词与严格 JSON 合同。规则并非本地模型，即使选择本地优先，规则完整命中时仍遵循规则保存语义。
+
+| 来源 / 类型 | 自动保存关闭 | 自动保存开启 |
+|---|---|---|
+| 本地模型：账单、订阅、资产 | 全部写入待确认草稿 | 全部写入待确认草稿 |
+| 规则或云端：账单、订阅 | 写入待确认草稿；订阅未创建 | 在同一确认事务内保存账单和对应订阅 |
+| 云端：资产 | 直接更新资产 / 快照 | 直接更新资产 / 快照 |
+
+`cloud_after_local_failure` 遵循云端保存语义，并携带本地错误。账单、订阅自动保存先持久化一批草稿，再复用确认事务；失败保留完整草稿供查看，不留下该批次的部分账单或订阅。云端资产独立处理，不与同次输入的账单构成跨类型总事务。
+
+## 草稿与数据库
+
+| 表 | 内容 |
+|---|---|
+| `records` | 已入库账单 |
+| `parsed_drafts` | 通用待确认项：kind、parser_source、原文、完整 payload、转交原因、确认结果 |
+| `conversation_messages` | 本机对话历史 |
+| `subscriptions` | 周期、锚点、下次扣费日、启停状态 |
+| `assets` / `asset_snapshots` | 资产主表与按日期的估值快照 |
+| `app_settings` | 本地配置，含云端连接配置 |
+| `fx_rates` | 汇率缓存 |
+| `sync_state` / `sync_cursor` | 同步状态和 CloudKit 拉取游标 |
+
+`0010_generalize_parsed_drafts.sql` 将旧 `record_drafts` 迁移为 `parsed_drafts`；Swift 和 Rust 的兼容类型名称仍为 `RecordDraft`。`0011_add_rule_parser_source.sql` 增加规则来源。原 `sync_outbox` 已由 0009 删除。
+
+`confirm_parsed_drafts` 在单个事务中校验所属 profile、草稿状态及类型，写入业务表、确认结果、草稿状态与助手消息。订阅确认同时创建首笔账单；资产确认写入资产和快照。批量确认的任一动作失败会整体回滚。编辑或丢弃不会创建业务记录。
+
+资产重命名命中已有名称时，同币种资产在一个事务中合并；同日快照保留目标行 ID，按更新时间选择内容，源行软删除。拒绝跨 profile、不同币种和自身合并。
+
+## 时间、订阅与汇率
+
+- 交易时间以 UTC 绝对时间持久化。带偏移的 RFC3339 是 DTO 时间边界；无偏移时间直接拒绝。
+- Swift 启动时传入设备 IANA 时区，系统时区变化时更新 Rust 并刷新账本与提醒。
+- Rust 按设备时区完成时间描述换算、账本日分组、月年边界和订阅扣费日，处理夏令时。
+- 明确时段使用规则表的钟点：凌晨 05、早上 08、上午 10、中午 12、下午 15、傍晚 18、晚上 20；只有日期时保留当前钟点，无时间线索时使用当前时间。
+- 启动、回到前台和 iOS 后台刷新都会补算到期订阅。启用 CloudKit 时，必须先完整拉取成功。每次扣费的 UUID v5 由订阅 ID 与到期日决定，账单写入与到期日推进为同一事务。
+- 可选的系统通知在设备当前时区的扣费日 09:00 提醒。iOS 后台调度由系统决定，补账正确性依赖下次启动时补算。
+- 账本统一换算为 CNY，汇率由 Frankfurter 获取。网络失败且已有缓存时，结果包含 `fx_warning`；没有可用汇率时报错。
+
+## 本地模型
+
+- 唯一清单位于 `BillLensAppleServices/Resources/local-models.json`，固定下载地址、revision、字节数、SHA-256、许可和内存门槛。
+- 0.8B 与 2B 都由用户下载。权重和状态位于 Application Support 的 `BillLensApple/LocalModels/`，排除设备备份，不通过 CloudKit 同步。
+- 下载完成必须验证大小与 SHA-256 才能安装。iOS 使用后台 URLSession，默认禁止昂贵和受限网络；蜂窝授权仅针对当前下载。macOS 使用由 App 持有的普通 URLSession。
+- `LocalModelManager` 持有下载与安装状态；`LocalLlmRuntime` 的串行队列持有唯一模型实例，切换前卸载。iOS 后台或内存压力会取消并卸载。
+- llama.cpp 固定为 b9632 XCFramework。模型生命周期、取消和字符串分配由 Swift 管理，路由与业务验证由 Rust 管理。
+
+## FFI 合同
+
+普通调用通过 `billlens_handle_request(const char *) -> char *`，返回 JSON：
+
+```json
+{"ok":true,"data":null,"error":null}
 ```
 
-### Swift 侧
+成功的 `data` 按请求响应类型解码。可空响应的 `null`（如尚未配置 LLM）是合法值；必填数据缺失或 `null` 是合同错误。失败返回 `ok=false` 与完整原因链。
 
-| 路径 | 职责 |
-|---|---|
-| `apple/Sources/BillLensMacApp/` | macOS 入口、远程通知桥接、桌面打包资源 |
-| `apple/Sources/BillLensIOSApp/` | iOS 入口、iOS 远程通知桥接 |
-| `apple/Sources/BillLensShared/` | 跨平台共享视图、状态、CloudKit 同步、FFI 调用 |
-| `apple/Sources/BillLensAppleServices/` | Vision OCR、Speech STT、日志 |
-| `apple/Sources/CBillLensRustBridge/` | Swift 调 Rust 的 C 头文件 |
+调用方必须使用 `billlens_free_string` 恰好释放一次响应。Speech 与本地 LLM 另有后端注册函数，注册时传入运行、取消、释放等 Swift C 回调；完整声明以 `billlens_ffi.h` 为准。Swift 从后台任务进入阻塞 FFI，SwiftUI 状态更新留在 MainActor。
 
-### Rust 侧
+## CloudKit
 
-| 路径 | 职责 |
-|---|---|
-| `rust/crates/core/` | `AppService`、规则解析（`rule_parser.rs`）、LLM 调用、汇率、订阅到期处理 |
-| `rust/crates/db/` | SQLite 持久化、迁移后的领域模型、查询 |
-| `rust/crates/ffi/` | 单入口 JSON FFI 协议，给 Swift 用 |
-| `rust/migrations/` | 数据库迁移，当前到 `0009_drop_sync_outbox.sql` |
+CloudKit 在 Swift 中负责传输，Rust 负责行版本与冲突处理。容器为 `iCloud.com.shendongchun.BillLensApple`，自定义 zone 为 `BillLensZone`。
 
-## 前端结构
-
-共享 UI 都在 `BillLensShared`，所以视觉和交互改动会同时影响 macOS 和 iOS。
-
-主视图：
-
-```text
-RootView
-├── EntryShell
-│   ├── ChatPanel
-│   └── ReviewPanel
-├── LedgerShell
-├── SubscriptionShell
-└── AssetShell
-```
-
-### 当前 UI 约束
-
-- 视觉基底是 **Liquid Glass**，原生支持的平台走 `glassEffect`，旧平台走同一套回退材质。
-- 半径统一收口在 `DesignTokens.swift` 的 `LayoutRadii`。
-- 主要容器分三层：
-
-| 层级 | Token |
-|---|---|
-| 页面外壳 | `LayoutRadii.shell` |
-| 主要分区 / 大卡片 | `LayoutRadii.section` |
-| 内容卡片 / 字段 / 小控件 | `LayoutRadii.card` / `field` / `compactField` / `micro` |
-
-- 颜色、文字层级、玻璃强度都统一在 `DesignTokens.swift` 和 `SharedComponents.swift`。
-
-## 业务流
-
-### 账单录入
-
-1. 用户输入文本、上传票据或开始语音。
-2. Swift 侧把输入发给 Rust。
-3. 文本输入先走 Rust 规则解析（`rule_parser.rs`）：金额、币种、收支方向、分类、订阅周期和时间。
-   - 规则能完整确定单笔账单（金额、显式币种、唯一分类）时直接生成结果，`parser_source = rule`，不调用模型。
-   - 否则调用本地 / 云端模型补全；规则已确定的字段写进 prompt，并在模型返回后由代码覆盖。
-   - 资产描述、多笔流水、订阅（需要识别服务名）和 OCR 文本始终交给模型。
-4. 时间换算只在代码里做：模型只返回原文时间片段 `time_text`（如“今天早上”），由 `rule_parser::resolve_time` 换算。
-   时段默认钟点：凌晨 05:00、早上 08:00、上午 10:00、中午 12:00、下午 15:00、傍晚 18:00、晚上 20:00；
-   只有日期（如“昨天”）时沿用当前钟点；没有任何时间线索时使用当前时间。
-5. 结构化结果先写成 `RecordDraft`。
-6. 用户审核后确认入库，生成 `Record`。
-
-### 时区
-
-- 数据库只存带时区偏移的绝对时间（UTC）；不带偏移的时间字符串直接拒绝，不按任何固定时区猜测。
-- 本地日期相关的计算都在 Rust 里按设备 IANA 时区（`chrono-tz`，含夏令时规则）完成：时间描述换算、账本按天分组、本月/本年范围、订阅扣费日与 09:00 扣费时间、解析回复里的时间。
-- Swift 在 `bootstrap` 时传 `TimeZone.current.identifier`；系统时区变化（`NSSystemTimeZoneDidChange`）时调用 `set_time_zone` 并刷新账本。
-
-### 图片录入
-
-1. `ReceiptOCRService` 用 Vision 做 OCR。
-2. OCR 文本继续走同一条 `submit_text` 解析链路。
-
-### 语音录入
-
-1. `SpeechCaptureService` 负责录音和实时转写。
-2. 停止录音后把转写结果塞回输入框。
-3. 后续仍然走文本解析链路。
-
-### 订阅与资产
-
-- 订阅支持周期规则、暂停/恢复、自动生成到期账单。
-- 资产支持快照式余额记录与趋势展示。
-- 两者都通过同一套 Rust FFI 协议增删改查。
-
-## 状态与桥接
-
-### `BillLensStore`
-
-`BillLensStore` 是前端唯一状态源，负责：
-
-- 启动时 `bootstrap`
-- 刷新首页、账本、订阅、资产
-- 草稿编辑和确认
-- 触发 CloudKit 拉取 / 推送
-- 读取和保存 LLM 配置
-
-### `RustBridge`
-
-Swift 不直接调用 Rust 结构体，而是统一走 JSON：
-
-```text
-[String: Any]
-  -> JSONSerialization
-  -> billlens_handle_request(...)
-  -> JSONDecoder
-  -> Codable 响应模型
-```
-
-这条边界当前只暴露两个 C 函数：
-
-- `billlens_handle_request`
-- `billlens_free_string`
-
-## FFI 协议
-
-所有请求都有一个 `action` 字段，Rust 侧在 `rust/crates/ffi/src/lib.rs` 分发。
-
-高频动作：
-
-| action | 用途 |
-|---|---|
-| `bootstrap` | 初始化数据库和运行时 |
-| `home` | 读取首页消息、草稿、最新入库记录 |
-| `submit_text` | 解析文本或 OCR 文本 |
-| `save_draft` / `confirm_draft` / `discard_draft` | 草稿生命周期 |
-| `ledger` | 拉取账本快照 |
-| `list_subscriptions` / `update_subscription` | 订阅管理 |
-| `list_assets` / `update_asset` | 资产管理 |
-| `get_llm_config` / `update_llm_config` | 应用内模型配置 |
-| `sync_list_dirty` / `sync_apply_remote` / `sync_mark_synced` | CloudKit 同步传输层 |
-| `process_due_subscriptions` | 扫描并生成到期订阅账单 |
-
-## 数据与同步
-
-### SQLite
-
-主库位置：
-
-- 数据库：`~/Library/Application Support/BillLensApple/billlens.sqlite`
-- 日志：`~/Library/Application Support/BillLensApple/billlens.log`
-
-主要表：
-
-| 表 | 用途 |
-|---|---|
-| `records` | 正式账单 |
-| `record_drafts` | 待确认草稿 |
-| `conversation_messages` | 对话历史 |
-| `subscriptions` | 周期订阅 |
-| `assets` | 资产主表 |
-| `asset_snapshots` | 资产快照 |
-| `app_settings` | 应用配置 |
-
-### CloudKit
-
-CloudKit 当前是**已接入**状态，不是占位稿。
-
-- 容器在 `CloudKitSyncService.swift`
-- 同步对象：`record`、`subscription`、`asset`、`asset_snapshot`
-- 冲突处理主要由 Rust 侧的版本字段决定
-- `llm_config` 不进云端，API Key 保持本地
-
-历史上存在过 `sync_outbox`，但已在 `0009_drop_sync_outbox.sql` 删除，当前改为行级 `sync_version / synced_version` 水位
-
-## 当前设计取舍
-
-| 主题 | 取舍 |
-|---|---|
-| 错误处理 | 尽早暴露，不做静默 fallback |
-| 前后端边界 | 用 JSON FFI，避免 Swift/Rust 结构直接绑死 |
-| 输入流程 | 先草稿后确认，避免模型直接写库 |
-| 跨平台 UI | 尽量共享 `BillLensShared`，减少双端分叉 |
-| 云同步 | 凭据本地保存，同步只传业务数据 |
+- 只同步 `record`、`subscription`、`asset`、`asset_snapshot`；草稿、对话、模型和 LLM 凭据留在本机。
+- 业务删除为带版本的软删除；远端意外硬删除（控制台操作或数据区重置）会被跳过并保留本地数据，记录 `sync.pull.skip` 日志，不阻塞游标。
+- 推送按 `sync_version > synced_version` 查询；只有 CloudKit 保存和本地水位确认都成功才视为该批次完成。
+- 拉取按页处理：验证整页类型及 payload → 父资产先于快照应用 → 保存新游标。任一记录、操作、解码、数据库或游标写入失败都终止，保留可重放的旧游标。
+- 同一进程共享进行中的拉取任务，状态隔离在 MainActor；不并发运行两个推送循环。
+- iOS Debug 默认禁用 CloudKit；macOS ad-hoc 构建不携带受限 entitlement。正式签名和真机多设备验证见开发文档与审查记录。

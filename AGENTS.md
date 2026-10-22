@@ -10,22 +10,27 @@
 6. **结论先行+表格化**：直接给结论和修补方案，多项对比用 Markdown 表格。严禁复读背景，严禁陈述式汇报。
 
 ## Project Structure & Module Organization
-`apple/` contains the macOS Swift Package. `apple/Sources/BillLensMacApp/` is the app entry point, `BillLensShared/` holds SwiftUI screens, state, and the Rust bridge, `BillLensAppleServices/` wraps Vision, Speech, and logging, and `CBillLensRustBridge/` exposes the C header consumed by Swift. `rust/` is a Cargo workspace: `crates/core/` contains business logic and LLM parsing, `crates/db/` manages SQLite persistence, and `crates/ffi/` builds the static library linked from Swift. Database migrations live in `rust/migrations/`.
+`apple/` supports macOS 14+ and iOS 17+. Platform entries are `BillLensMacApp/` and `BillLensIOSApp/`; `BillLensShared/` owns shared SwiftUI state, views, JSON FFI and CloudKit transport. `BillLensAppleServices/` owns Vision, Speech, logging, model downloads and llama.cpp inference. `CBillLensRustBridge/` contains the C contract. The Rust workspace contains `core` (rules, parsing, routing, business orchestration), `db` (SQLx persistence) and `ffi` (static library). Keep all released migrations in `rust/migrations/`, including migrations for removed tables.
 
 ## Build, Test, and Development Commands
-Set `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, and `LLM_PROVIDER` before running the app.
+Use the repository-root `build.sh`. Build on an Apple Silicon Mac with Xcode, Rust and XcodeGen installed.
 
-- `cd rust && cargo build -p billlens_ffi`: build the Rust static library for Swift linking.
-- `cd apple && ./build-rust.sh`: rebuild the FFI library from the Apple-side workflow.
-- `cd apple && swift build`: compile the macOS app.
-- `cd apple && swift run BillLensMacApp`: launch the local app.
-- `cd rust && cargo test`: run the Rust unit test suite.
+- `./build.sh dev`: Rust + Xcode macOS Debug build and LaunchServices launch.
+- `./build.sh mac`: Xcode macOS Release App and DMG.
+- `./build.sh all`: all three Rust static libraries (macOS, iOS simulator, iOS device).
+- `./build.sh xcode-ios-sim`: Rust + Xcode iOS simulator Debug build.
+- `cd rust && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`.
+- `cd apple && swift build && swift test`: compile and test; build the macOS Rust static library first.
+
+Cloud configuration is optional at launch. `LLM_BASE_URL`, `LLM_MODEL`, `LLM_PROVIDER` are required together if any cloud environment configuration is supplied; `LLM_API_KEY` may be absent or empty. Prefer the Settings UI for LaunchServices-launched apps. See `docs/development.md` for configuration, signing and sandbox cache options.
 
 ## Coding Style & Naming Conventions
 Use 4-space indentation in Swift and Rust. Follow existing naming patterns: Swift types use `UpperCamelCase`, Swift properties and methods use `lowerCamelCase`, Rust modules and functions use `snake_case`, and Rust types use `CamelCase`. Keep FFI changes synchronized across `rust/crates/ffi/src/lib.rs`, `apple/Sources/CBillLensRustBridge/include/billlens_ffi.h`, and `apple/Sources/BillLensShared/RustBridge.swift`. No repo-level Swift formatter or linter is checked in; keep Swift formatting consistent with nearby files and run `cargo fmt` for Rust edits.
 
 ## Testing Guidelines
-Rust tests live inline under `#[cfg(test)]`, primarily in `rust/crates/core/` and `rust/crates/db/`. Add unit tests with any change to parsing, storage, or edge-case logic. There is currently no Swift test target in `apple/Package.swift`, so Swift-side changes should at least pass `swift build` and a manual smoke test of the affected flow.
+Rust tests live inline under `#[cfg(test)]`. Parsing, storage, transaction and edge-case fixes require regression tests. Swift targets are `BillLensAppleServicesTests` and `BillLensSharedTests`. Run `swift build` and `swift test` for Swift changes; UI changes additionally require manual smoke testing. Cross-layer changes must rebuild all Rust targets and the iOS simulator App.
+
+Use `parsed_drafts` for record, asset and subscription review. Local model results always require confirmation; rule/cloud bills and subscriptions respect auto-confirm. Confirmation and automatic bill/subscription saving share the atomic Repository transaction. Cloud asset parsing still updates snapshots immediately. Do not create subscriptions before manual draft confirmation. Successful FFI responses may legitimately contain `data: null` for optional response types.
 
 ## Failure Visibility
 Do not add fallback behavior that hides errors or silently degrades functionality. If a dependency, configuration value, FFI contract, parser, or local service is invalid, fail fast and surface the problem through explicit errors, logs, or assertions so it can be fixed immediately. Prefer exposing integration issues during development over masking them with default behavior.
@@ -37,7 +42,7 @@ Keep responses tightly scoped to the user's request and avoid unrelated commenta
 Recent commits use short, imperative Chinese subjects such as `增加历史账单删除功能`. Keep commits focused and descriptive in that style. Pull requests should summarize user-visible changes, call out migration, FFI, or environment-variable updates, list the commands you ran, and include screenshots or short recordings for SwiftUI changes.
 
 ## Configuration & Data
-Local runtime data is stored in `~/Library/Application Support/BillLensApple/`, including `billlens.sqlite` and `billlens.log`. Do not commit secrets; keep API keys and model endpoints in shell environment variables only.
+Runtime files live under the process's `Application Support/BillLensApple/`: `billlens.sqlite`, `billlens.log` and `LocalModels/`. macOS non-sandbox builds use `~/Library/Application Support/`; iOS uses its sandbox container. Cloud API keys are stored in local SQLite settings, excluded from CloudKit, and must never be committed or logged. Models are downloaded separately and excluded from backup. See `docs/architecture.md` for sync boundaries and `docs/review.md` for verification limits.
 <!-- TRELLIS:START -->
 # Trellis Instructions
 

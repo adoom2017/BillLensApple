@@ -256,7 +256,9 @@ public final class BillLensStore: ObservableObject {
             AppLogger.log("entry.text.result", "route=\(result.parserSource) auto_confirmed=\(result.autoConfirmed) count=\(result.parsed.count) subscription=\(result.subscriptionCreated) asset_acks=\(result.assetAcks?.count ?? 0)")
             try await self.refreshLedger()
             self.finishProgress()
-            if result.autoConfirmed { CloudKitSyncService.shared.schedulePush() }
+            if result.autoConfirmed || result.subscriptionCreated || !(result.assetAcks?.isEmpty ?? true) {
+                CloudKitSyncService.shared.schedulePush()
+            }
         }
     }
 
@@ -302,8 +304,14 @@ public final class BillLensStore: ObservableObject {
                 try await self.loadSubscriptions()
                 try await self.refreshSubscriptionRemindersIfEnabled()
             }
+            if !(result.assetAcks?.isEmpty ?? true) {
+                try await self.loadAssets()
+            }
             try await self.refreshLedger()
             self.finishProgress()
+            if result.autoConfirmed || result.subscriptionCreated || !(result.assetAcks?.isEmpty ?? true) {
+                CloudKitSyncService.shared.schedulePush()
+            }
         }
     }
 
@@ -372,6 +380,9 @@ public final class BillLensStore: ObservableObject {
             ])
             try await self.refreshHome()
             try await self.refreshLedger()
+            if draft.kind == "asset" {
+                try await self.loadAssets()
+            }
             if draft.kind == "subscription" {
                 try await self.loadSubscriptions()
                 try await self.refreshSubscriptionRemindersIfEnabled()
@@ -391,6 +402,7 @@ public final class BillLensStore: ObservableObject {
             ])
             self.apply(home: result.home)
             try await self.refreshLedger()
+            try await self.loadAssets()
             try await self.loadSubscriptions()
             try await self.refreshSubscriptionRemindersIfEnabled()
             self.statusText = "已批量入库"
@@ -653,7 +665,6 @@ public final class BillLensStore: ObservableObject {
             "llm_config.update",
             "model=\(cfg.model) provider=\(cfg.provider) enable_thinking=\(thinkingMode)"
         )
-        CloudKitSyncService.shared.schedulePush()
     }
 
     public func listLlmModels(
@@ -821,6 +832,7 @@ public final class BillLensStore: ObservableObject {
             ])
             AppLogger.log("timezone.changed", identifier)
             try await self.refreshLedger()
+            try await self.refreshSubscriptionRemindersIfEnabled()
             self.statusText = "已按时区 \(identifier) 刷新账本"
         }
     }

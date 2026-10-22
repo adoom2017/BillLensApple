@@ -63,7 +63,7 @@ struct SubscriptionShell: View {
                 LabeledContent("活跃订阅", value: "\(activeSubscriptionCount) 项")
                 if let next = nextRenewal {
                     LabeledContent("最近续费") {
-                        Text("\(next.merchant ?? next.category) · \(BillLensFormatters.displayDateTime(next.nextDueAt))")
+                        Text("\(next.merchant ?? next.category) · \(BillLensFormatters.displayDay(next.nextDueAt))")
                             .lineLimit(1)
                     }
                 }
@@ -208,7 +208,7 @@ struct SubscriptionRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(subscription.merchant ?? subscription.category)
                     .lineLimit(1)
-                Text("\(subscription.cycleDisplayText) · 下次 \(BillLensFormatters.displayDateTime(subscription.nextDueAt))")
+                Text("\(subscription.cycleDisplayText) · 下次 \(BillLensFormatters.displayDay(subscription.nextDueAt))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -246,7 +246,7 @@ struct SubscriptionDetailView: View {
                     color: subscription.isActive ? CategoryStyle.color(for: "订阅") : .gray,
                     title: subscription.merchant ?? subscription.category,
                     amount: BillLensFormatters.currencyString(subscription.amount, currencyCode: subscription.currency),
-                    caption: "下次扣费 \(BillLensFormatters.displayDateTime(subscription.nextDueAt))"
+                    caption: "下次扣费 \(BillLensFormatters.displayDay(subscription.nextDueAt))"
                 ) {
                     StatusTag(title: subscription.cycleDisplayText, color: .accentColor)
                     StatusTag(
@@ -270,7 +270,7 @@ struct SubscriptionDetailView: View {
                     ? "每月 \(subscription.anchorDay) 日"
                     : "每年 \(subscription.anchorMonth ?? 1) 月 \(subscription.anchorDay) 日")
                 if let last = subscription.lastChargedAt {
-                    LabeledContent("上次记账", value: BillLensFormatters.displayDateTime(last))
+                    LabeledContent("上次记账", value: BillLensFormatters.displayDay(last))
                 }
             }
 

@@ -354,17 +354,6 @@ pub struct RecordUpdate {
     pub note: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct RecordDraftUpdate {
-    pub direction: Option<RecordDirection>,
-    pub amount: Option<f64>,
-    pub currency: Option<String>,
-    pub category: Option<String>,
-    pub merchant: Option<String>,
-    pub transaction_at: Option<DateTime<Utc>>,
-    pub note: Option<String>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ParsedRecordPayload {

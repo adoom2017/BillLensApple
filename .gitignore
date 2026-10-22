@@ -74,11 +74,6 @@ Cargo.lock
 *.exe
 *.app
 
-# Rust FFI
-**/target/
-**/Cargo.lock
-
-
 .claude/
 .github/
 re.md

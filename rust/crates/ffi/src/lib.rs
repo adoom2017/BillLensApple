@@ -212,7 +212,7 @@ fn encode_envelope<T: Serialize>(payload: Envelope<T>) -> *mut c_char {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn billlens_handle_request(request_json: *const c_char) -> *mut c_char {
-    handle_request_inner(request_json).unwrap_or_else(|error| encode_error(error.to_string()))
+    handle_request_inner(request_json).unwrap_or_else(|error| encode_error(format!("{error:#}")))
 }
 
 /// SAFETY: All FFI entry points use `runtime().block_on()` to bridge async→sync.
@@ -592,5 +592,44 @@ pub unsafe extern "C" fn billlens_free_string(value: *mut c_char) {
     }
     unsafe {
         let _ = CString::from_raw(value);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn response(request: *const c_char) -> serde_json::Value {
+        let pointer = billlens_handle_request(request);
+        assert!(!pointer.is_null());
+        let json = unsafe { CStr::from_ptr(pointer) }.to_str().unwrap();
+        let value = serde_json::from_str(json).unwrap();
+        unsafe { billlens_free_string(pointer) };
+        value
+    }
+
+    #[test]
+    fn invalid_request_preserves_decode_context_and_underlying_cause() {
+        let request = CString::new(r#"{"action":"not_an_action"}"#).unwrap();
+        let result = response(request.as_ptr());
+        assert_eq!(result["ok"], false);
+        let error = result["error"].as_str().unwrap();
+        assert!(error.contains("failed to decode engine request"));
+        assert!(error.contains("unknown variant"));
+        assert!(error.contains("not_an_action"));
+    }
+
+    #[test]
+    fn null_and_invalid_utf8_requests_return_errors() {
+        assert_eq!(response(std::ptr::null())["ok"], false);
+        let invalid: [c_char; 2] = [-1, 0];
+        let result = response(invalid.as_ptr());
+        assert_eq!(result["ok"], false);
+        assert!(
+            result["error"]
+                .as_str()
+                .unwrap()
+                .contains("not valid utf-8")
+        );
     }
 }

@@ -185,7 +185,7 @@ public final class LocalModelManager: NSObject, ObservableObject, @unchecked Sen
 
         do {
             try prepareDirectories()
-            models = try Self.loadCatalog()
+            models = try Self.bundledCatalog()
             persistent = try loadPersistentState()
             try validatePersistentState()
             publishPersistentState()
@@ -232,27 +232,6 @@ public final class LocalModelManager: NSObject, ObservableObject, @unchecked Sen
             throw LocalModelManagerError.unknownModel(modelId)
         }
         return model
-    }
-
-    public func selectedModelFileURL() throws -> (LocalModelDescriptor, URL) {
-        try requireInitialized()
-        guard let selectedModelId else {
-            throw LocalModelManagerError.modelNotInstalled("未选择模型")
-        }
-        let descriptor = try descriptor(for: selectedModelId)
-        guard let state = installed[selectedModelId] else {
-            throw LocalModelManagerError.modelNotInstalled(selectedModelId)
-        }
-        let url = installedFileURL(modelId: selectedModelId, state: state)
-        let attributes = try fileManager.attributesOfItem(atPath: url.path)
-        let actualSize = (attributes[.size] as? NSNumber)?.int64Value
-        guard actualSize == state.byteCount else {
-            throw LocalModelManagerError.invalidDownloadSize(
-                expected: state.byteCount,
-                actual: actualSize ?? -1
-            )
-        }
-        return (descriptor, url)
     }
 
     public func startDownload(modelId: String, allowCellularOnce: Bool = false) throws {
@@ -507,7 +486,7 @@ public final class LocalModelManager: NSObject, ObservableObject, @unchecked Sen
     }
 
     nonisolated public static func resolvedSelectedModel() throws -> (LocalModelDescriptor, URL) {
-        let models = try loadCatalog()
+        let models = try bundledCatalog()
         let root = localModelsRootURL()
         let stateURL = root.appendingPathComponent("catalog-state.json")
         guard FileManager.default.fileExists(atPath: stateURL.path) else {
@@ -597,10 +576,6 @@ public final class LocalModelManager: NSObject, ObservableObject, @unchecked Sen
             }
         }
         return catalog.models
-    }
-
-    nonisolated private static func loadCatalog() throws -> [LocalModelDescriptor] {
-        try bundledCatalog()
     }
 
     nonisolated private static func localModelsRootURL() -> URL {

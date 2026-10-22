@@ -6,16 +6,7 @@ public actor SubscriptionNotificationService {
 
     private let center = UNUserNotificationCenter.current()
     private let identifierPrefix = "billlens.subscription."
-    private let calendar: Calendar
-
-    private init() {
-        var calendar = Calendar(identifier: .gregorian)
-        guard let timeZone = TimeZone(identifier: "Asia/Shanghai") else {
-            preconditionFailure("Asia/Shanghai time zone is unavailable")
-        }
-        calendar.timeZone = timeZone
-        self.calendar = calendar
-    }
+    private init() {}
 
     public func requestAuthorization() async throws {
         let granted = try await center.requestAuthorization(options: [.alert, .sound, .badge])
@@ -57,23 +48,11 @@ public actor SubscriptionNotificationService {
     }
 
     private func reminderRequest(identifier: String, subscription: SubscriptionItem) throws -> UNNotificationRequest {
-        let dateParts = subscription.nextDueAt.split(separator: "-")
-        guard dateParts.count == 3,
-              let year = Int(dateParts[0]),
-              let month = Int(dateParts[1]),
-              let day = Int(dateParts[2]) else {
-            throw SubscriptionNotificationError.invalidDueDate(subscription.nextDueAt)
-        }
-
-        var components = DateComponents()
-        components.calendar = calendar
-        components.timeZone = calendar.timeZone
-        components.year = year
-        components.month = month
-        components.day = day
-        components.hour = 9
-        components.minute = 0
-        guard let fireDate = calendar.date(from: components), fireDate > Date.now else {
+        let components = try Self.reminderComponents(
+            dueDate: subscription.nextDueAt,
+            timeZone: .current
+        )
+        guard let fireDate = components.date, fireDate > Date.now else {
             throw SubscriptionNotificationError.nonFutureDueDate(subscription.nextDueAt)
         }
 
@@ -87,6 +66,32 @@ public actor SubscriptionNotificationService {
         let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
         return UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
     }
+    nonisolated static func reminderComponents(dueDate: String, timeZone: TimeZone) throws -> DateComponents {
+        let parts = dueDate.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 3, parts[0].count == 4, parts[1].count == 2, parts[2].count == 2,
+              let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]) else {
+            throw SubscriptionNotificationError.invalidDueDate(dueDate)
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        var components = DateComponents()
+        components.calendar = calendar
+        components.timeZone = timeZone
+        components.year = year
+        components.month = month
+        components.day = day
+        components.hour = 9
+        components.minute = 0
+        guard let date = components.date,
+              calendar.component(.year, from: date) == year,
+              calendar.component(.month, from: date) == month,
+              calendar.component(.day, from: date) == day,
+              calendar.component(.hour, from: date) == 9 else {
+            throw SubscriptionNotificationError.invalidDueDate(dueDate)
+        }
+        return components
+    }
+
 }
 
 public enum SubscriptionNotificationError: LocalizedError {

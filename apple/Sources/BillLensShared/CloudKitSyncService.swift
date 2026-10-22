@@ -7,13 +7,16 @@ import BillLensAppleServices
 
 /// Handles bidirectional CloudKit sync for all entity types.
 /// Rust owns data/conflict logic; this service owns transport only.
-public final class CloudKitSyncService: @unchecked Sendable {
+@MainActor
+public final class CloudKitSyncService {
     public static let shared = CloudKitSyncService()
 
     private let zoneName = "BillLensZone"
     private let containerIdentifier = "iCloud.com.shendongchun.BillLensApple"
     private var container: CKContainer?
     private var isPushScheduled = false
+    private var isPushing = false
+    private var pullTask: Task<Bool, Never>?
     private var didEnsureZoneAndSubscription = false
     private var didLogUnavailable = false
     private var bridge: RustBridge?
@@ -32,15 +35,6 @@ public final class CloudKitSyncService: @unchecked Sendable {
         cloudKitIsEnabledForProcess()
     }
 
-    public func pullThenPush(bridge: RustBridge, profileID: String) {
-        configure(bridge: bridge, profileID: profileID)
-        Task.detached(priority: .background) { [weak self] in
-            guard await self?.ensureZoneAndSubscription() == true else { return }
-            await self?.pull()
-            await self?.push()
-        }
-    }
-
     /// Pull and wait for completion. Returns true only when remote state was fully applied.
     /// Used by bootstrap to gate subscription processing on confirmed remote state.
     public func pullSync(bridge: RustBridge, profileID: String) async -> Bool {
@@ -52,15 +46,15 @@ public final class CloudKitSyncService: @unchecked Sendable {
     public func schedulePush() {
         guard !isPushScheduled else { return }
         isPushScheduled = true
-        Task.detached(priority: .background) { [weak self] in
+        Task(priority: .background) { [weak self] in
             try? await Task.sleep(nanoseconds: 500_000_000)
-            await self?.resetScheduleFlag()
+            self?.isPushScheduled = false
             await self?.push()
         }
     }
 
     public func handleRemoteNotification() {
-        Task.detached(priority: .background) { [weak self] in
+        Task(priority: .background) { [weak self] in
             guard await self?.ensureZoneAndSubscription() == true else { return }
             await self?.pull()
         }
@@ -81,9 +75,7 @@ public final class CloudKitSyncService: @unchecked Sendable {
 
         let zone = CKRecordZone(zoneName: zoneName)
         do {
-            try await privateDB.save(zone)
-        } catch let error as CKError where error.code == .serverRejectedRequest {
-            // zone already exists
+            _ = try await privateDB.save(zone)
         } catch {
             AppLogger.log("sync.zone", "Failed to create zone: \(error)")
             return false
@@ -95,9 +87,7 @@ public final class CloudKitSyncService: @unchecked Sendable {
         notificationInfo.shouldSendContentAvailable = true
         sub.notificationInfo = notificationInfo
         do {
-            try await privateDB.save(sub)
-        } catch let error as CKError where error.code == .serverRejectedRequest {
-            // subscription already exists
+            _ = try await privateDB.save(sub)
         } catch {
             AppLogger.log("sync.subscription", "Failed to create subscription: \(error)")
             return false
@@ -109,6 +99,9 @@ public final class CloudKitSyncService: @unchecked Sendable {
     // MARK: - Push (local → CloudKit)
 
     private func push() async {
+        guard !isPushing else { return }
+        isPushing = true
+        defer { isPushing = false }
         guard let bridge else { return }
         guard await ensureZoneAndSubscription() else { return }
         guard let privateDB = privateDatabase() else { return }
@@ -117,12 +110,18 @@ public final class CloudKitSyncService: @unchecked Sendable {
         let zone = CKRecordZone.ID(zoneName: zoneName, ownerName: CKCurrentUserDefaultName)
 
         while true {
-            guard let dirtyBatch: SyncDirtyBatch = try? await bridge.sendAsync([
-                "action": "sync_list_dirty",
-                "profile_id": profileID,
-                "entity_types": entityTypes,
-                "limit": 200
-            ]) else { break }
+            let dirtyBatch: SyncDirtyBatch
+            do {
+                dirtyBatch = try await bridge.sendAsync([
+                    "action": "sync_list_dirty",
+                    "profile_id": profileID,
+                    "entity_types": entityTypes,
+                    "limit": 200
+                ])
+            } catch {
+                AppLogger.log("sync.push.error", "Cannot load dirty rows: \(error)")
+                return
+            }
 
             let allItems = dirtyBatch.records + dirtyBatch.subscriptions + dirtyBatch.assets +
                            dirtyBatch.assetSnapshots + dirtyBatch.appSettings
@@ -153,7 +152,34 @@ public final class CloudKitSyncService: @unchecked Sendable {
     }
 
     private func pushChunk(_ records: [CKRecord], itemsByID: [String: SyncDirtyItem], bridge: RustBridge, database: CKDatabase) async -> Bool {
-        return await withCheckedContinuation { continuation in
+        if let error = await Self.saveRecords(records, database: database) {
+            AppLogger.log("sync.push", "Push failed: \(error)")
+            return false
+        }
+        let entries: [[String: Any]] = records.compactMap { record in
+            guard let item = itemsByID[record.recordID.recordName] else { return nil }
+            return [
+                "entity_type": item.entityType,
+                "id": item.id,
+                "synced_version": item.syncVersion
+            ]
+        }
+        do {
+            let _: [String: Int] = try await bridge.sendAsync([
+                "action": "sync_mark_synced",
+                "entries": entries
+            ])
+            return true
+        } catch {
+            AppLogger.log("sync.push.error", "Cannot acknowledge saved rows: \(error)")
+            return false
+        }
+    }
+
+    /// CloudKit 在自己的操作队列上调用回调，因此操作必须在非隔离上下文中创建，
+    /// 否则闭包会被推断为 MainActor 隔离却在后台线程执行。
+    nonisolated private static func saveRecords(_ records: [CKRecord], database: CKDatabase) async -> (any Error)? {
+        await withCheckedContinuation { continuation in
             let op = CKModifyRecordsOperation(recordsToSave: records, recordIDsToDelete: nil)
             // .allKeys unconditionally overwrites each field — correct for a LWW opaque payload
             // where we always hold the full entity state and never partial-update individual keys.
@@ -161,26 +187,9 @@ public final class CloudKitSyncService: @unchecked Sendable {
             op.modifyRecordsResultBlock = { result in
                 switch result {
                 case .success:
-                    var entries: [[String: Any]] = []
-                    for record in records {
-                        if let item = itemsByID[record.recordID.recordName] {
-                            entries.append([
-                                "entity_type": item.entityType,
-                                "id": item.id,
-                                "synced_version": item.syncVersion
-                            ])
-                        }
-                    }
-                    Task {
-                        let _: [String: Int] = (try? await bridge.sendAsync([
-                            "action": "sync_mark_synced",
-                            "entries": entries
-                        ])) ?? [:]
-                        continuation.resume(returning: true)
-                    }
+                    continuation.resume(returning: nil)
                 case .failure(let error):
-                    AppLogger.log("sync.push", "Push failed: \(error)")
-                    continuation.resume(returning: false)
+                    continuation.resume(returning: error)
                 }
             }
             database.add(op)
@@ -192,105 +201,197 @@ public final class CloudKitSyncService: @unchecked Sendable {
     /// Returns true only when remote state was fully fetched and applied to the local DB.
     @discardableResult
     private func pull() async -> Bool {
+        if let pullTask { return await pullTask.value }
+        let task = Task { await pullPages() }
+        pullTask = task
+        let result = await task.value
+        pullTask = nil
+        return result
+    }
+
+    private func pullPages() async -> Bool {
         guard let bridge else { return false }
         guard let privateDB = privateDatabase() else { return false }
         let zone = CKRecordZone.ID(zoneName: zoneName, ownerName: CKCurrentUserDefaultName)
 
         struct CursorResponse: Decodable { let token: String? }
-        struct FetchOutcome {
-            var records: [CKRecord] = []
-            var newToken: CKServerChangeToken?
-            var tokenExpired = false
-            var fetchFailed = false
-            var moreComing = false
-        }
 
         var didClearOnExpiry = false
         while true {
-            let cursorResp: CursorResponse? = try? await bridge.sendAsync([
-                "action": "sync_get_cursor",
-                "profile_id": profileID,
-                "zone": zoneName
-            ])
-            var serverToken: CKServerChangeToken? = nil
-            if let tokenStr = cursorResp?.token, let data = Data(base64Encoded: tokenStr) {
-                serverToken = try? NSKeyedUnarchiver.unarchivedObject(ofClass: CKServerChangeToken.self, from: data)
+            let serverToken: CKServerChangeToken?
+            do {
+                let cursor: CursorResponse = try await bridge.sendAsync([
+                    "action": "sync_get_cursor",
+                    "profile_id": profileID,
+                    "zone": zoneName
+                ])
+                serverToken = try Self.decodeServerToken(cursor.token)
+            } catch {
+                AppLogger.log("sync.pull.error", "Cannot load cursor: \(error)")
+                return false
             }
 
-            let outcome = await withCheckedContinuation { (continuation: CheckedContinuation<FetchOutcome, Never>) in
-                var out = FetchOutcome()
-                let config = CKFetchRecordZoneChangesOperation.ZoneConfiguration()
-                config.previousServerChangeToken = serverToken
-                let op = CKFetchRecordZoneChangesOperation(recordZoneIDs: [zone], configurationsByRecordZoneID: [zone: config])
-                op.recordWasChangedBlock = { _, result in
-                    if case .success(let record) = result { out.records.append(record) }
-                }
-                op.recordZoneFetchResultBlock = { _, result in
-                    switch result {
-                    case .success(let (token, _, more)):
-                        out.newToken = token
-                        out.moreComing = more
-                    case .failure(let error as CKError) where error.code == .changeTokenExpired:
-                        out.tokenExpired = true
-                    case .failure(let error):
-                        AppLogger.log("sync.pull", "Zone fetch error: \(error)")
-                        out.fetchFailed = true
-                    }
-                }
-                op.fetchRecordZoneChangesResultBlock = { _ in continuation.resume(returning: out) }
-                privateDB.add(op)
-            }
+            let outcome = await Self.fetchPage(database: privateDB, zone: zone, token: serverToken)
 
             if outcome.tokenExpired {
                 if didClearOnExpiry { return false }
                 didClearOnExpiry = true
-                let _: [String: String] = (try? await bridge.sendAsync([
-                    "action": "sync_set_cursor",
-                    "profile_id": profileID,
-                    "zone": zoneName,
-                    "token": NSNull()
-                ])) ?? [:]
+                do {
+                    let _: [String: String] = try await bridge.sendAsync([
+                        "action": "sync_set_cursor",
+                        "profile_id": profileID,
+                        "zone": zoneName,
+                        "token": NSNull()
+                    ])
+                } catch {
+                    AppLogger.log("sync.pull.error", "Cannot clear expired cursor: \(error)")
+                    return false
+                }
                 continue
             }
             if outcome.fetchFailed { return false }
 
-            if !outcome.records.isEmpty {
-                // Apply parent entities (assets) before children (asset_snapshots) to satisfy FK ordering.
-                let typeOrder: [String: Int] = ["record": 0, "subscription": 1, "asset": 2, "asset_snapshot": 3]
-                let entries: [[String: Any]] = outcome.records
-                    .sorted { (typeOrder[$0.recordType] ?? 99) < (typeOrder[$1.recordType] ?? 99) }
-                    .compactMap { record in
-                        guard let payload = record["payload"] as? String else { return nil }
-                        return ["entity_type": record.recordType, "payload": payload]
-                    }
-                let result: SyncApplyResult? = try? await bridge.sendAsync([
-                    "action": "sync_apply_remote",
-                    "entries": entries
-                ])
-                if result == nil {
-                    AppLogger.log("sync.pull", "sync_apply_remote failed; cursor not advanced")
-                    return false
+            do {
+                let entries = try Self.remoteEntries(from: outcome.records)
+                if !entries.isEmpty {
+                    let _: SyncApplyResult = try await bridge.sendAsync([
+                        "action": "sync_apply_remote",
+                        "entries": entries
+                    ])
                 }
-            }
-
-            if let token = outcome.newToken,
-               let data = try? NSKeyedArchiver.archivedData(withRootObject: token, requiringSecureCoding: true) {
-                let tokenStr = data.base64EncodedString()
-                let _: [String: String] = (try? await bridge.sendAsync([
+                guard let token = outcome.newToken else {
+                    throw RustBridgeError.engineError("CloudKit 拉取成功但没有返回同步游标。")
+                }
+                let data = try NSKeyedArchiver.archivedData(
+                    withRootObject: token,
+                    requiringSecureCoding: true
+                )
+                let _: [String: String] = try await bridge.sendAsync([
                     "action": "sync_set_cursor",
                     "profile_id": profileID,
                     "zone": zoneName,
-                    "token": tokenStr
-                ])) ?? [:]
+                    "token": data.base64EncodedString()
+                ])
+            } catch {
+                AppLogger.log("sync.pull.error", "Page not committed: \(error)")
+                return false
             }
 
             if !outcome.moreComing { return true }
         }
     }
 
-    @MainActor
-    private func resetScheduleFlag() {
-        isPushScheduled = false
+    /// 单页拉取结果。只在操作完成后整体交回调用方，此后不再有并发修改。
+    struct FetchOutcome: @unchecked Sendable {
+        var records: [CKRecord] = []
+        var newToken: CKServerChangeToken?
+        var tokenExpired = false
+        var fetchFailed = false
+        var moreComing = false
+    }
+
+    /// CloudKit 回调在其操作队列上并发执行，结果写入加锁的容器。
+    private final class FetchOutcomeBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var outcome = FetchOutcome()
+
+        func update(_ body: (inout FetchOutcome) -> Void) {
+            lock.lock()
+            defer { lock.unlock() }
+            body(&outcome)
+        }
+
+        func value() -> FetchOutcome {
+            lock.lock()
+            defer { lock.unlock() }
+            return outcome
+        }
+    }
+
+    /// 拉取一页变更；见 `saveRecords` 关于非隔离的说明。
+    nonisolated private static func fetchPage(
+        database: CKDatabase,
+        zone: CKRecordZone.ID,
+        token: CKServerChangeToken?
+    ) async -> FetchOutcome {
+        await withCheckedContinuation { continuation in
+            let box = FetchOutcomeBox()
+            let config = CKFetchRecordZoneChangesOperation.ZoneConfiguration()
+            config.previousServerChangeToken = token
+            let op = CKFetchRecordZoneChangesOperation(recordZoneIDs: [zone], configurationsByRecordZoneID: [zone: config])
+            op.recordWasChangedBlock = { _, result in
+                switch result {
+                case .success(let record):
+                    box.update { $0.records.append(record) }
+                case .failure(let error):
+                    AppLogger.log("sync.pull.error", "Record fetch failed: \(error)")
+                    box.update { $0.fetchFailed = true }
+                }
+            }
+            // App 只做软删除（tombstone 随记录同步），硬删除只可能来自 CloudKit 控制台或数据区重置。
+            // 跳过该条并保留本地数据，不让一条外部删除永久阻塞同步游标。
+            op.recordWithIDWasDeletedBlock = { recordID, recordType in
+                AppLogger.log(
+                    "sync.pull.skip",
+                    "Skipped remote hard deletion: type=\(recordType) id=\(recordID.recordName); local row kept"
+                )
+            }
+            op.recordZoneFetchResultBlock = { _, result in
+                switch result {
+                case .success(let (token, _, more)):
+                    box.update {
+                        $0.newToken = token
+                        $0.moreComing = more
+                    }
+                case .failure(let error as CKError) where error.code == .changeTokenExpired:
+                    box.update { $0.tokenExpired = true }
+                case .failure(let error):
+                    AppLogger.log("sync.pull", "Zone fetch error: \(error)")
+                    box.update { $0.fetchFailed = true }
+                }
+            }
+            // Process one page per operation; the cursor is committed before the next page.
+            op.fetchAllChanges = false
+            op.fetchRecordZoneChangesResultBlock = { result in
+                if case .failure(let error) = result {
+                    if let ckError = error as? CKError, ckError.code == .changeTokenExpired {
+                        box.update { $0.tokenExpired = true }
+                    } else {
+                        AppLogger.log("sync.pull.error", "Fetch operation failed: \(error)")
+                        box.update { $0.fetchFailed = true }
+                    }
+                }
+                continuation.resume(returning: box.value())
+            }
+            database.add(op)
+        }
+    }
+
+    static func decodeServerToken(_ encoded: String?) throws -> CKServerChangeToken? {
+        guard let encoded else { return nil }
+        guard let data = Data(base64Encoded: encoded),
+              let token = try NSKeyedUnarchiver.unarchivedObject(
+                ofClass: CKServerChangeToken.self,
+                from: data
+              ) else {
+            throw RustBridgeError.engineError("CloudKit 同步游标损坏。")
+        }
+        return token
+    }
+
+    static func remoteEntries(from records: [CKRecord]) throws -> [[String: Any]] {
+        let typeOrder = ["record": 0, "subscription": 1, "asset": 2, "asset_snapshot": 3]
+        // Validate the entire page before applying anything or advancing its cursor.
+        let entries = try records.map { record -> (Int, [String: Any]) in
+            guard let order = typeOrder[record.recordType] else {
+                throw RustBridgeError.engineError("CloudKit 包含未知数据类型：\(record.recordType)")
+            }
+            guard let payload = record["payload"] as? String else {
+                throw RustBridgeError.engineError("CloudKit 记录缺少 payload：\(record.recordID.recordName)")
+            }
+            return (order, ["entity_type": record.recordType, "payload": payload])
+        }
+        return entries.sorted { $0.0 < $1.0 }.map(\.1)
     }
 
     private func privateDatabase() -> CKDatabase? {

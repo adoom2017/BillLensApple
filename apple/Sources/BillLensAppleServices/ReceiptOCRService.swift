@@ -40,6 +40,10 @@ public final class ReceiptOCRService: ReceiptTextRecognizing, @unchecked Sendabl
     }
 
     public func recognizeText(from imageURL: URL) async throws -> String {
+        let hasSecurityScope = imageURL.startAccessingSecurityScopedResource()
+        defer {
+            if hasSecurityScope { imageURL.stopAccessingSecurityScopedResource() }
+        }
         AppLogger.log("ocr.start", "image_url=\(imageURL.path)")
         guard let cgImage = loadCGImage(from: imageURL) else {
             AppLogger.log("ocr.error", "failed to load image at \(imageURL.path)")

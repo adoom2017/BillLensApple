@@ -415,7 +415,8 @@ fn parse_number(token: &[char]) -> Option<f64> {
                 zero_seen = true;
             }
             current = current * 10 + digit;
-        } else if let Some(unit) = unit_value(c) {
+        } else {
+            let unit = unit_value(c)?;
             if unit == 10_000 {
                 section += current;
                 total += section.max(1) * unit;
@@ -426,8 +427,6 @@ fn parse_number(token: &[char]) -> Option<f64> {
             current = 0;
             last_unit = unit;
             zero_seen = false;
-        } else {
-            return None;
         }
     }
     // “两百五”=250、“一千二”=1200：末位裸数字承接上一级单位。

@@ -16,7 +16,8 @@ let macosLibPath = "../rust/target/\(rustBuildMode)"
 let iosLibPath: String = {
     switch rustTarget {
     case "ios":  return "../rust/target/aarch64-apple-ios/\(rustBuildMode)"
-    default:     return "../rust/target/aarch64-apple-ios-sim/\(rustBuildMode)"
+    case "ios-sim": return "../rust/target/aarch64-apple-ios-sim/\(rustBuildMode)"
+    default: fatalError("RUST_TARGET must be ios or ios-sim")
     }
 }()
 
@@ -66,6 +67,13 @@ var targets: [Target] = [
     .testTarget(
         name: "BillLensAppleServicesTests",
         dependencies: ["BillLensAppleServices"]
+    ),
+    .testTarget(
+        name: "BillLensSharedTests",
+        dependencies: ["BillLensShared"],
+        linkerSettings: [
+            .unsafeFlags(["-L", macosLibPath, "-lbilllens_ffi"]),
+        ]
     ),
 ]
 

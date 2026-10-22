@@ -12,9 +12,9 @@ pub use billlens_apple_db::{
     ConversationMessage, ConversationRole, DirectionStatsItem, EXPENSE_CATEGORIES, EntityKind,
     INCOME_CATEGORIES, ParsedAssetInfo, ParsedDraftConfirmationAction, ParsedDraftKind,
     ParsedRecordPayload, ParserSource, Record, RecordCreate, RecordDirection, RecordDraft,
-    RecordDraftStatus, RecordDraftUpdate, RecordsStatsRange, RecordsStatsResponse, RecordsSummary,
-    Subscription, SubscriptionChargeAdvance, SubscriptionCreate, SubscriptionCycle,
-    SubscriptionUpdate, advance_next_due, is_valid_asset_category, is_valid_record_category,
+    RecordDraftStatus, RecordsStatsRange, RecordsStatsResponse, RecordsSummary, Subscription,
+    SubscriptionChargeAdvance, SubscriptionCreate, SubscriptionCycle, SubscriptionUpdate,
+    advance_next_due, is_valid_asset_category, is_valid_record_category,
     is_valid_record_category_for_direction,
 };
 use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, TimeZone, Utc};
@@ -444,6 +444,18 @@ impl AppService {
         let routed = self
             .parse_with_rules(&content, &source, routing, now)
             .await?;
+        self.persist_parsed_submission(profile_id, &content, auto_confirm, routed, time_zone)
+            .await
+    }
+
+    async fn persist_parsed_submission(
+        &self,
+        profile_id: &str,
+        content: &str,
+        auto_confirm: bool,
+        routed: RoutedParseResult,
+        time_zone: Tz,
+    ) -> Result<SubmitTextResult, CoreError> {
         let payloads = routed.payloads;
 
         if payloads.is_empty() {
@@ -459,7 +471,7 @@ impl AppService {
                 .repo
                 .create_parsed_drafts_batch(
                     profile_id,
-                    &content,
+                    content,
                     &payloads,
                     ParserSource::Local,
                     None,
@@ -548,105 +560,6 @@ impl AppService {
             format!("\n{}", format_asset_acks_summary(&asset_acks))
         };
 
-        // Create subscriptions for any payload with subscription_cycle detected
-        let mut subscription_created = false;
-        for payload in &bill_payloads {
-            if let Some(ref cycle) = payload.subscription_cycle {
-                {
-                    let direction = payload.direction.as_ref().ok_or_else(|| {
-                        CoreError::bad_request("subscription direction is required")
-                    })?;
-                    let amount = payload.amount.filter(|value| *value > 0.0).ok_or_else(|| {
-                        CoreError::bad_request("subscription amount must be greater than 0")
-                    })?;
-                    let currency = validate_required_currency(payload.currency.as_deref())?;
-                    let transaction_at = payload.transaction_at.ok_or_else(|| {
-                        CoreError::bad_request("subscription transaction_at is required")
-                    })?;
-                    let category = payload.category.as_deref().ok_or_else(|| {
-                        CoreError::bad_request("subscription category is required")
-                    })?;
-                    let local_time = transaction_at.with_timezone(&time_zone);
-                    let today = local_time.date_naive();
-                    let anchor_day = local_time.day() as i32;
-                    let anchor_month = match cycle {
-                        SubscriptionCycle::Yearly => Some(local_time.month() as i32),
-                        SubscriptionCycle::Monthly => None,
-                    };
-                    let next_due = advance_next_due(cycle, anchor_day, anchor_month, today);
-                    let sub_create = SubscriptionCreate {
-                        direction: direction.clone(),
-                        amount,
-                        currency,
-                        category: validate_category_for_direction(category, Some(direction))?,
-                        merchant: payload.merchant.clone(),
-                        note: payload.note.clone(),
-                        cycle: cycle.clone(),
-                        anchor_day,
-                        anchor_month,
-                        next_due_at: next_due,
-                    };
-                    self.repo
-                        .create_subscription(
-                            Uuid::new_v4(),
-                            profile_id,
-                            &self.device_id,
-                            sub_create,
-                        )
-                        .await
-                        .map_err(map_internal)?;
-                    subscription_created = true;
-                    logger::info(
-                        "submit_text.subscription",
-                        format!("created subscription cycle={}", cycle.as_str()),
-                    );
-                }
-            }
-        }
-
-        if auto_confirm {
-            // Validate all payloads before touching the DB so a bad payload never
-            // leaves earlier records committed while the rest fail.
-            let creates: Vec<RecordCreate> = bill_payloads
-                .iter()
-                .map(record_create_from_parsed)
-                .collect::<Result<_, _>>()?;
-            let mut last_record_id = None;
-            for create in creates {
-                let record = self
-                    .repo
-                    .create_record(Uuid::new_v4(), profile_id, &self.device_id, create)
-                    .await
-                    .map_err(map_internal)?;
-                last_record_id = Some(record.id);
-            }
-            self.repo
-                .create_conversation_message(
-                    Uuid::new_v4(),
-                    profile_id,
-                    ConversationRole::Assistant,
-                    &format!(
-                        "已自动保存 {} 笔账单。{summary}{asset_tail}",
-                        bill_payloads.len()
-                    ),
-                    None,
-                    last_record_id,
-                )
-                .await
-                .map_err(map_internal)?;
-            let home = self.home(profile_id).await.map_err(map_internal)?;
-            return Ok(SubmitTextResult {
-                home,
-                auto_confirmed: true,
-                parsed: payloads,
-                subscription_created,
-                asset_acks,
-                parser_source: routed.parser_source,
-                local_model_id: routed.local_model_id,
-                local_failure: routed.local_failure,
-            });
-        }
-
         let fallback_reason = routed
             .local_failure
             .as_ref()
@@ -655,13 +568,46 @@ impl AppService {
             .repo
             .create_parsed_drafts_batch(
                 profile_id,
-                &content,
+                content,
                 &bill_payloads,
                 routed.parser_source,
                 fallback_reason.as_deref(),
             )
             .await
             .map_err(map_internal)?;
+        if auto_confirm {
+            let actions = drafts
+                .iter()
+                .map(|draft| {
+                    confirmation_action_from_draft(draft, &time_zone)
+                        .map(|action| (draft.id, action))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            self.repo
+                .confirm_parsed_drafts(
+                    profile_id,
+                    &self.device_id,
+                    actions,
+                    &format!(
+                        "已自动保存 {} 笔账单。{summary}{asset_tail}",
+                        bill_payloads.len()
+                    ),
+                )
+                .await
+                .map_err(map_internal)?;
+            let home = self.home(profile_id).await.map_err(map_internal)?;
+            return Ok(SubmitTextResult {
+                home,
+                auto_confirmed: true,
+                subscription_created: bill_payloads.iter().any(|p| p.subscription_cycle.is_some()),
+                parsed: payloads,
+                asset_acks,
+                parser_source: routed.parser_source,
+                local_model_id: routed.local_model_id,
+                local_failure: routed.local_failure,
+            });
+        }
+
         let first_draft_id = drafts.first().map(|d| d.id);
         self.repo
             .create_conversation_message(
@@ -683,7 +629,7 @@ impl AppService {
             home,
             auto_confirmed: false,
             parsed: payloads,
-            subscription_created,
+            subscription_created: false,
             asset_acks,
             parser_source: routed.parser_source,
             local_model_id: routed.local_model_id,
@@ -1913,38 +1859,6 @@ fn record_create_from_draft(payload: &RecordDraft) -> Result<RecordCreate, CoreE
     })
 }
 
-fn record_create_from_parsed(payload: &ParsedRecordPayload) -> Result<RecordCreate, CoreError> {
-    let direction = payload
-        .direction
-        .clone()
-        .ok_or_else(|| CoreError::bad_request("parsed direction is required"))?;
-    let amount = payload
-        .amount
-        .filter(|amount| *amount > 0.0)
-        .ok_or_else(|| CoreError::bad_request("parsed amount must be greater than 0"))?;
-    let category = payload
-        .category
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| CoreError::bad_request("parsed category is required"))?
-        .to_string();
-    let category = validate_category_for_direction(&category, Some(&direction))?;
-    let transaction_at = payload
-        .transaction_at
-        .ok_or_else(|| CoreError::bad_request("parsed transaction_at is required"))?;
-
-    Ok(RecordCreate {
-        direction,
-        amount,
-        currency: validate_required_currency(payload.currency.as_deref())?,
-        category,
-        merchant: trim_optional(payload.merchant.clone()),
-        transaction_at,
-        note: trim_optional(payload.note.clone()),
-    })
-}
-
 fn confirmation_action_from_draft(
     draft: &RecordDraft,
     time_zone: &Tz,
@@ -2201,6 +2115,122 @@ mod tests {
             code,
             message: format!("{} failure", code.as_str()),
         }
+    }
+
+    async fn submission_test_service() -> AppService {
+        let path =
+            std::env::temp_dir().join(format!("billlens-submission-{}.sqlite", Uuid::new_v4()));
+        AppService::new(
+            BillRepository::connect(path).await.unwrap(),
+            EngineBootstrap {
+                device_id: "test-device".to_string(),
+                llm: None,
+                log_file_path: None,
+                time_zone: "Asia/Shanghai".to_string(),
+            },
+        )
+        .unwrap()
+    }
+
+    fn cloud_subscription_result(count: usize) -> RoutedParseResult {
+        let mut payload = routed_payload();
+        payload.category = Some("订阅".to_string());
+        payload.subscription_cycle = Some(SubscriptionCycle::Monthly);
+        RoutedParseResult {
+            payloads: vec![payload; count],
+            parser_source: ParserSource::Cloud,
+            local_model_id: None,
+            local_failure: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn cloud_subscription_draft_creates_subscription_only_on_confirmation() {
+        let service = submission_test_service().await;
+        let result = service
+            .persist_parsed_submission(
+                "test",
+                "subscription",
+                false,
+                cloud_subscription_result(1),
+                chrono_tz::Asia::Shanghai,
+            )
+            .await
+            .unwrap();
+        assert!(!result.subscription_created);
+        assert!(service.list_subscriptions("test").await.unwrap().is_empty());
+        assert!(result.home.latest_record.is_none());
+        let draft = &result.home.drafts[0];
+        assert_eq!(draft.kind, ParsedDraftKind::Subscription);
+        service.confirm_draft("test", draft.id).await.unwrap();
+        assert_eq!(service.list_subscriptions("test").await.unwrap().len(), 1);
+        assert!(service.confirm_draft("test", draft.id).await.is_err());
+        assert_eq!(service.list_subscriptions("test").await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn discarded_cloud_subscription_draft_has_no_business_writes() {
+        let service = submission_test_service().await;
+        let result = service
+            .persist_parsed_submission(
+                "test",
+                "subscription",
+                false,
+                cloud_subscription_result(1),
+                chrono_tz::Asia::Shanghai,
+            )
+            .await
+            .unwrap();
+        service
+            .discard_draft("test", result.home.drafts[0].id)
+            .await
+            .unwrap();
+        assert!(service.list_subscriptions("test").await.unwrap().is_empty());
+        assert!(service.home("test").await.unwrap().latest_record.is_none());
+    }
+
+    #[tokio::test]
+    async fn cloud_auto_confirm_creates_subscription_and_bill_once() {
+        let service = submission_test_service().await;
+        let result = service
+            .persist_parsed_submission(
+                "test",
+                "subscription",
+                true,
+                cloud_subscription_result(1),
+                chrono_tz::Asia::Shanghai,
+            )
+            .await
+            .unwrap();
+        assert!(result.auto_confirmed);
+        assert!(result.subscription_created);
+        assert!(result.home.drafts.is_empty());
+        assert!(result.home.latest_record.is_some());
+        assert_eq!(service.list_subscriptions("test").await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn cloud_auto_confirm_rolls_back_entire_bill_batch() {
+        let service = submission_test_service().await;
+        // Fail after the first subscription and bill have been written.
+        sqlx::query(
+            "CREATE TRIGGER fail_second_record BEFORE INSERT ON records WHEN (SELECT COUNT(*) FROM records) = 1 BEGIN SELECT RAISE(ABORT, 'injected second record failure'); END;"
+        ).execute(service.repo.pool()).await.unwrap();
+        let result = service
+            .persist_parsed_submission(
+                "test",
+                "subscriptions",
+                true,
+                cloud_subscription_result(2),
+                chrono_tz::Asia::Shanghai,
+            )
+            .await;
+        assert!(result.is_err());
+        assert!(service.list_subscriptions("test").await.unwrap().is_empty());
+        let home = service.home("test").await.unwrap();
+        assert!(home.latest_record.is_none());
+        // Failed automatic confirmation leaves the complete batch available for review.
+        assert_eq!(home.drafts.len(), 2);
     }
 
     #[test]

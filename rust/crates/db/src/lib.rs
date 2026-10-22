@@ -143,42 +143,6 @@ impl BillRepository {
         row.try_into()
     }
 
-    pub async fn create_record_draft(
-        &self,
-        id: Uuid,
-        profile_id: &str,
-        content: &str,
-        auto_confirm: bool,
-        parsed: &ParsedRecordPayload,
-    ) -> Result<RecordDraft> {
-        if auto_confirm {
-            return Err(anyhow!("auto-confirmed payloads must not create drafts"));
-        }
-        let kind = parsed_draft_kind(parsed)?;
-        let payload_json =
-            serde_json::to_string(parsed).context("failed to encode draft payload")?;
-        let row = sqlx::query_as::<_, RecordDraftRow>(
-            r#"
-            INSERT INTO parsed_drafts (
-                id, batch_id, profile_id, kind, parser_source, original_content,
-                payload_json, status
-            )
-            VALUES (?1, ?1, ?2, ?3, 'cloud', ?4, ?5, 'parsed')
-            RETURNING *
-            "#,
-        )
-        .bind(id.to_string())
-        .bind(profile_id)
-        .bind(kind.as_str())
-        .bind(content)
-        .bind(payload_json)
-        .fetch_one(&self.pool)
-        .await
-        .context("failed to insert parsed draft")?;
-
-        row.try_into()
-    }
-
     pub async fn get_record_draft(&self, id: Uuid) -> Result<RecordDraft> {
         let row = sqlx::query_as::<_, RecordDraftRow>("SELECT * FROM parsed_drafts WHERE id = ?1")
             .bind(id.to_string())
@@ -188,29 +152,6 @@ impl BillRepository {
             .ok_or_else(|| anyhow!("parsed draft not found"))?;
 
         row.try_into()
-    }
-
-    pub async fn update_record_draft(
-        &self,
-        id: Uuid,
-        update: RecordDraftUpdate,
-    ) -> Result<RecordDraft> {
-        let existing = self.get_record_draft(id).await?;
-        if existing.kind != ParsedDraftKind::Record {
-            return Err(anyhow!("record fields cannot update a non-record draft"));
-        }
-        if existing.status != RecordDraftStatus::Parsed {
-            return Err(anyhow!("only parsed drafts can be updated"));
-        }
-        let mut payload = existing.payload();
-        payload.direction = update.direction;
-        payload.amount = update.amount;
-        payload.currency = update.currency;
-        payload.category = update.category;
-        payload.merchant = update.merchant;
-        payload.transaction_at = update.transaction_at;
-        payload.note = update.note;
-        self.update_parsed_draft_payload(id, &payload).await
     }
 
     pub async fn update_parsed_draft_payload(
@@ -246,26 +187,6 @@ impl BillRepository {
         row.try_into()
     }
 
-    pub async fn latest_active_record_draft(
-        &self,
-        profile_id: &str,
-    ) -> Result<Option<RecordDraft>> {
-        let row = sqlx::query_as::<_, RecordDraftRow>(
-            r#"
-            SELECT * FROM parsed_drafts
-            WHERE profile_id = ?1 AND status = 'parsed'
-            ORDER BY updated_at DESC
-            LIMIT 1
-            "#,
-        )
-        .bind(profile_id)
-        .fetch_optional(&self.pool)
-        .await
-        .context("failed to load latest active parsed draft")?;
-
-        row.map(TryInto::try_into).transpose()
-    }
-
     pub async fn list_active_record_drafts(&self, profile_id: &str) -> Result<Vec<RecordDraft>> {
         let rows = sqlx::query_as::<_, RecordDraftRow>(
             r#"
@@ -280,18 +201,6 @@ impl BillRepository {
         .context("failed to list active parsed drafts")?;
 
         rows.into_iter().map(TryInto::try_into).collect()
-    }
-
-    /// Insert multiple draft rows inside a single transaction so a mid-batch
-    /// failure never leaves a partial set of rows committed.
-    pub async fn create_record_drafts_batch(
-        &self,
-        profile_id: &str,
-        content: &str,
-        payloads: &[ParsedRecordPayload],
-    ) -> Result<Vec<RecordDraft>> {
-        self.create_parsed_drafts_batch(profile_id, content, payloads, ParserSource::Cloud, None)
-            .await
     }
 
     pub async fn create_parsed_drafts_batch(
@@ -344,22 +253,6 @@ impl BillRepository {
             .await
             .context("failed to commit draft batch transaction")?;
         Ok(drafts)
-    }
-
-    /// Compatibility wrapper for record-only callers. New code should call
-    /// `confirm_parsed_drafts` so all draft kinds share the same transaction.
-    pub async fn confirm_record_drafts_batch(
-        &self,
-        profile_id: &str,
-        device_id: &str,
-        draft_creates: Vec<(Uuid, RecordCreate)>,
-    ) -> Result<Option<Record>> {
-        let actions = draft_creates
-            .into_iter()
-            .map(|(id, create)| (id, ParsedDraftConfirmationAction::Record(create)))
-            .collect();
-        self.confirm_parsed_drafts(profile_id, device_id, actions, "已批量确认账单入库。")
-            .await
     }
 
     pub async fn confirm_parsed_drafts(
@@ -523,35 +416,6 @@ impl BillRepository {
         row.map(TryInto::try_into).transpose()
     }
 
-    pub async fn mark_record_draft_confirmed(
-        &self,
-        draft_id: Uuid,
-        record_id: Uuid,
-    ) -> Result<RecordDraft> {
-        let confirmation_json = serde_json::to_string(&ParsedDraftConfirmation {
-            record_id: Some(record_id),
-            ..Default::default()
-        })
-        .context("failed to encode record confirmation")?;
-        let row = sqlx::query_as::<_, RecordDraftRow>(
-            r#"
-            UPDATE parsed_drafts
-            SET status = 'confirmed',
-                confirmation_json = ?2,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?1 AND status = 'parsed'
-            RETURNING *
-            "#,
-        )
-        .bind(draft_id.to_string())
-        .bind(confirmation_json)
-        .fetch_one(&self.pool)
-        .await
-        .context("failed to confirm record draft")?;
-
-        row.try_into()
-    }
-
     pub async fn discard_record_draft(&self, draft_id: Uuid) -> Result<RecordDraft> {
         let row = sqlx::query_as::<_, RecordDraftRow>(
             r#"
@@ -660,129 +524,6 @@ impl BillRepository {
             .context("failed to load records")?;
 
         rows.into_iter().map(TryInto::try_into).collect()
-    }
-
-    /// NOTE: This method sums amounts directly without currency conversion.
-    /// Results are inaccurate for multi-currency data. Prefer using
-    /// `ledger()` which performs proper FX conversion via `aggregate_converted_stats`.
-    #[deprecated(note = "does not handle multi-currency; use ledger() for accurate stats")]
-    pub async fn record_stats(
-        &self,
-        profile_id: &str,
-        range: RecordsStatsRange,
-        direction: Option<RecordDirection>,
-        category: Option<&str>,
-    ) -> Result<RecordsStatsResponse> {
-        let summary_rows = self
-            .aggregate_summary_rows(profile_id, &range, direction.clone(), category)
-            .await?;
-        let category_rows = self
-            .aggregate_category_rows(profile_id, &range, direction, category)
-            .await?;
-
-        let mut income_amount = 0.0;
-        let mut income_count = 0;
-        let mut expense_amount = 0.0;
-        let mut expense_count = 0;
-
-        for row in &summary_rows {
-            match row.direction.as_str() {
-                "income" => {
-                    income_amount = row.total_amount;
-                    income_count = row.record_count;
-                }
-                "expense" => {
-                    expense_amount = row.total_amount;
-                    expense_count = row.record_count;
-                }
-                _ => {}
-            }
-        }
-
-        Ok(RecordsStatsResponse {
-            range,
-            summary: RecordsSummary {
-                income_amount,
-                income_count,
-                expense_amount,
-                expense_count,
-                net_amount: income_amount - expense_amount,
-            },
-            by_direction: summary_rows
-                .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<Vec<_>>>()?,
-            by_category: category_rows
-                .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<Vec<_>>>()?,
-        })
-    }
-
-    async fn aggregate_summary_rows(
-        &self,
-        profile_id: &str,
-        range: &RecordsStatsRange,
-        direction: Option<RecordDirection>,
-        category: Option<&str>,
-    ) -> Result<Vec<DirectionStatsRow>> {
-        let mut builder = QueryBuilder::<Sqlite>::new(
-            "SELECT direction, COALESCE(SUM(amount), 0) AS total_amount, COUNT(*) AS record_count FROM records WHERE profile_id = ",
-        );
-        builder
-            .push_bind(profile_id)
-            .push(" AND deleted_at IS NULL AND transaction_at >= ")
-            .push_bind(range.start_at)
-            .push(" AND transaction_at <= ")
-            .push_bind(range.end_at);
-        if let Some(direction) = direction {
-            builder
-                .push(" AND direction = ")
-                .push_bind(direction.as_str());
-        }
-        if let Some(category) = category {
-            builder.push(" AND category = ").push_bind(category);
-        }
-        builder.push(" GROUP BY direction ORDER BY direction ASC");
-
-        builder
-            .build_query_as::<DirectionStatsRow>()
-            .fetch_all(&self.pool)
-            .await
-            .context("failed to aggregate record summary")
-    }
-
-    async fn aggregate_category_rows(
-        &self,
-        profile_id: &str,
-        range: &RecordsStatsRange,
-        direction: Option<RecordDirection>,
-        category: Option<&str>,
-    ) -> Result<Vec<CategoryStatsRow>> {
-        let mut builder = QueryBuilder::<Sqlite>::new(
-            "SELECT category, direction, COALESCE(SUM(amount), 0) AS total_amount, COUNT(*) AS record_count FROM records WHERE profile_id = ",
-        );
-        builder
-            .push_bind(profile_id)
-            .push(" AND deleted_at IS NULL AND transaction_at >= ")
-            .push_bind(range.start_at)
-            .push(" AND transaction_at <= ")
-            .push_bind(range.end_at);
-        if let Some(direction) = direction {
-            builder
-                .push(" AND direction = ")
-                .push_bind(direction.as_str());
-        }
-        if let Some(category) = category {
-            builder.push(" AND category = ").push_bind(category);
-        }
-        builder.push(" GROUP BY category, direction ORDER BY total_amount DESC, category ASC");
-
-        builder
-            .build_query_as::<CategoryStatsRow>()
-            .fetch_all(&self.pool)
-            .await
-            .context("failed to aggregate category stats")
     }
 
     // ── Subscription operations ─────────────────────────────────────────
@@ -923,29 +664,6 @@ impl BillRepository {
         .context("failed to list active due subscriptions")?;
 
         rows.into_iter().map(TryInto::try_into).collect()
-    }
-
-    pub async fn update_subscription_charged(
-        &self,
-        id: Uuid,
-        last_charged_at: NaiveDate,
-        next_due_at: NaiveDate,
-    ) -> Result<()> {
-        sqlx::query(
-            r#"
-            UPDATE subscriptions
-            SET last_charged_at = ?2, next_due_at = ?3,
-                sync_version = sync_version + 1, updated_at = datetime('now')
-            WHERE id = ?1
-            "#,
-        )
-        .bind(id.to_string())
-        .bind(last_charged_at.to_string())
-        .bind(next_due_at.to_string())
-        .execute(&self.pool)
-        .await
-        .context("failed to update subscription charged")?;
-        Ok(())
     }
 
     /// Atomically create a record and update the subscription's charged state.
@@ -1291,90 +1009,98 @@ impl BillRepository {
         row.try_into()
     }
 
-    /// Merge all snapshots from `source_id` into `target_id`, then soft-delete the source asset.
-    /// For same-day conflicts, keeps the snapshot with the later updated_at.
+    /// Merge snapshots atomically, retaining the target row identity on date conflicts.
     pub async fn merge_asset_into(
         &self,
         source_id: Uuid,
         target_id: Uuid,
         profile_id: &str,
     ) -> Result<()> {
+        if source_id == target_id {
+            return Err(anyhow!("cannot merge an asset into itself"));
+        }
         let source = source_id.to_string();
         let target = target_id.to_string();
-
-        // For each source snapshot, if target already has a snapshot on the same day,
-        // soft-delete whichever is older; otherwise reassign the source snapshot to target.
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin asset merge")?;
+        let mut currencies = Vec::new();
+        for id in [&source, &target] {
+            let asset = sqlx::query_as::<_, AssetRow>(
+                "SELECT * FROM assets WHERE id = ?1 AND profile_id = ?2 AND deleted_at IS NULL",
+            )
+            .bind(id)
+            .bind(profile_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .context("failed to load asset for merge")?
+            .ok_or_else(|| anyhow!("merge asset not found for profile"))?;
+            currencies.push(asset.currency);
+        }
+        if currencies[0] != currencies[1] {
+            return Err(anyhow!("cannot merge assets with different currencies"));
+        }
         let source_snaps = sqlx::query_as::<_, AssetSnapshotRow>(
-            "SELECT * FROM asset_snapshots WHERE asset_id = ?1 AND deleted_at IS NULL",
+            "SELECT * FROM asset_snapshots WHERE asset_id = ?1 AND profile_id = ?2 AND deleted_at IS NULL",
         )
         .bind(&source)
-        .fetch_all(&self.pool)
+        .bind(profile_id)
+        .fetch_all(&mut *tx)
         .await
         .context("failed to load source snapshots")?;
 
         for snap in source_snaps {
-            let conflict: Option<AssetSnapshotRow> = sqlx::query_as::<_, AssetSnapshotRow>(
-                "SELECT * FROM asset_snapshots WHERE asset_id = ?1 AND recorded_on = ?2 AND deleted_at IS NULL",
+            // The unique (asset_id, recorded_on) index also covers tombstones.
+            let conflict = sqlx::query_as::<_, AssetSnapshotRow>(
+                "SELECT * FROM asset_snapshots WHERE asset_id = ?1 AND recorded_on = ?2",
             )
             .bind(&target)
             .bind(&snap.recorded_on)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&mut *tx)
             .await
             .context("failed to check snapshot conflict")?;
 
             if let Some(existing) = conflict {
-                // Keep the more recently updated one; soft-delete the other.
-                if snap.updated_at >= existing.updated_at {
-                    // source wins: delete target's conflicting snapshot, then reassign source
+                if existing.deleted_at.is_some() || snap.updated_at >= existing.updated_at {
                     sqlx::query(
-                        "UPDATE asset_snapshots SET deleted_at = datetime('now'), sync_version = sync_version + 1 WHERE id = ?1",
+                        "UPDATE asset_snapshots SET amount = ?2, note = ?3, deleted_at = NULL, sync_version = sync_version + 1, updated_at = datetime('now') WHERE id = ?1",
                     )
                     .bind(&existing.id)
-                    .execute(&self.pool)
+                    .bind(snap.amount)
+                    .bind(&snap.note)
+                    .execute(&mut *tx)
                     .await
-                    .context("failed to delete conflicting target snapshot")?;
-
-                    sqlx::query(
-                        "UPDATE asset_snapshots SET asset_id = ?2, sync_version = sync_version + 1, updated_at = datetime('now') WHERE id = ?1",
-                    )
-                    .bind(&snap.id)
-                    .bind(&target)
-                    .execute(&self.pool)
-                    .await
-                    .context("failed to reassign source snapshot")?;
-                } else {
-                    // target wins: soft-delete the source snapshot
-                    sqlx::query(
-                        "UPDATE asset_snapshots SET deleted_at = datetime('now'), sync_version = sync_version + 1 WHERE id = ?1",
-                    )
-                    .bind(&snap.id)
-                    .execute(&self.pool)
-                    .await
-                    .context("failed to delete losing source snapshot")?;
+                    .context("failed to update winning target snapshot")?;
                 }
+                sqlx::query(
+                    "UPDATE asset_snapshots SET deleted_at = datetime('now'), sync_version = sync_version + 1, updated_at = datetime('now') WHERE id = ?1",
+                )
+                .bind(&snap.id)
+                .execute(&mut *tx)
+                .await
+                .context("failed to delete merged source snapshot")?;
             } else {
-                // No conflict: just reassign
                 sqlx::query(
                     "UPDATE asset_snapshots SET asset_id = ?2, sync_version = sync_version + 1, updated_at = datetime('now') WHERE id = ?1",
                 )
                 .bind(&snap.id)
                 .bind(&target)
-                .execute(&self.pool)
+                .execute(&mut *tx)
                 .await
                 .context("failed to reassign source snapshot")?;
             }
         }
-
-        // Soft-delete the source asset
         sqlx::query(
             "UPDATE assets SET deleted_at = datetime('now'), sync_version = sync_version + 1, updated_at = datetime('now') WHERE id = ?1 AND profile_id = ?2",
         )
         .bind(&source)
         .bind(profile_id)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .context("failed to soft-delete source asset")?;
-
+        tx.commit().await.context("failed to commit asset merge")?;
         Ok(())
     }
 
@@ -1583,17 +1309,6 @@ impl BillRepository {
 
     pub async fn mark_subscription_synced(&self, id: Uuid, synced_version: i64) -> Result<()> {
         self.mark_subscriptions_synced(&[(id, synced_version)])
-            .await?;
-        Ok(())
-    }
-
-    pub async fn mark_asset_synced(&self, id: Uuid, synced_version: i64) -> Result<()> {
-        self.mark_assets_synced(&[(id, synced_version)]).await?;
-        Ok(())
-    }
-
-    pub async fn mark_asset_snapshot_synced(&self, id: Uuid, synced_version: i64) -> Result<()> {
-        self.mark_asset_snapshots_synced(&[(id, synced_version)])
             .await?;
         Ok(())
     }
@@ -2296,34 +2011,6 @@ impl TryFrom<ConversationMessageRow> for ConversationMessage {
 }
 
 #[derive(Debug, FromRow)]
-struct DirectionStatsRow {
-    direction: String,
-    total_amount: f64,
-    record_count: i64,
-}
-
-impl TryFrom<DirectionStatsRow> for DirectionStatsItem {
-    type Error = anyhow::Error;
-
-    fn try_from(row: DirectionStatsRow) -> Result<Self> {
-        Ok(Self {
-            direction: RecordDirection::try_from(row.direction.as_str())
-                .map_err(anyhow::Error::msg)?,
-            total_amount: row.total_amount,
-            record_count: row.record_count,
-        })
-    }
-}
-
-#[derive(Debug, FromRow)]
-struct CategoryStatsRow {
-    category: String,
-    direction: String,
-    total_amount: f64,
-    record_count: i64,
-}
-
-#[derive(Debug, FromRow)]
 struct FxRateRow {
     base_currency: String,
     quote_currency: String,
@@ -2343,20 +2030,6 @@ impl TryFrom<FxRateRow> for FxRateCache {
             rate_date: NaiveDate::parse_from_str(&row.rate_date, "%Y-%m-%d")
                 .context("invalid fx rate_date")?,
             fetched_at: row.fetched_at,
-        })
-    }
-}
-
-impl TryFrom<CategoryStatsRow> for CategoryStatsItem {
-    type Error = anyhow::Error;
-
-    fn try_from(row: CategoryStatsRow) -> Result<Self> {
-        Ok(Self {
-            category: row.category,
-            direction: RecordDirection::try_from(row.direction.as_str())
-                .map_err(anyhow::Error::msg)?,
-            total_amount: row.total_amount,
-            record_count: row.record_count,
         })
     }
 }
@@ -2608,6 +2281,128 @@ mod tests {
                 next_due_at: NaiveDate::from_ymd_opt(2026, 8, 14).unwrap(),
             },
         }
+    }
+
+    async fn asset_merge_fixture() -> (BillRepository, Asset, Asset) {
+        let path = std::env::temp_dir().join(format!("billlens-merge-{}.sqlite", Uuid::new_v4()));
+        let repo = BillRepository::connect(path).await.unwrap();
+        let source = repo
+            .find_or_create_asset("p1", "device", "source", "存款", "CNY")
+            .await
+            .unwrap();
+        let target = repo
+            .find_or_create_asset("p1", "device", "target", "存款", "CNY")
+            .await
+            .unwrap();
+        repo.upsert_asset_snapshot(
+            source.id,
+            "p1",
+            "device",
+            "2026-10-22",
+            20.0,
+            Some("source"),
+        )
+        .await
+        .unwrap();
+        repo.upsert_asset_snapshot(
+            target.id,
+            "p1",
+            "device",
+            "2026-10-22",
+            10.0,
+            Some("target"),
+        )
+        .await
+        .unwrap();
+        sqlx::query("UPDATE asset_snapshots SET updated_at = '2026-10-22 00:00:00'")
+            .execute(repo.pool())
+            .await
+            .unwrap();
+        (repo, source, target)
+    }
+
+    #[tokio::test]
+    async fn asset_merge_keeps_target_identity_for_same_day() {
+        let (repo, source, target) = asset_merge_fixture().await;
+        repo.merge_asset_into(source.id, target.id, "p1")
+            .await
+            .unwrap();
+        let assets = repo.list_assets_with_snapshots("p1").await.unwrap();
+        assert_eq!(assets.len(), 1);
+        assert_eq!(assets[0].id, target.id);
+        assert_eq!(assets[0].snapshots.len(), 1);
+        assert_eq!(assets[0].snapshots[0].amount, 20.0);
+        assert_eq!(assets[0].snapshots[0].note.as_deref(), Some("source"));
+    }
+
+    #[tokio::test]
+    async fn asset_merge_reuses_soft_deleted_target_snapshot() {
+        let (repo, source, target) = asset_merge_fixture().await;
+        let target_snapshot = repo
+            .list_assets_with_snapshots("p1")
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|a| a.id == target.id)
+            .unwrap()
+            .snapshots[0]
+            .id;
+        repo.delete_asset_snapshot(target_snapshot, "p1")
+            .await
+            .unwrap();
+        repo.merge_asset_into(source.id, target.id, "p1")
+            .await
+            .unwrap();
+        let assets = repo.list_assets_with_snapshots("p1").await.unwrap();
+        assert_eq!(assets[0].snapshots[0].id, target_snapshot);
+        assert_eq!(assets[0].snapshots[0].amount, 20.0);
+    }
+
+    #[tokio::test]
+    async fn asset_merge_failure_rolls_back_snapshots_and_source() {
+        let (repo, source, target) = asset_merge_fixture().await;
+        sqlx::query("CREATE TRIGGER fail_merge BEFORE UPDATE OF deleted_at ON assets BEGIN SELECT RAISE(ABORT, 'injected merge failure'); END;")
+            .execute(repo.pool()).await.unwrap();
+        assert!(
+            repo.merge_asset_into(source.id, target.id, "p1")
+                .await
+                .is_err()
+        );
+        let assets = repo.list_assets_with_snapshots("p1").await.unwrap();
+        assert_eq!(assets.len(), 2);
+        assert_eq!(
+            assets.iter().find(|a| a.id == source.id).unwrap().snapshots[0].amount,
+            20.0
+        );
+        assert_eq!(
+            assets.iter().find(|a| a.id == target.id).unwrap().snapshots[0].amount,
+            10.0
+        );
+    }
+
+    #[tokio::test]
+    async fn asset_merge_rejects_wrong_profile_self_and_mixed_currencies() {
+        let (repo, source, target) = asset_merge_fixture().await;
+        assert!(
+            repo.merge_asset_into(source.id, target.id, "other")
+                .await
+                .is_err()
+        );
+        assert!(
+            repo.merge_asset_into(source.id, source.id, "p1")
+                .await
+                .is_err()
+        );
+        let usd = repo
+            .find_or_create_asset("p1", "device", "usd", "存款", "USD")
+            .await
+            .unwrap();
+        assert!(
+            repo.merge_asset_into(source.id, usd.id, "p1")
+                .await
+                .is_err()
+        );
+        assert_eq!(repo.list_assets("p1").await.unwrap().len(), 3);
     }
 
     #[tokio::test]
