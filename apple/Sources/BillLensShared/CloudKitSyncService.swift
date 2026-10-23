@@ -18,6 +18,8 @@ public final class CloudKitSyncService {
     private var isPushing = false
     private var pullTask: Task<Bool, Never>?
     private var didEnsureZoneAndSubscription = false
+    /// 最近一次拉取或初始化失败的具体原因，供界面展示。
+    public private(set) var lastFailureReason: String?
     private var didLogUnavailable = false
     private var bridge: RustBridge?
     private var profileID: String = "local-default"
@@ -71,29 +73,76 @@ public final class CloudKitSyncService {
 
     private func ensureZoneAndSubscription() async -> Bool {
         if didEnsureZoneAndSubscription { return true }
-        guard let privateDB = privateDatabase() else { return false }
+        guard let privateDB = privateDatabase(), let container else {
+            return recordFailure("sync.setup", "CloudKit 未启用：当前构建未配置或未签名 \(containerIdentifier)")
+        }
 
-        let zone = CKRecordZone(zoneName: zoneName)
         do {
-            _ = try await privateDB.save(zone)
+            let status = try await container.accountStatus()
+            guard status == .available else {
+                return recordFailure("sync.setup", "iCloud 账户不可用（\(Self.describe(status))），请在系统设置中登录 iCloud 并允许本 App 使用 iCloud")
+            }
         } catch {
-            AppLogger.log("sync.zone", "Failed to create zone: \(error)")
-            return false
+            return recordFailure("sync.setup", "无法获取 iCloud 账户状态：\(Self.describe(error))")
+        }
+
+        // 先查询再创建：只有明确“不存在”时才保存，其余错误都视为失败。
+        let zoneID = CKRecordZone.ID(zoneName: zoneName, ownerName: CKCurrentUserDefaultName)
+        do {
+            _ = try await privateDB.recordZone(for: zoneID)
+        } catch let error as CKError where error.code == .zoneNotFound {
+            do {
+                _ = try await privateDB.save(CKRecordZone(zoneID: zoneID))
+                AppLogger.log("sync.setup", "Created zone \(zoneName)")
+            } catch {
+                return recordFailure("sync.zone", "创建 CloudKit 数据区失败：\(Self.describe(error))")
+            }
+        } catch {
+            return recordFailure("sync.zone", "读取 CloudKit 数据区失败：\(Self.describe(error))")
         }
 
         let subID = CKSubscription.ID("billlens-db-changes")
-        let sub = CKDatabaseSubscription(subscriptionID: subID)
-        let notificationInfo = CKSubscription.NotificationInfo()
-        notificationInfo.shouldSendContentAvailable = true
-        sub.notificationInfo = notificationInfo
         do {
-            _ = try await privateDB.save(sub)
+            _ = try await privateDB.subscription(for: subID)
+        } catch let error as CKError where error.code == .unknownItem {
+            let sub = CKDatabaseSubscription(subscriptionID: subID)
+            let notificationInfo = CKSubscription.NotificationInfo()
+            notificationInfo.shouldSendContentAvailable = true
+            sub.notificationInfo = notificationInfo
+            do {
+                _ = try await privateDB.save(sub)
+                AppLogger.log("sync.setup", "Created database subscription")
+            } catch {
+                return recordFailure("sync.subscription", "创建 CloudKit 变更订阅失败：\(Self.describe(error))")
+            }
         } catch {
-            AppLogger.log("sync.subscription", "Failed to create subscription: \(error)")
-            return false
+            return recordFailure("sync.subscription", "读取 CloudKit 变更订阅失败：\(Self.describe(error))")
         }
         didEnsureZoneAndSubscription = true
         return true
+    }
+
+    /// 记录失败原因并返回 false，便于 `guard ... else { return recordFailure(...) }`。
+    private func recordFailure(_ stage: String, _ reason: String) -> Bool {
+        AppLogger.log(stage, reason)
+        lastFailureReason = reason
+        return false
+    }
+
+    nonisolated static func describe(_ error: Error) -> String {
+        guard let ckError = error as? CKError else { return error.localizedDescription }
+        return "CKError \(ckError.code.rawValue)：\(ckError.localizedDescription)"
+    }
+
+    nonisolated static func describe(_ status: CKAccountStatus) -> String {
+        switch status {
+        case .available: "可用"
+        case .noAccount: "未登录 iCloud"
+        case .restricted: "受限"
+        case .couldNotDetermine: "无法确定"
+        case .temporarilyUnavailable: "暂时不可用"
+        @unknown default: "未知状态 \(status.rawValue)"
+        }
     }
 
     // MARK: - Push (local → CloudKit)
@@ -206,12 +255,15 @@ public final class CloudKitSyncService {
         pullTask = task
         let result = await task.value
         pullTask = nil
+        if result { lastFailureReason = nil }
         return result
     }
 
     private func pullPages() async -> Bool {
-        guard let bridge else { return false }
-        guard let privateDB = privateDatabase() else { return false }
+        guard let bridge else { return recordFailure("sync.pull.error", "同步服务尚未配置") }
+        guard let privateDB = privateDatabase() else {
+            return recordFailure("sync.pull.error", "CloudKit 未启用")
+        }
         let zone = CKRecordZone.ID(zoneName: zoneName, ownerName: CKCurrentUserDefaultName)
 
         struct CursorResponse: Decodable { let token: String? }
@@ -227,14 +279,15 @@ public final class CloudKitSyncService {
                 ])
                 serverToken = try Self.decodeServerToken(cursor.token)
             } catch {
-                AppLogger.log("sync.pull.error", "Cannot load cursor: \(error)")
-                return false
+                return recordFailure("sync.pull.error", "Cannot load cursor: \(Self.describe(error))")
             }
 
             let outcome = await Self.fetchPage(database: privateDB, zone: zone, token: serverToken)
 
             if outcome.tokenExpired {
-                if didClearOnExpiry { return false }
+                if didClearOnExpiry {
+                    return recordFailure("sync.pull.error", "CloudKit 同步游标连续过期")
+                }
                 didClearOnExpiry = true
                 do {
                     let _: [String: String] = try await bridge.sendAsync([
@@ -244,12 +297,13 @@ public final class CloudKitSyncService {
                         "token": NSNull()
                     ])
                 } catch {
-                    AppLogger.log("sync.pull.error", "Cannot clear expired cursor: \(error)")
-                    return false
+                    return recordFailure("sync.pull.error", "Cannot clear expired cursor: \(Self.describe(error))")
                 }
                 continue
             }
-            if outcome.fetchFailed { return false }
+            if outcome.fetchFailed {
+                return recordFailure("sync.pull.error", outcome.failureReason ?? "CloudKit 拉取失败")
+            }
 
             do {
                 let entries = try Self.remoteEntries(from: outcome.records)
@@ -273,8 +327,7 @@ public final class CloudKitSyncService {
                     "token": data.base64EncodedString()
                 ])
             } catch {
-                AppLogger.log("sync.pull.error", "Page not committed: \(error)")
-                return false
+                return recordFailure("sync.pull.error", "Page not committed: \(Self.describe(error))")
             }
 
             if !outcome.moreComing { return true }
@@ -287,6 +340,7 @@ public final class CloudKitSyncService {
         var newToken: CKServerChangeToken?
         var tokenExpired = false
         var fetchFailed = false
+        var failureReason: String?
         var moreComing = false
     }
 
@@ -325,7 +379,10 @@ public final class CloudKitSyncService {
                     box.update { $0.records.append(record) }
                 case .failure(let error):
                     AppLogger.log("sync.pull.error", "Record fetch failed: \(error)")
-                    box.update { $0.fetchFailed = true }
+                    box.update {
+                        $0.fetchFailed = true
+                        $0.failureReason = "读取 CloudKit 记录失败：\(describe(error))"
+                    }
                 }
             }
             // App 只做软删除（tombstone 随记录同步），硬删除只可能来自 CloudKit 控制台或数据区重置。
@@ -347,7 +404,10 @@ public final class CloudKitSyncService {
                     box.update { $0.tokenExpired = true }
                 case .failure(let error):
                     AppLogger.log("sync.pull", "Zone fetch error: \(error)")
-                    box.update { $0.fetchFailed = true }
+                    box.update {
+                        $0.fetchFailed = true
+                        $0.failureReason = "拉取 CloudKit 数据区失败：\(describe(error))"
+                    }
                 }
             }
             // Process one page per operation; the cursor is committed before the next page.
@@ -358,7 +418,10 @@ public final class CloudKitSyncService {
                         box.update { $0.tokenExpired = true }
                     } else {
                         AppLogger.log("sync.pull.error", "Fetch operation failed: \(error)")
-                        box.update { $0.fetchFailed = true }
+                        box.update {
+                            $0.fetchFailed = true
+                            $0.failureReason = "CloudKit 拉取操作失败：\(describe(error))"
+                        }
                     }
                 }
                 continuation.resume(returning: box.value())

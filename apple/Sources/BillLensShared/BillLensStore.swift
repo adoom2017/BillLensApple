@@ -190,7 +190,8 @@ public final class BillLensStore: ObservableObject {
         if CloudKitSyncService.shared.isEnabledForCurrentProcess {
             let pulled = await CloudKitSyncService.shared.pullSync(bridge: bridge, profileID: profileID)
             guard pulled else {
-                throw RustBridgeError.engineError("CloudKit 拉取失败，已停止订阅补算，避免多设备重复记账。")
+                let reason = CloudKitSyncService.shared.lastFailureReason ?? "未知原因"
+                throw RustBridgeError.engineError("CloudKit 拉取失败（\(reason)），已停止订阅补算，避免多设备重复记账。")
             }
         }
 
