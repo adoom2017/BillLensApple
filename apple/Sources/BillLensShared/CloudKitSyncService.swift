@@ -131,7 +131,35 @@ public final class CloudKitSyncService {
 
     nonisolated static func describe(_ error: Error) -> String {
         guard let ckError = error as? CKError else { return error.localizedDescription }
-        return "CKError \(ckError.code.rawValue)：\(ckError.localizedDescription)"
+        // localizedDescription 对 CKError 只有 “error 15” 之类的编号；服务端原因在 userInfo 里。
+        let serverDetail = [
+            ckError.userInfo["ServerErrorDescription"] as? String,
+            ckError.userInfo[NSDebugDescriptionErrorKey] as? String,
+        ]
+        .compactMap { $0 }
+        .filter { !$0.isEmpty }
+        .joined(separator: "；")
+        let detail = serverDetail.isEmpty ? ckError.localizedDescription : serverDetail
+        return "CKError \(ckError.code.rawValue)（\(Self.name(of: ckError.code))）：\(detail)"
+    }
+
+    nonisolated static func name(of code: CKError.Code) -> String {
+        switch code {
+        case .serverRejectedRequest: "serverRejectedRequest"
+        case .notAuthenticated: "notAuthenticated"
+        case .permissionFailure: "permissionFailure"
+        case .badContainer: "badContainer"
+        case .missingEntitlement: "missingEntitlement"
+        case .zoneNotFound: "zoneNotFound"
+        case .unknownItem: "unknownItem"
+        case .networkUnavailable: "networkUnavailable"
+        case .networkFailure: "networkFailure"
+        case .serviceUnavailable: "serviceUnavailable"
+        case .requestRateLimited: "requestRateLimited"
+        case .quotaExceeded: "quotaExceeded"
+        case .changeTokenExpired: "changeTokenExpired"
+        default: "code \(code.rawValue)"
+        }
     }
 
     nonisolated static func describe(_ status: CKAccountStatus) -> String {
