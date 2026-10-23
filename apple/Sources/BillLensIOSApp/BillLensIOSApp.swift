@@ -19,16 +19,16 @@ final class SubscriptionBackgroundRefreshCoordinator {
     }
 
     func register() {
+        // launchHandler 在 `using` 指定的队列上执行。本类是 MainActor 隔离的，闭包也会被推断为
+        // MainActor 隔离；传 nil 会在后台队列调用，触发 Swift 6 运行时隔离检查崩溃。必须用主队列。
         let registered = BGTaskScheduler.shared.register(
             forTaskWithIdentifier: Self.taskIdentifier,
-            using: nil
+            using: .main
         ) { task in
             guard let refreshTask = task as? BGAppRefreshTask else {
                 preconditionFailure("订阅后台任务类型错误：\(type(of: task))")
             }
-            Task { @MainActor in
-                self.handle(refreshTask)
-            }
+            self.handle(refreshTask)
         }
         precondition(registered, "订阅后台任务注册失败：\(Self.taskIdentifier)")
     }
@@ -60,7 +60,8 @@ final class SubscriptionBackgroundRefreshCoordinator {
                 backgroundTask.setTaskCompleted(success: false)
             }
         }
-        backgroundTask.expirationHandler = {
+        // 系统在任意队列调用 expirationHandler；@Sendable 闭包不继承 MainActor 隔离，只取消 Task。
+        backgroundTask.expirationHandler = { @Sendable in
             worker.cancel()
         }
     }
