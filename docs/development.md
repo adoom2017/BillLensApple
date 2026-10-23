@@ -115,6 +115,18 @@ swift test --disable-sandbox \
 
 导出默认 `debugging`；可设置 `IOS_EXPORT_METHOD=app-store-connect` 或 `MAC_EXPORT_METHOD=developer-id`。Archive 使用 `-allowProvisioningUpdates`，要求 Xcode 已登录具备相应能力的开发者账号。
 
+### macOS 正式签名
+
+| 用途 | 命令 | 产物 |
+|---|---|---|
+| 本机或已注册的 Mac | `./build.sh archive-mac` | `dist/xcode/mac/BillLens.app`（开发签名） |
+| 分发给任何 Mac（推荐） | `MAC_EXPORT_METHOD=developer-id NOTARY_PROFILE=<名称> ./build.sh archive-mac` | 已公证、已钉票据的 App 与 `dist/xcode/BillLens-mac.zip` |
+| Mac App Store / TestFlight | `MAC_EXPORT_METHOD=app-store-connect ./build.sh archive-mac` | 需先开启 App Sandbox |
+
+- Developer ID 分发需要公证，先保存一次凭据：`xcrun notarytool store-credentials <名称> --apple-id <Apple ID> --team-id YH6JCRN97J`（密码使用 appleid.apple.com 生成的 App 专用密码）。
+- macOS 推送权限键是 `com.apple.developer.aps-environment`（iOS 是 `aps-environment`）；导出分发版本时 Xcode 自动改为 production。
+- 正式签名版本使用 CloudKit **Production** 环境，需先在 CloudKit Console 把 schema 部署到 Production。
+
 ## 检查与冒烟
 
 ```bash

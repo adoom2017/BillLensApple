@@ -68,9 +68,9 @@ adhoc_signing_args=(
 )
 
 write_export_options() {
-    local path="$1"
+    local plist_path="$1"
     local method="$2"
-    cat > "$path" <<PLIST
+    cat > "$plist_path" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -239,12 +239,19 @@ cmd_archive_ios() {
 }
 
 cmd_archive_mac() {
+    local method="${MAC_EXPORT_METHOD:-debugging}"
+    # Developer ID 分发必须公证，否则其他 Mac 上 Gatekeeper 会拦截；先检查凭据再开始耗时构建。
+    if [[ "$method" == developer-id && -z "${NOTARY_PROFILE:-}" ]]; then
+        echo "error: MAC_EXPORT_METHOD=developer-id 需要 NOTARY_PROFILE（notarytool 钥匙串配置名）。" >&2
+        echo "       先执行一次：xcrun notarytool store-credentials <名称> --apple-id <Apple ID> --team-id YH6JCRN97J" >&2
+        exit 1
+    fi
+
     export RUST_BUILD_MODE=release
     BUILD_MODE=release
     build_rust_macos
     xcode_generate
 
-    local method="${MAC_EXPORT_METHOD:-debugging}"
     local archive="$XCODE_DIST/BillLensMac.xcarchive"
     local export_dir="$XCODE_DIST/mac"
     local options="$XCODE_DIST/ExportOptions-mac.plist"
@@ -268,10 +275,39 @@ cmd_archive_mac() {
         -exportOptionsPlist "$options" \
         -allowProvisioningUpdates
 
+    if [[ "$method" == developer-id ]]; then
+        notarize_mac_app "$export_dir/BillLens.app"
+    fi
+
     echo ""
     echo "Done:"
     echo "  Archive: $archive"
     echo "  Export:  $export_dir"
+}
+
+# 公证 Developer ID 签名的 App，钉上公证票据，并生成可分发的 zip。
+notarize_mac_app() {
+    local app="$1"
+    local upload="$XCODE_DIST/BillLens-notarize.zip"
+    local release_zip="$XCODE_DIST/BillLens-mac.zip"
+
+    echo "==> Verify Developer ID signature"
+    codesign --verify --deep --strict --verbose=2 "$app"
+
+    echo "==> Notarize (profile=$NOTARY_PROFILE)"
+    rm -f "$upload"
+    ditto -c -k --keepParent "$app" "$upload"
+    xcrun notarytool submit "$upload" --keychain-profile "$NOTARY_PROFILE" --wait
+    rm -f "$upload"
+
+    echo "==> Staple and assess"
+    xcrun stapler staple "$app"
+    spctl --assess --type execute --verbose=2 "$app"
+
+    rm -f "$release_zip"
+    ditto -c -k --keepParent "$app" "$release_zip"
+    echo "    Notarized app: $app"
+    echo "    Release zip:   $release_zip"
 }
 
 # ---- dispatch ----
@@ -299,6 +335,7 @@ Environment:
   RUST_BUILD_MODE=release   Switch to release mode (default: debug)
   IOS_EXPORT_METHOD         archive-ios export method (default: debugging; app-store-connect / release-testing)
   MAC_EXPORT_METHOD         archive-mac export method (default: debugging; developer-id / app-store-connect)
+  NOTARY_PROFILE            notarytool keychain profile, required for MAC_EXPORT_METHOD=developer-id
 EOF
 }
 
