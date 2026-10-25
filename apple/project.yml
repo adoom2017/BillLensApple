@@ -3,6 +3,8 @@
 name: BillLensApple
 options:
   bundleIdPrefix: com.shendongchun
+  developmentLanguage: en
+  xcodeVersion: "27.0"
   createIntermediateGroups: true
   defaultConfig: Debug
   deploymentTarget:
@@ -42,6 +44,7 @@ packages:
 targets:
 
   BillLensIOSApp:
+    productName: Billumi
     type: application
     platform: iOS
     deploymentTarget: "17.0"
@@ -50,9 +53,11 @@ targets:
         excludes:
           - Info.plist
           - BillLensIOSApp.entitlements
+      - path: Resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.shendongchun.BillLensApple
+        PRODUCT_NAME: Billumi
         INFOPLIST_FILE: Sources/BillLensIOSApp/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_STYLE: Automatic
@@ -78,6 +83,7 @@ targets:
         product: BillLensAppleServices
 
   BillLensMacApp:
+    productName: Billumi
     type: application
     platform: macOS
     deploymentTarget: "14.0"
@@ -86,10 +92,11 @@ targets:
         excludes:
           - Info.plist
           - BillLensMacApp.entitlements
+      - path: Resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.shendongchun.BillLensAppleMac
-        PRODUCT_NAME: BillLens
+        PRODUCT_NAME: Billumi
         # Rust 静态库只编译宿主 arm64，Intel 切片无法链接。
         ARCHS: arm64
         INFOPLIST_FILE: Sources/BillLensMacApp/Info.plist

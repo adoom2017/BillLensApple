@@ -1,0 +1,4 @@
+"CFBundleDisplayName" = "账映";
+"CFBundleName" = "账映";
+"NSMicrophoneUsageDescription" = "账映需要麦克风权限来录制语音并识别账单信息。";
+"NSSpeechRecognitionUsageDescription" = "账映需要语音识别权限来将您的语音转换为文字录入账单。";

@@ -1,4 +1,6 @@
-# BillLens
+# Billumi · 账映
+
+一句话记账，一眼看清收支。
 
 Rust 核心 + SwiftUI 前端的个人账单应用，支持 macOS 14+ 和 iOS 17+。构建脚本面向 Apple Silicon Mac。
 

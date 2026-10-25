@@ -1,4 +1,4 @@
-# BillLens 架构
+# Billumi（账映）架构
 
 ## 模块边界
 

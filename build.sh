@@ -99,7 +99,7 @@ cmd_dev() {
         "${adhoc_signing_args[@]}" \
         build
 
-    local app="$DERIVED_DATA/Build/Products/Debug/BillLens.app"
+    local app="$DERIVED_DATA/Build/Products/Debug/Billumi.app"
     # ad-hoc 签名没有 Team ID：整体重签且不开 Hardened Runtime，否则 llama.framework 会被库校验拒绝。
     codesign --force --deep --sign - "$app"
 
@@ -112,10 +112,10 @@ cmd_dev() {
 
 cmd_mac() {
     cmd_xcode_mac
-    local dmg="$REPO_ROOT/dist/BillLens.dmg"
+    local dmg="$REPO_ROOT/dist/Billumi.dmg"
     echo "==> Creating DMG"
     rm -f "$dmg"
-    hdiutil create -volname BillLens -srcfolder "$XCODE_DIST/BillLens.app" -ov -format UDZO "$dmg"
+    hdiutil create -volname Billumi -srcfolder "$XCODE_DIST/Billumi.app" -ov -format UDZO "$dmg"
     echo "Done: $dmg"
 }
 
@@ -162,14 +162,14 @@ cmd_xcode_mac() {
         build
 
     mkdir -p "$XCODE_DIST"
-    rm -rf "$XCODE_DIST/BillLens.app"
-    cp -R "$DERIVED_DATA/Build/Products/Release/BillLens.app" "$XCODE_DIST/BillLens.app"
+    rm -rf "$XCODE_DIST/Billumi.app"
+    cp -R "$DERIVED_DATA/Build/Products/Release/Billumi.app" "$XCODE_DIST/Billumi.app"
     # ad-hoc 签名没有 Team ID，开启 Hardened Runtime 时库校验会拒绝加载 llama.framework，
     # 因此本机构建整体重签且不带 runtime；正式分发走 archive-mac 的团队签名。
-    codesign --force --deep --sign - "$XCODE_DIST/BillLens.app"
-    codesign --verify --deep --strict "$XCODE_DIST/BillLens.app"
+    codesign --force --deep --sign - "$XCODE_DIST/Billumi.app"
+    codesign --verify --deep --strict "$XCODE_DIST/Billumi.app"
     echo ""
-    echo "Done: $XCODE_DIST/BillLens.app"
+    echo "Done: $XCODE_DIST/Billumi.app"
 }
 
 cmd_xcode_ios_sim() {
@@ -187,7 +187,7 @@ cmd_xcode_ios_sim() {
         CODE_SIGNING_ALLOWED=NO \
         build
 
-    local app="$DERIVED_DATA/Build/Products/Debug-iphonesimulator/BillLensIOSApp.app"
+    local app="$DERIVED_DATA/Build/Products/Debug-iphonesimulator/Billumi.app"
     if [[ -z "${SIMULATOR:-}" ]]; then
         echo ""
         echo "Done: $app"
@@ -209,7 +209,7 @@ cmd_archive_ios() {
     xcode_generate
 
     local method="${IOS_EXPORT_METHOD:-debugging}"
-    local archive="$XCODE_DIST/BillLensIOS.xcarchive"
+    local archive="$XCODE_DIST/BillumiIOS.xcarchive"
     local export_dir="$XCODE_DIST/ios"
     local options="$XCODE_DIST/ExportOptions-ios.plist"
     mkdir -p "$XCODE_DIST"
@@ -252,7 +252,7 @@ cmd_archive_mac() {
     build_rust_macos
     xcode_generate
 
-    local archive="$XCODE_DIST/BillLensMac.xcarchive"
+    local archive="$XCODE_DIST/BillumiMac.xcarchive"
     local export_dir="$XCODE_DIST/mac"
     local options="$XCODE_DIST/ExportOptions-mac.plist"
     mkdir -p "$XCODE_DIST"
@@ -276,7 +276,7 @@ cmd_archive_mac() {
         -allowProvisioningUpdates
 
     if [[ "$method" == developer-id ]]; then
-        notarize_mac_app "$export_dir/BillLens.app"
+        notarize_mac_app "$export_dir/Billumi.app"
     fi
 
     echo ""
@@ -288,8 +288,8 @@ cmd_archive_mac() {
 # 公证 Developer ID 签名的 App，钉上公证票据，并生成可分发的 zip。
 notarize_mac_app() {
     local app="$1"
-    local upload="$XCODE_DIST/BillLens-notarize.zip"
-    local release_zip="$XCODE_DIST/BillLens-mac.zip"
+    local upload="$XCODE_DIST/Billumi-notarize.zip"
+    local release_zip="$XCODE_DIST/Billumi-mac.zip"
 
     echo "==> Verify Developer ID signature"
     codesign --verify --deep --strict --verbose=2 "$app"
@@ -318,7 +318,7 @@ Usage: ./build.sh <command>
 
 Commands:
   dev       xcodebuild Debug + run macOS app (ad-hoc signed, via LaunchServices)
-  mac       xcodebuild Release + create dist/BillLens.dmg (app: dist/xcode/BillLens.app)
+  mac       xcodebuild Release + create dist/Billumi.dmg (app: dist/xcode/Billumi.app)
   ios-sim   Compile Rust for iOS Simulator (aarch64-apple-ios-sim)
   ios       Compile Rust for iOS device (aarch64-apple-ios)
   all       Compile Rust for all platforms (macOS + ios + ios-sim)
@@ -326,7 +326,7 @@ Commands:
 
 Xcode workflow (project generated from apple/project.yml):
   xcode          Regenerate BillLensApple.xcodeproj and open it in Xcode
-  xcode-mac      xcodebuild macOS Release, ad-hoc signed -> dist/xcode/BillLens.app
+  xcode-mac      xcodebuild macOS Release, ad-hoc signed -> dist/xcode/Billumi.app
   xcode-ios-sim  xcodebuild iOS Simulator Debug; SIMULATOR=<name or UDID> installs and launches
   archive-ios    Archive + export iOS with automatic signing -> dist/xcode/ios/
   archive-mac    Archive + export macOS with automatic signing -> dist/xcode/mac/

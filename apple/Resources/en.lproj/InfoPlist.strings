@@ -1,0 +1,4 @@
+"CFBundleDisplayName" = "Billumi";
+"CFBundleName" = "Billumi";
+"NSMicrophoneUsageDescription" = "Billumi uses the microphone to record voice entries for your bills.";
+"NSSpeechRecognitionUsageDescription" = "Billumi uses speech recognition to turn your voice into bill entries.";

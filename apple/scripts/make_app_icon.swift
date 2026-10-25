@@ -1,5 +1,5 @@
 #!/usr/bin/env swift
-// 生成 BillLens 应用图标。用法：cd apple && swift scripts/make_app_icon.swift
+// 生成 Billumi 应用图标。用法：cd apple && swift scripts/make_app_icon.swift
 // macOS：按 Apple 图标模板，1024 画布内居中 824 连续圆角方块 + 投影，四周透明。
 // iOS：满铺不透明方块，圆角由系统裁切。
 import AppKit
@@ -171,7 +171,7 @@ renderIconSet(macIconSet, master: macMaster, opaque: false)
 renderIconSet(iosIconSet, master: renderIOSMaster(), opaque: true)
 
 // SwiftPM 组装的 .app 与 Dock 图标使用 AppIcon.icns
-let iconset = NSTemporaryDirectory() + "BillLens.iconset"
+let iconset = NSTemporaryDirectory() + "Billumi.iconset"
 try? FileManager.default.removeItem(atPath: iconset)
 try! FileManager.default.createDirectory(atPath: iconset, withIntermediateDirectories: true)
 for base in [16, 32, 128, 256, 512] {

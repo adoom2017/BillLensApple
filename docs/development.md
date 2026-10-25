@@ -12,6 +12,20 @@
 
 SwiftPM 会获取固定 URL 和 checksum 的 llama.cpp b9632 XCFramework。首次构建需要网络；GGUF 权重不参与构建。
 
+## 应用名称与本地化
+
+产品名称为 **Billumi**，中文宣传语为“一句话记账，一眼看清收支”。iOS 与 macOS 共用 `apple/Resources/` 下的 `InfoPlist.strings`：
+
+| 应用语言 | 显示名称 |
+|---|---|
+| 简体中文（`zh-Hans`） | 账映 |
+| 繁体中文（`zh-Hant`） | 帳映 |
+| 英语及其他未提供翻译的语言 | Billumi |
+
+名称与麦克风、语音识别权限提示由系统本地化机制选择；用户为 App 单独设置语言时，以应用语言为准。此处仅本地化名称与权限提示，不代表其他界面已完成多语言翻译。修改资源或配置后重新生成 Xcode 工程，再构建并检查实际 App 产物。
+
+`PRODUCT_NAME` 决定安装包及可执行文件名，两端均为 `Billumi`。Bundle ID、CloudKit 容器、数据库及模型目录、设备标识、后台会话标识继续使用原有值，保证升级后的数据与同步身份连续。工程、scheme、Swift 模块及 Rust FFI 保留 `BillLens` 内部名称。App Store 页面上的本地化名称与副标题需另外在 App Store Connect 配置。
+
 ## 启动与模型配置
 
 ```bash
@@ -49,14 +63,14 @@ App 经 LaunchServices 启动，不能假定会继承终端环境变量。日常
 
 | 命令 | 行为与输出 |
 |---|---|
-| `./build.sh dev` | macOS Debug，`apple/build/DerivedData/Build/Products/Debug/BillLens.app`，构建并启动 |
-| `./build.sh mac` | 复用 `xcode-mac` 生成 Release App，并打包 `dist/BillLens.dmg` |
+| `./build.sh dev` | macOS Debug，`apple/build/DerivedData/Build/Products/Debug/Billumi.app`，构建并启动 |
+| `./build.sh mac` | 复用 `xcode-mac` 生成 Release App，并打包 `dist/Billumi.dmg` |
 | `./build.sh ios-sim` | Rust `aarch64-apple-ios-sim` 静态库 |
 | `./build.sh ios` | Rust `aarch64-apple-ios` 静态库 |
 | `./build.sh all` | macOS、iOS 模拟器、iOS 真机三份 Rust 库 |
 | `./build.sh test` | Rust workspace 测试 |
 | `./build.sh xcode` | 重新生成工程并打开 Xcode |
-| `./build.sh xcode-mac` | macOS Release、ad-hoc 签名，`dist/xcode/BillLens.app` |
+| `./build.sh xcode-mac` | macOS Release、ad-hoc 签名，`dist/xcode/Billumi.app` |
 | `./build.sh xcode-ios-sim` | iOS 模拟器 Debug；设置 `SIMULATOR=<名称或 UDID>` 时安装启动 |
 | `./build.sh archive-ios` | iOS Release archive 与自动签名导出，`dist/xcode/ios/` |
 | `./build.sh archive-mac` | macOS Release archive 与自动签名导出，`dist/xcode/mac/` |
@@ -119,8 +133,8 @@ swift test --disable-sandbox \
 
 | 用途 | 命令 | 产物 |
 |---|---|---|
-| 本机或已注册的 Mac | `./build.sh archive-mac` | `dist/xcode/mac/BillLens.app`（开发签名） |
-| 分发给任何 Mac（推荐） | `MAC_EXPORT_METHOD=developer-id NOTARY_PROFILE=<名称> ./build.sh archive-mac` | 已公证、已钉票据的 App 与 `dist/xcode/BillLens-mac.zip` |
+| 本机或已注册的 Mac | `./build.sh archive-mac` | `dist/xcode/mac/Billumi.app`（开发签名） |
+| 分发给任何 Mac（推荐） | `MAC_EXPORT_METHOD=developer-id NOTARY_PROFILE=<名称> ./build.sh archive-mac` | 已公证、已钉票据的 App 与 `dist/xcode/Billumi-mac.zip` |
 | Mac App Store / TestFlight | `MAC_EXPORT_METHOD=app-store-connect ./build.sh archive-mac` | 需先开启 App Sandbox |
 
 - Developer ID 分发需要公证，先保存一次凭据：`xcrun notarytool store-credentials <名称> --apple-id <Apple ID> --team-id YH6JCRN97J`（密码使用 appleid.apple.com 生成的 App 专用密码）。

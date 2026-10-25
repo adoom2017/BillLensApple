@@ -55,3 +55,16 @@
 iOS SwiftPM 编译使用 `BILLLENS_INCLUDE_IOS_SPM=1 RUST_TARGET=ios-sim`、`--triple arm64-apple-ios17.0-simulator` 和 Xcode iPhoneSimulator SDK。它验证源代码与链接，不替代 Xcode 的资源、签名和安装验证。
 
 尚需对应运行环境验证：真实 0.8B/2B 模型下载、取消、原子更新、蜂窝单次授权与后台恢复；语音权限/录音；正式签名 CloudKit 多设备同步与冲突；实际 UI 和 VoiceOver。现有本地模型任务仍有这些未勾选验收项，保持进行中，不因本轮审查归档。
+
+## 2026-10-25 应用名称调整
+
+统一产品名为 Billumi，简体名称“账映”、繁体名称“帳映”；两端共用名称与权限提示翻译。更新安装包、DMG、归档和公证 ZIP 文件名，保留原有应用、数据和同步标识。XcodeGen 的 `productName` 与 `PRODUCT_NAME` 同时设置为 Billumi，保证生成的产品引用与实际构建文件名一致。
+
+| 检查 | 本轮结果 |
+|---|---|
+| `./build.sh all` | macOS、iOS 模拟器、iOS 真机 Rust Debug 库构建通过 |
+| `swift build` / `swift test` | 构建通过；23 项测试通过 |
+| 名称、权限提示、工程资源成员与稳定 Bundle ID | 检查通过；Foundation 资源读取确认简体、繁体、英语及法语/日语/德语名称选择符合预期 |
+| `plutil -lint`、`zsh -n build.sh`、`git diff --check`、XcodeGen 重复生成 | 通过 |
+| `./build.sh xcode-mac` / `./build.sh xcode-ios-sim` | 当前执行环境中 Xcode 启动后异常退出，退出码 134；工程列表读取同样失败，未完成本轮 App 打包验证 |
+| 安装后名称与权限弹窗冒烟 | 模拟器服务连接失败，尚未验证；需在可正常运行 Xcode/模拟器的环境复核 |

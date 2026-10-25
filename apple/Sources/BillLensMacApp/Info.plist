@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Billumi</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIconFile</key>
@@ -27,10 +29,10 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>BillLens 需要麦克风权限以支持语音输入账单。</string>
+	<string>Billumi uses the microphone to record voice entries for your bills.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>BillLens 需要语音识别权限以将语音转换为文字。</string>
+	<string>Billumi uses speech recognition to turn your voice into bill entries.</string>
 </dict>
 </plist>

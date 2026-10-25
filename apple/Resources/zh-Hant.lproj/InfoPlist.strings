@@ -1,0 +1,4 @@
+"CFBundleDisplayName" = "帳映";
+"CFBundleName" = "帳映";
+"NSMicrophoneUsageDescription" = "帳映需要麥克風權限，以錄製語音並辨識帳單資訊。";
+"NSSpeechRecognitionUsageDescription" = "帳映需要語音辨識權限，將您的語音轉換為文字以記錄帳單。";
