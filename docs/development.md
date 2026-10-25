@@ -134,7 +134,7 @@ swift test --disable-sandbox \
 | 用途 | 命令 | 产物 |
 |---|---|---|
 | 本机或已注册的 Mac | `./build.sh archive-mac` | `dist/xcode/mac/Billumi.app`（开发签名） |
-| 分发给任何 Mac（推荐） | `MAC_EXPORT_METHOD=developer-id NOTARY_PROFILE=<名称> ./build.sh archive-mac` | 已公证、已钉票据的 App 与 `dist/xcode/Billumi-mac.zip` |
+| 分发给任何 Mac（推荐） | `MAC_EXPORT_METHOD=developer-id NOTARY_PROFILE=<名称> ./build.sh archive-mac` | 已公证、已钉票据的 App、`dist/xcode/Billumi-mac.zip` 与 `dist/xcode/Billumi.dmg`（DMG 单独签名、公证并钉票据） |
 | Mac App Store / TestFlight | `MAC_EXPORT_METHOD=app-store-connect ./build.sh archive-mac` | 需先开启 App Sandbox |
 
 - Developer ID 分发需要公证，先保存一次凭据：`xcrun notarytool store-credentials <名称> --apple-id <Apple ID> --team-id YH6JCRN97J`（密码使用 appleid.apple.com 生成的 App 专用密码）。

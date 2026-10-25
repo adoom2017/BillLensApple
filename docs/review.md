@@ -58,7 +58,7 @@ iOS SwiftPM 编译使用 `BILLLENS_INCLUDE_IOS_SPM=1 RUST_TARGET=ios-sim`、`--t
 
 ## 2026-10-25 应用名称调整
 
-统一产品名为 Billumi，简体名称“账映”、繁体名称“帳映”；两端共用名称与权限提示翻译。更新安装包、DMG、归档和公证 ZIP 文件名，保留原有应用、数据和同步标识。XcodeGen 的 `productName` 与 `PRODUCT_NAME` 同时设置为 Billumi，保证生成的产品引用与实际构建文件名一致。
+统一产品名为 Billumi，简体名称“账映”、繁体名称“帳映”；两端共用名称与权限提示翻译。更新安装包、DMG、归档和公证 ZIP 文件名，保留原有应用、数据和同步标识。XcodeGen 的 `productName` 与 `PRODUCT_NAME` 同时设置为 Billumi，保证生成的产品引用与实际构建文件名一致。Developer ID 归档在公证 App 后另行生成 DMG，以同一 Developer ID 签名、单独公证并钉票据；`build.sh mac` 与之共用带 `/Applications` 快捷方式的 DMG 布局。
 
 | 检查 | 本轮结果 |
 |---|---|
@@ -66,5 +66,7 @@ iOS SwiftPM 编译使用 `BILLLENS_INCLUDE_IOS_SPM=1 RUST_TARGET=ios-sim`、`--t
 | `swift build` / `swift test` | 构建通过；23 项测试通过 |
 | 名称、权限提示、工程资源成员与稳定 Bundle ID | 检查通过；Foundation 资源读取确认简体、繁体、英语及法语/日语/德语名称选择符合预期 |
 | `plutil -lint`、`zsh -n build.sh`、`git diff --check`、XcodeGen 重复生成 | 通过 |
-| `./build.sh xcode-mac` / `./build.sh xcode-ios-sim` | 当前执行环境中 Xcode 启动后异常退出，退出码 134；工程列表读取同样失败，未完成本轮 App 打包验证 |
-| 安装后名称与权限弹窗冒烟 | 模拟器服务连接失败，尚未验证；需在可正常运行 Xcode/模拟器的环境复核 |
+| `./build.sh xcode-mac` / `./build.sh xcode-ios-sim` / `./build.sh mac` | 通过；产物为 `Billumi.app`，DMG 卷名 `Billumi`，含 `Billumi.app` 与 `/Applications` 快捷方式 |
+| `MAC_EXPORT_METHOD=developer-id NOTARY_PROFILE=<名称> ./build.sh archive-mac` | 通过；App 与 `dist/xcode/Billumi.dmg` 均公证通过并钉票据，`spctl` 结果为 `Notarized Developer ID` |
+| macOS 安装后名称 | 从公证 DMG 安装到 `/Applications` 并启动正常；LaunchServices 本地化名称为简体“账映”、繁体“帳映”、英语 Billumi |
+| iOS 安装后名称与两端权限弹窗冒烟 | 尚未验证；需在模拟器或真机复核 |

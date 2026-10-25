@@ -114,8 +114,7 @@ cmd_mac() {
     cmd_xcode_mac
     local dmg="$REPO_ROOT/dist/Billumi.dmg"
     echo "==> Creating DMG"
-    rm -f "$dmg"
-    hdiutil create -volname Billumi -srcfolder "$XCODE_DIST/Billumi.app" -ov -format UDZO "$dmg"
+    create_dmg "$XCODE_DIST/Billumi.app" "$dmg"
     echo "Done: $dmg"
 }
 
@@ -306,8 +305,42 @@ notarize_mac_app() {
 
     rm -f "$release_zip"
     ditto -c -k --keepParent "$app" "$release_zip"
+
+    # DMG 是独立的分发容器：用与 App 相同的 Developer ID 签名后单独公证并钉票据，
+    # 否则下载后的 DMG 在打开时会被 Gatekeeper 拦截。
+    local dmg="$XCODE_DIST/Billumi.dmg"
+    local identity
+    identity="$(codesign -dvv "$app" 2>&1 | sed -n 's/^Authority=\(Developer ID Application: .*\)$/\1/p' | head -1)"
+    if [[ -z "$identity" ]]; then
+        echo "error: 无法从 $app 读取 Developer ID Application 签名身份。" >&2
+        exit 1
+    fi
+
+    echo "==> Create DMG"
+    create_dmg "$app" "$dmg"
+    codesign --force --sign "$identity" --timestamp "$dmg"
+
+    echo "==> Notarize DMG (profile=$NOTARY_PROFILE)"
+    xcrun notarytool submit "$dmg" --keychain-profile "$NOTARY_PROFILE" --wait
+    xcrun stapler staple "$dmg"
+    spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
+
     echo "    Notarized app: $app"
     echo "    Release zip:   $release_zip"
+    echo "    Release dmg:   $dmg"
+}
+
+# 生成带 /Applications 快捷方式的压缩 DMG，便于拖拽安装。
+create_dmg() {
+    local app="$1"
+    local dmg="$2"
+    local staging
+    staging="$(mktemp -d)"
+    ditto "$app" "$staging/$(basename "$app")"
+    ln -s /Applications "$staging/Applications"
+    rm -f "$dmg"
+    hdiutil create -volname Billumi -srcfolder "$staging" -ov -format UDZO "$dmg"
+    rm -rf "$staging"
 }
 
 # ---- dispatch ----
