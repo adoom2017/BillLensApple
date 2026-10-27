@@ -2,6 +2,7 @@ mod fx;
 mod llm;
 pub mod local_llm;
 mod logger;
+pub mod manual;
 mod rule_parser;
 pub mod statement;
 pub mod stt;
@@ -9,14 +10,14 @@ pub mod stt;
 use anyhow::{Result, anyhow};
 pub use billlens_apple_db::{
     ALL_RECORD_CATEGORIES, ASSET_CATEGORIES, AppSetting, Asset, AssetAck, AssetConfirmationCreate,
-    AssetSnapshot, AssetUpdateInput, AssetWithSnapshots, BillRepository, CategoryStatsItem,
-    ConversationMessage, ConversationRole, DirectionStatsItem, EXPENSE_CATEGORIES, EntityKind,
-    INCOME_CATEGORIES, ParsedAssetInfo, ParsedDraftConfirmationAction, ParsedDraftKind,
-    ParsedRecordPayload, ParserSource, Record, RecordCreate, RecordDirection, RecordDraft,
-    RecordDraftStatus, RecordsStatsRange, RecordsStatsResponse, RecordsSummary, Subscription,
-    SubscriptionChargeAdvance, SubscriptionCreate, SubscriptionCycle, SubscriptionUpdate,
-    advance_next_due, is_valid_asset_category, is_valid_record_category,
-    is_valid_record_category_for_direction,
+    AssetCurrencyMismatch, AssetSnapshot, AssetUpdateInput, AssetWithSnapshots, BillRepository,
+    CategoryStatsItem, ConversationMessage, ConversationRole, DirectionStatsItem,
+    EXPENSE_CATEGORIES, EntityKind, INCOME_CATEGORIES, ParsedAssetInfo,
+    ParsedDraftConfirmationAction, ParsedDraftKind, ParsedRecordPayload, ParserSource, Record,
+    RecordCreate, RecordDirection, RecordDraft, RecordDraftStatus, RecordsStatsRange,
+    RecordsStatsResponse, RecordsSummary, Subscription, SubscriptionChargeAdvance,
+    SubscriptionCreate, SubscriptionCycle, SubscriptionUpdate, advance_next_due,
+    is_valid_asset_category, is_valid_record_category, is_valid_record_category_for_direction,
 };
 use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, TimeZone, Utc};
 use chrono_tz::Tz;
@@ -1120,69 +1121,10 @@ impl AppService {
         let mut created_summaries: Vec<(String, f64, String)> = Vec::new();
 
         for sub in due_subs {
-            let mut current_due = sub.next_due_at;
-
-            // Generate records for each missed cycle up to today
-            while current_due <= today {
-                let transaction_at = time_zone
-                    .with_ymd_and_hms(
-                        current_due.year(),
-                        current_due.month(),
-                        current_due.day(),
-                        9,
-                        0,
-                        0,
-                    )
-                    .earliest()
-                    .ok_or_else(|| {
-                        CoreError::Internal(format!(
-                            "failed to construct subscription transaction time for {current_due}"
-                        ))
-                    })?
-                    .with_timezone(&Utc);
-
-                let record_id = subscription_charge_record_id(sub.id, current_due);
-                let record_create = RecordCreate {
-                    direction: sub.direction.clone(),
-                    amount: sub.amount,
-                    currency: sub.currency.clone(),
-                    category: sub.category.clone(),
-                    merchant: sub.merchant.clone(),
-                    transaction_at,
-                    note: sub.note.clone(),
-                };
-
-                let next =
-                    advance_next_due(&sub.cycle, sub.anchor_day, sub.anchor_month, current_due);
-
-                self.repo
-                    .create_record_and_advance_subscription(
-                        record_id,
-                        profile_id,
-                        &self.device_id,
-                        record_create,
-                        SubscriptionChargeAdvance {
-                            subscription_id: sub.id,
-                            last_charged_at: current_due,
-                            next_due_at: next,
-                        },
-                    )
-                    .await
-                    .map_err(|error| {
-                        CoreError::Internal(format!(
-                            "failed to charge subscription {} for {}: {error}",
-                            sub.id, current_due
-                        ))
-                    })?;
-
-                created_summaries.push((
-                    sub.merchant.clone().unwrap_or_else(|| sub.category.clone()),
-                    sub.amount,
-                    sub.currency.clone(),
-                ));
-
-                current_due = next;
-            }
+            created_summaries.extend(
+                self.charge_subscription_through(profile_id, &sub, today, time_zone)
+                    .await?,
+            );
         }
 
         if !created_summaries.is_empty() {
@@ -1215,6 +1157,80 @@ impl AppService {
         }
 
         Ok(created_summaries)
+    }
+
+    /// 为单个订阅生成 `next_due_at..=today` 的每期账单。记录 ID 由订阅 ID 与到期日决定，重复执行幂等。
+    async fn charge_subscription_through(
+        &self,
+        profile_id: &str,
+        sub: &Subscription,
+        today: NaiveDate,
+        time_zone: Tz,
+    ) -> Result<Vec<(String, f64, String)>, CoreError> {
+        let mut summaries = Vec::new();
+        let mut current_due = sub.next_due_at;
+
+        // Generate records for each missed cycle up to today
+        while current_due <= today {
+            let transaction_at = time_zone
+                .with_ymd_and_hms(
+                    current_due.year(),
+                    current_due.month(),
+                    current_due.day(),
+                    9,
+                    0,
+                    0,
+                )
+                .earliest()
+                .ok_or_else(|| {
+                    CoreError::Internal(format!(
+                        "failed to construct subscription transaction time for {current_due}"
+                    ))
+                })?
+                .with_timezone(&Utc);
+
+            let record_id = subscription_charge_record_id(sub.id, current_due);
+            let record_create = RecordCreate {
+                direction: sub.direction.clone(),
+                amount: sub.amount,
+                currency: sub.currency.clone(),
+                category: sub.category.clone(),
+                merchant: sub.merchant.clone(),
+                transaction_at,
+                note: sub.note.clone(),
+            };
+
+            let next = advance_next_due(&sub.cycle, sub.anchor_day, sub.anchor_month, current_due);
+
+            self.repo
+                .create_record_and_advance_subscription(
+                    record_id,
+                    profile_id,
+                    &self.device_id,
+                    record_create,
+                    SubscriptionChargeAdvance {
+                        subscription_id: sub.id,
+                        last_charged_at: current_due,
+                        next_due_at: next,
+                    },
+                )
+                .await
+                .map_err(|error| {
+                    CoreError::Internal(format!(
+                        "failed to charge subscription {} for {}: {error}",
+                        sub.id, current_due
+                    ))
+                })?;
+
+            summaries.push((
+                sub.merchant.clone().unwrap_or_else(|| sub.category.clone()),
+                sub.amount,
+                sub.currency.clone(),
+            ));
+
+            current_due = next;
+        }
+        Ok(summaries)
     }
 
     // ── Sync API ─────────────────────────────────────────────────────────────
@@ -1833,30 +1849,87 @@ fn record_create_from_draft(payload: &RecordDraft) -> Result<RecordCreate, CoreE
         .direction
         .clone()
         .ok_or_else(|| CoreError::bad_request("draft direction is required"))?;
-    let amount = payload
-        .amount
+    let transaction_at = payload
+        .transaction_at
+        .ok_or_else(|| CoreError::bad_request("draft transaction_at is required"))?;
+    validated_record_create(
+        direction,
+        payload.amount,
+        payload.currency.as_deref(),
+        payload.category.as_deref(),
+        payload.merchant.clone(),
+        transaction_at,
+        payload.note.clone(),
+    )
+}
+
+/// 草稿确认与手动新增 / 编辑共用的账单字段校验。
+fn validated_record_create(
+    direction: RecordDirection,
+    amount: Option<f64>,
+    currency: Option<&str>,
+    category: Option<&str>,
+    merchant: Option<String>,
+    transaction_at: DateTime<Utc>,
+    note: Option<String>,
+) -> Result<RecordCreate, CoreError> {
+    let amount = amount
         .filter(|amount| *amount > 0.0)
         .ok_or_else(|| CoreError::bad_request("draft amount must be greater than 0"))?;
-    let category = payload
-        .category
-        .as_deref()
+    let category = category
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| CoreError::bad_request("draft category is required"))?
         .to_string();
     let category = validate_category_for_direction(&category, Some(&direction))?;
-    let transaction_at = payload
-        .transaction_at
-        .ok_or_else(|| CoreError::bad_request("draft transaction_at is required"))?;
 
     Ok(RecordCreate {
         direction,
         amount,
-        currency: validate_required_currency(payload.currency.as_deref())?,
+        currency: validate_required_currency(currency)?,
         category,
-        merchant: trim_optional(payload.merchant.clone()),
+        merchant: trim_optional(merchant),
         transaction_at,
-        note: trim_optional(payload.note.clone()),
+        note: trim_optional(note),
+    })
+}
+
+/// 草稿确认与手动新增 / 更新估值共用的资产字段校验。
+fn validated_asset_create(info: &ParsedAssetInfo) -> Result<AssetConfirmationCreate, CoreError> {
+    let name = info.name.trim();
+    if name.is_empty() {
+        return Err(CoreError::bad_request("asset name is required"));
+    }
+    let amount = (info.amount > 0.0)
+        .then_some(info.amount)
+        .ok_or_else(|| CoreError::bad_request("asset amount must be greater than 0"))?;
+    let category = info
+        .category
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| CoreError::bad_request("asset category is required"))?;
+    if !is_valid_asset_category(category) {
+        return Err(CoreError::bad_request(format!(
+            "asset category must be one of: {}",
+            ASSET_CATEGORIES.join("、")
+        )));
+    }
+    let recorded_on = info
+        .recorded_on
+        .as_deref()
+        .ok_or_else(|| CoreError::bad_request("asset recorded_on is required"))
+        .and_then(|value| {
+            NaiveDate::parse_from_str(value, "%Y-%m-%d")
+                .map_err(|_| CoreError::bad_request("asset recorded_on must be YYYY-MM-DD"))
+        })?;
+    Ok(AssetConfirmationCreate {
+        name: name.to_string(),
+        category: category.to_string(),
+        amount,
+        currency: validate_required_currency(info.currency.as_deref())?,
+        recorded_on,
+        note: trim_optional(info.note.clone()),
     })
 }
 
@@ -1873,42 +1946,8 @@ fn confirmation_action_from_draft(
                 .asset_info
                 .as_ref()
                 .ok_or_else(|| CoreError::bad_request("asset draft payload is missing"))?;
-            let name = info.name.trim();
-            if name.is_empty() {
-                return Err(CoreError::bad_request("asset name is required"));
-            }
-            let amount = (info.amount > 0.0)
-                .then_some(info.amount)
-                .ok_or_else(|| CoreError::bad_request("asset amount must be greater than 0"))?;
-            let category = info
-                .category
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| CoreError::bad_request("asset category is required"))?;
-            if !is_valid_asset_category(category) {
-                return Err(CoreError::bad_request(format!(
-                    "asset category must be one of: {}",
-                    ASSET_CATEGORIES.join("、")
-                )));
-            }
-            let recorded_on = info
-                .recorded_on
-                .as_deref()
-                .ok_or_else(|| CoreError::bad_request("asset recorded_on is required"))
-                .and_then(|value| {
-                    NaiveDate::parse_from_str(value, "%Y-%m-%d")
-                        .map_err(|_| CoreError::bad_request("asset recorded_on must be YYYY-MM-DD"))
-                })?;
             Ok(ParsedDraftConfirmationAction::Asset(
-                AssetConfirmationCreate {
-                    name: name.to_string(),
-                    category: category.to_string(),
-                    amount,
-                    currency: validate_required_currency(info.currency.as_deref())?,
-                    recorded_on,
-                    note: trim_optional(info.note.clone()),
-                },
+                validated_asset_create(info)?,
             ))
         }
         ParsedDraftKind::Subscription => {
@@ -1917,31 +1956,39 @@ fn confirmation_action_from_draft(
                 .subscription_cycle
                 .clone()
                 .ok_or_else(|| CoreError::bad_request("subscription cycle is required"))?;
-            let local_date = record.transaction_at.with_timezone(time_zone);
-            let anchor_day = local_date.day() as i32;
-            let anchor_month = match cycle {
-                SubscriptionCycle::Yearly => Some(local_date.month() as i32),
-                SubscriptionCycle::Monthly => None,
-            };
-            let next_due_at =
-                advance_next_due(&cycle, anchor_day, anchor_month, local_date.date_naive());
-            let subscription = SubscriptionCreate {
-                direction: record.direction.clone(),
-                amount: record.amount,
-                currency: record.currency.clone(),
-                category: record.category.clone(),
-                merchant: record.merchant.clone(),
-                note: record.note.clone(),
-                cycle,
-                anchor_day,
-                anchor_month,
-                next_due_at,
-            };
-            Ok(ParsedDraftConfirmationAction::Subscription {
-                record,
-                subscription,
-            })
+            Ok(subscription_confirmation_action(record, cycle, time_zone))
         }
+    }
+}
+
+/// 订阅首笔账单 + 订阅：扣费日锚点取首笔账单的本地日期，下次扣费日为其后一期。
+fn subscription_confirmation_action(
+    record: RecordCreate,
+    cycle: SubscriptionCycle,
+    time_zone: &Tz,
+) -> ParsedDraftConfirmationAction {
+    let local_date = record.transaction_at.with_timezone(time_zone);
+    let anchor_day = local_date.day() as i32;
+    let anchor_month = match cycle {
+        SubscriptionCycle::Yearly => Some(local_date.month() as i32),
+        SubscriptionCycle::Monthly => None,
+    };
+    let next_due_at = advance_next_due(&cycle, anchor_day, anchor_month, local_date.date_naive());
+    let subscription = SubscriptionCreate {
+        direction: record.direction.clone(),
+        amount: record.amount,
+        currency: record.currency.clone(),
+        category: record.category.clone(),
+        merchant: record.merchant.clone(),
+        note: record.note.clone(),
+        cycle,
+        anchor_day,
+        anchor_month,
+        next_due_at,
+    };
+    ParsedDraftConfirmationAction::Subscription {
+        record,
+        subscription,
     }
 }
 
@@ -2042,6 +2089,13 @@ fn format_asset_acks_summary(acks: &[AssetAck]) -> String {
 }
 
 fn map_internal(error: anyhow::Error) -> CoreError {
+    // 业务约束冲突是用户可修正的输入问题，不是内部错误。
+    if let Some(mismatch) = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<AssetCurrencyMismatch>())
+    {
+        return CoreError::bad_request(mismatch.to_string());
+    }
     let message = format!("{error:#}");
     logger::error("core", &message);
     CoreError::Internal(message)

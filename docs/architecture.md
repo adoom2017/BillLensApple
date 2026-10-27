@@ -40,6 +40,15 @@ SwiftUI → BillLensStore → RustBridge → JSON C FFI → AppService → SQLit
 
 `cloud_after_local_failure` 遵循云端保存语义，并携带本地错误。账单、订阅自动保存先持久化一批草稿，再复用确认事务；失败保留完整草稿供查看，不留下该批次的部分账单或订阅。云端资产独立处理，不与同次输入的账单构成跨类型总事务。
 
+## 手动新增与编辑
+
+账单、订阅、资产页面的「＋」与账单行编辑、资产详情「更新估值」走 FFI `create_record` / `update_record` / `create_subscription` / `create_asset`。
+
+- 校验与写入复用草稿确认：`validated_record_create` / `validated_asset_create`，以及 `apply_confirmation_action_in_transaction`（`confirm_parsed_drafts` 与 `create_manual_entry` 共用）。不经过 `parsed_drafts`，不写对话消息，无迁移。
+- 手动订阅以首次扣费日为第一个 `next_due_at`；不晚于今天时只对该订阅执行到期补扣（UUID v5，重复执行幂等），将来日期只建订阅。
+- 更新估值沿用资产当前名称、类别、币种，按名称合并，同日快照覆盖。按名称写入资产（草稿确认、手动新增、云端直接保存）时，同名在用资产币种不同则拒绝（`AssetCurrencyMismatch`），不改币种也不追加异币种快照。
+- `update_record` 同时写入 `device_id` 并递增 `sync_version`。
+
 ## 信用卡电子账单导入
 
 目前支持招商银行信用卡电子账单。入口：记账页「＋」菜单；macOS 在导入面板的拖放区拖入 Mail 邮件（file promise 只能由 AppKit `NSFilePromiseReceiver` 接收，SwiftUI `onDrop` 收不到），或把 Finder 中的 `.eml` / `.html` / `.pdf` 拖进窗口；iOS Mail「打印 → 分享 → 账映」。

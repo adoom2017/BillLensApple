@@ -12,6 +12,7 @@ struct LedgerShell: View {
     @State private var selectedLedgerDate: String?
     @State private var selectedCategoryFilter: String?
     @State private var recordToDelete: RecordItem?
+    @State private var recordForm: RecordFormMode?
 
     private var usesCompactLayout: Bool {
         #if os(iOS)
@@ -32,6 +33,10 @@ struct LedgerShell: View {
                 ProgressView("正在加载账单…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+        }
+        .sheet(item: $recordForm) { mode in
+            RecordFormSheet(mode: mode)
+                .environmentObject(store)
         }
         .alert(
             "删除这笔账单？",
@@ -122,6 +127,14 @@ struct LedgerShell: View {
         }
         ToolbarItem(placement: .primaryAction) {
             categoryFilterMenu(ledger)
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                recordForm = .create
+            } label: {
+                Label("添加账单", systemImage: "plus")
+            }
+            .help("手动添加账单")
         }
     }
 
@@ -262,6 +275,12 @@ struct LedgerShell: View {
             Section {
                 ForEach(filteredRecords(day.records)) { record in
                     RecordRowView(record: record)
+                        .contentShape(Rectangle())
+                        #if os(macOS)
+                        .onTapGesture(count: 2) { recordForm = .edit(record) }
+                        #else
+                        .onTapGesture { recordForm = .edit(record) }
+                        #endif
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) {
                                 recordToDelete = record
@@ -270,6 +289,11 @@ struct LedgerShell: View {
                             }
                         }
                         .contextMenu {
+                            Button {
+                                recordForm = .edit(record)
+                            } label: {
+                                Label("编辑", systemImage: "pencil")
+                            }
                             Button(role: .destructive) {
                                 recordToDelete = record
                             } label: {

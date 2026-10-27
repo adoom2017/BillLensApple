@@ -34,6 +34,10 @@ schemes:
         BillLensIOSApp: all
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - BillLensIOSUITests
     archive:
       config: Release
 
@@ -114,6 +118,24 @@ targets:
           CODE_SIGN_ENTITLEMENTS: ""
         Release:
           CODE_SIGN_ENTITLEMENTS: Sources/BillLensShareExtension/BillLensShareExtension.entitlements
+
+  # 模拟器端到端冒烟：手动新增 / 编辑账单、订阅、资产。
+  BillLensIOSUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Tests/BillLensIOSUITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shendongchun.BillLensApple.UITests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: 6.0
+        TEST_TARGET_NAME: BillLensIOSApp
+        EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
+    dependencies:
+      - target: BillLensIOSApp
 
   BillLensMacApp:
     productName: Billumi

@@ -7,6 +7,7 @@ struct SubscriptionShell: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var subscriptionToDelete: SubscriptionItem?
     @State private var editingSubscription: SubscriptionItem?
+    @State private var isCreatingSubscription = false
 
     private var usesCompactLayout: Bool {
         sizeClass == .compact
@@ -31,6 +32,20 @@ struct SubscriptionShell: View {
         }
         .onAppear {
             store.loadSubscriptionsReportingErrors()
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    isCreatingSubscription = true
+                } label: {
+                    Label("添加订阅", systemImage: "plus")
+                }
+                .help("手动添加订阅")
+            }
+        }
+        .sheet(isPresented: $isCreatingSubscription) {
+            SubscriptionCreateSheet()
+                .environmentObject(store)
         }
         .sheet(item: $editingSubscription) { subscription in
             SubscriptionEditSheet(subscription: subscription) { update in

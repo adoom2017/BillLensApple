@@ -10,6 +10,7 @@ struct AssetShell: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var assetToDelete: AssetItem?
     @State private var editingAsset: AssetItem?
+    @State private var assetForm: AssetFormMode?
 
     private var usesCompactLayout: Bool {
         sizeClass == .compact
@@ -38,6 +39,20 @@ struct AssetShell: View {
             } catch {
                 store.errorText = error.localizedDescription
             }
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    assetForm = .create
+                } label: {
+                    Label("添加资产", systemImage: "plus")
+                }
+                .help("手动添加资产")
+            }
+        }
+        .sheet(item: $assetForm) { mode in
+            AssetFormSheet(mode: mode)
+                .environmentObject(store)
         }
         .sheet(item: $editingAsset) { asset in
             AssetEditSheet(asset: asset) { update in
@@ -163,6 +178,7 @@ struct AssetShell: View {
             AssetDetailView(
                 asset: asset,
                 onEdit: { editingAsset = asset },
+                onUpdateValuation: { assetForm = .valuation(asset) },
                 onDelete: { assetToDelete = asset },
                 onDeleteSnapshot: { store.deleteAssetSnapshot($0) }
             )
@@ -212,6 +228,7 @@ struct AssetRow: View {
 struct AssetDetailView: View {
     let asset: AssetItem
     let onEdit: () -> Void
+    let onUpdateValuation: () -> Void
     let onDelete: () -> Void
     let onDeleteSnapshot: (String) -> Void
     @State private var snapshotToDelete: AssetSnapshotItem?
@@ -250,6 +267,7 @@ struct AssetDetailView: View {
             }
 
             Section {
+                Button("更新估值", action: onUpdateValuation)
                 Button("编辑资产", action: onEdit)
                 Button("删除资产", role: .destructive, action: onDelete)
             }

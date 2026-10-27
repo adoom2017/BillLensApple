@@ -11,6 +11,7 @@
 		4F550F1AC0AF9D679E8CD519 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = CE4376050C1C7A0F8B76BFFB /* InfoPlist.strings */; };
 		5C8073FCFA8A3DE41DC3DDCF /* BillLensShared in Frameworks */ = {isa = PBXBuildFile; productRef = D6E37C17C3A4A3256FE6A83B /* BillLensShared */; };
 		5FAAABA1B6FAE90C0D5522E7 /* BillLensAppleServices in Frameworks */ = {isa = PBXBuildFile; productRef = 9119C4F24AF97D7C891E6B46 /* BillLensAppleServices */; };
+		7A20FF938371503EC004316F /* ManualEntryUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38BDB59EDDE9F141BB32A77B /* ManualEntryUITests.swift */; };
 		7B27368C4DCE954FE1E89172 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = CE4376050C1C7A0F8B76BFFB /* InfoPlist.strings */; };
 		9543F2D4E6CEBB7FB972B18B /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = CE4376050C1C7A0F8B76BFFB /* InfoPlist.strings */; };
 		9AB53B383A2E327739EA8608 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC84C675FE7156E4F7078C70 /* ShareViewController.swift */; };
@@ -24,6 +25,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		4B4EEC09961C2611E3C2CCA0 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D22B7D7B2A9CC6296C228239 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AD46254B4CA6B364EE9523EA;
+			remoteInfo = BillLensIOSApp;
+		};
 		C6A7641C2B55A5FC12EC0FC2 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = D22B7D7B2A9CC6296C228239 /* Project object */;
@@ -52,9 +60,11 @@
 		09D78360C38804C798214C01 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
 		32D5C856C5E35D2B56037B20 /* BillLensShareExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = BillLensShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		37931752EE1A5D888E1874BD /* Billumi.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Billumi.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		38BDB59EDDE9F141BB32A77B /* ManualEntryUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualEntryUITests.swift; sourceTree = "<group>"; };
 		3E86FB5C63FA63F9EE21FBEC /* apple */ = {isa = PBXFileReference; lastKnownFileType = folder; name = apple; path = .; sourceTree = SOURCE_ROOT; };
 		57FCC8A4034B8F0DA7218807 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		7F2359A859EC52115EE8C7D0 /* Billumi.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Billumi.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		924433ED9E700E23AFCEC476 /* BillLensIOSUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = BillLensIOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		968DF4D9C5C6410DB7CF0700 /* BillLensIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillLensIOSApp.swift; sourceTree = "<group>"; };
 		A2369E23FE7BDF40B0A1AFE3 /* BillLensMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillLensMacApp.swift; sourceTree = "<group>"; };
 		A6C8413B89227E37F6C098B1 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
@@ -144,6 +154,7 @@
 				1987D185DA6BFB124B749FF7 /* Packages */,
 				5875F15FF489823D4A29377D /* Resources */,
 				59D1CDCFECEAC504D4569AA6 /* Sources */,
+				F93CC1DA3D6F88DBC8237575 /* Tests */,
 				DD06FBF04EB96486913171E1 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -151,6 +162,7 @@
 		DD06FBF04EB96486913171E1 /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				924433ED9E700E23AFCEC476 /* BillLensIOSUITests.xctest */,
 				32D5C856C5E35D2B56037B20 /* BillLensShareExtension.appex */,
 				37931752EE1A5D888E1874BD /* Billumi.app */,
 				7F2359A859EC52115EE8C7D0 /* Billumi.app */,
@@ -158,9 +170,43 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		F02E59BEAFFAC4439FDA19F6 /* BillLensIOSUITests */ = {
+			isa = PBXGroup;
+			children = (
+				38BDB59EDDE9F141BB32A77B /* ManualEntryUITests.swift */,
+			);
+			path = BillLensIOSUITests;
+			sourceTree = "<group>";
+		};
+		F93CC1DA3D6F88DBC8237575 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				F02E59BEAFFAC4439FDA19F6 /* BillLensIOSUITests */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		328D1F211ECBEFE757AD38B2 /* BillLensIOSUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C6868DC5FBB51A4897350F4E /* Build configuration list for PBXNativeTarget "BillLensIOSUITests" */;
+			buildPhases = (
+				825CBC2FDD61E46CB8F5CC8F /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				843652D1052EFB73EA4219A7 /* PBXTargetDependency */,
+			);
+			name = BillLensIOSUITests;
+			packageProductDependencies = (
+			);
+			productName = BillLensIOSUITests;
+			productReference = 924433ED9E700E23AFCEC476 /* BillLensIOSUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		706DE52D7776039BEEC21A30 /* BillLensMacApp */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 8A2EF9CD1A17B0F7E9E241AC /* Build configuration list for PBXNativeTarget "BillLensMacApp" */;
@@ -232,6 +278,11 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 2700;
 				TargetAttributes = {
+					328D1F211ECBEFE757AD38B2 = {
+						DevelopmentTeam = YH6JCRN97J;
+						ProvisioningStyle = Automatic;
+						TestTargetID = AD46254B4CA6B364EE9523EA;
+					};
 					706DE52D7776039BEEC21A30 = {
 						DevelopmentTeam = YH6JCRN97J;
 						ProvisioningStyle = Automatic;
@@ -267,6 +318,7 @@
 			targets = (
 				AD46254B4CA6B364EE9523EA /* BillLensIOSApp */,
 				839061421453352F493C3C0F /* BillLensShareExtension */,
+				328D1F211ECBEFE757AD38B2 /* BillLensIOSUITests */,
 				706DE52D7776039BEEC21A30 /* BillLensMacApp */,
 			);
 		};
@@ -311,6 +363,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		825CBC2FDD61E46CB8F5CC8F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7A20FF938371503EC004316F /* ManualEntryUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E33E37474A904056A7AF0438 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -334,6 +394,11 @@
 			isa = PBXTargetDependency;
 			target = 839061421453352F493C3C0F /* BillLensShareExtension */;
 			targetProxy = C6A7641C2B55A5FC12EC0FC2 /* PBXContainerItemProxy */;
+		};
+		843652D1052EFB73EA4219A7 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AD46254B4CA6B364EE9523EA /* BillLensIOSApp */;
+			targetProxy = 4B4EEC09961C2611E3C2CCA0 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -397,6 +462,27 @@
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		2CDB2070EBA03630FA79486A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.shendongchun.BillLensApple.UITests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = BillLensIOSApp;
 			};
 			name = Release;
 		};
@@ -536,6 +622,27 @@
 			};
 			name = Release;
 		};
+		8A777665A0C780392986B7AB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.shendongchun.BillLensApple.UITests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = BillLensIOSApp;
+			};
+			name = Debug;
+		};
 		F677391DC7B0EC47514BD04C /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -656,6 +763,15 @@
 			buildConfigurations = (
 				549B61E0B73747CEC25E2645 /* Debug */,
 				05FEC086EF2A8CB2005025BE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C6868DC5FBB51A4897350F4E /* Build configuration list for PBXNativeTarget "BillLensIOSUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8A777665A0C780392986B7AB /* Debug */,
+				2CDB2070EBA03630FA79486A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

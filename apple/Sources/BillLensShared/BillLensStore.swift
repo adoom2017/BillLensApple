@@ -536,6 +536,90 @@ public final class BillLensStore: ObservableObject {
         }
     }
 
+    // MARK: - Manual entry
+    // 表单内 await 并就地显示错误，不走 perform 的全局错误条。
+    // 只有 Rust 写入失败才抛出（表单保持打开以便修改重试）；写入成功后的刷新失败
+    // 报告到全局错误条并照常关闭表单，避免用户以为未保存而重复新增。
+
+    public func createRecord(_ input: ManualRecordInput) async throws {
+        let record: RecordItem = try await bridge.sendAsync([
+            "action": "create_record",
+            "profile_id": profileID,
+            "input": try ManualEntryEncoding.dictionary(input)
+        ])
+        AppLogger.log("record.create", "record_id=\(record.id)")
+        await finishManualWrite("账单已添加") {
+            try await self.refreshAfterRecordChange()
+        }
+    }
+
+    public func updateRecord(_ recordId: String, input: ManualRecordInput) async throws {
+        let _: RecordItem = try await bridge.sendAsync([
+            "action": "update_record",
+            "profile_id": profileID,
+            "record_id": recordId,
+            "input": try ManualEntryEncoding.dictionary(input)
+        ])
+        AppLogger.log("record.update", "record_id=\(recordId)")
+        await finishManualWrite("账单已更新") {
+            try await self.refreshAfterRecordChange()
+        }
+    }
+
+    public func createSubscription(_ input: ManualSubscriptionInput) async throws {
+        let result: ManualSubscriptionResult = try await bridge.sendAsync([
+            "action": "create_subscription",
+            "profile_id": profileID,
+            "input": try ManualEntryEncoding.dictionary(input)
+        ])
+        AppLogger.log("subscription.create", "id=\(result.subscription.id) charged=\(result.charged)")
+        selectedSubscriptionId = result.subscription.id
+        let status = result.charged > 0 ? "订阅已添加，已记录 \(result.charged) 笔扣费" : "订阅已添加"
+        await finishManualWrite(status) {
+            try await self.loadSubscriptions()
+            try await self.refreshSubscriptionRemindersIfEnabled()
+            if result.charged > 0 {
+                try await self.refreshAfterRecordChange()
+            }
+        }
+    }
+
+    /// 新增资产与更新估值共用：同名资产合并，同日估值覆盖。
+    public func saveAssetValuation(_ input: ParsedAssetInfo) async throws {
+        let result: ManualAssetResult = try await bridge.sendAsync([
+            "action": "create_asset",
+            "profile_id": profileID,
+            "input": try ManualEntryEncoding.dictionary(input)
+        ])
+        AppLogger.log("asset.manual", "id=\(result.assetId)")
+        await finishManualWrite("资产已保存") {
+            try await self.loadAssets()
+            self.selectedAssetId = result.assetId
+        }
+    }
+
+    /// 写入已提交：先排队同步，再刷新界面；刷新失败只报告，不让表单误判为保存失败。
+    private func finishManualWrite(_ status: String, refresh: () async throws -> Void) async {
+        CloudKitSyncService.shared.schedulePush()
+        do {
+            try await refresh()
+            statusText = status
+        } catch {
+            AppLogger.log("manual.refresh.error", error.localizedDescription)
+            errorText = "已保存，但刷新界面失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// 刷新账单页与首页最新记录。只更新 `latestRecord`，不重载草稿，避免冲掉记账页未保存的草稿编辑。
+    private func refreshAfterRecordChange() async throws {
+        try await refreshLedger()
+        let snapshot: HomeSnapshot = try await bridge.sendAsync([
+            "action": "home",
+            "profile_id": profileID
+        ])
+        latestRecord = snapshot.latestRecord
+    }
+
     // MARK: - Subscription Management
 
     public func loadSubscriptions() async throws {

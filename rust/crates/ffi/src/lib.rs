@@ -2,13 +2,14 @@ use anyhow::{Context, Result, anyhow};
 use billlens_apple_core::local_llm::{
     self, LocalLlmBackend, LocalLlmCancelFn, LocalLlmFreeStringFn, LocalLlmRunFn, LocalLlmUnloadFn,
 };
+use billlens_apple_core::manual::{ManualRecordInput, ManualSubscriptionInput};
 use billlens_apple_core::statement::StatementSourceInput;
 use billlens_apple_core::stt::{
     self, SttBackend, SttCancelFn, SttFreeStringFn, SttStartFn, SttStopFn,
 };
 use billlens_apple_core::{
     AppService, AssetUpdateInput, DraftInput, EngineBootstrap, EntityKind, EntrySource, LlmConfig,
-    LocalRoutingRequest, SubscriptionUpdate, SyncMarkSyncedEntry, SyncRemoteEntry,
+    LocalRoutingRequest, ParsedAssetInfo, SubscriptionUpdate, SyncMarkSyncedEntry, SyncRemoteEntry,
 };
 use billlens_apple_db::BillRepository;
 use chrono::{DateTime, FixedOffset};
@@ -89,6 +90,23 @@ enum EngineRequest {
     LocalLlmUnload,
     ConfirmAllDrafts {
         profile_id: String,
+    },
+    CreateRecord {
+        profile_id: String,
+        input: ManualRecordInput,
+    },
+    UpdateRecord {
+        profile_id: String,
+        record_id: Uuid,
+        input: ManualRecordInput,
+    },
+    CreateSubscription {
+        profile_id: String,
+        input: ManualSubscriptionInput,
+    },
+    CreateAsset {
+        profile_id: String,
+        input: ParsedAssetInfo,
     },
     ParseStatement {
         profile_id: String,
@@ -382,6 +400,26 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
         }
         EngineRequest::ConfirmAllDrafts { profile_id } => with_app(|app| {
             let result = runtime().block_on(app.confirm_all_drafts(&profile_id))?;
+            Ok(encode_ok(result))
+        }),
+        EngineRequest::CreateRecord { profile_id, input } => with_app(|app| {
+            let record = runtime().block_on(app.create_manual_record(&profile_id, input))?;
+            Ok(encode_ok(record))
+        }),
+        EngineRequest::UpdateRecord {
+            profile_id,
+            record_id,
+            input,
+        } => with_app(|app| {
+            let record = runtime().block_on(app.update_record(&profile_id, record_id, input))?;
+            Ok(encode_ok(record))
+        }),
+        EngineRequest::CreateSubscription { profile_id, input } => with_app(|app| {
+            let result = runtime().block_on(app.create_manual_subscription(&profile_id, input))?;
+            Ok(encode_ok(result))
+        }),
+        EngineRequest::CreateAsset { profile_id, input } => with_app(|app| {
+            let result = runtime().block_on(app.create_manual_asset(&profile_id, input))?;
             Ok(encode_ok(result))
         }),
         EngineRequest::ParseStatement { profile_id, source } => with_app(|app| {
@@ -696,5 +734,26 @@ mod tests {
                 "{invalid}"
             );
         }
+    }
+
+    #[test]
+    fn manual_entry_requests_decode_strictly() {
+        let record = r#"{"direction":"expense","amount":12.5,"currency":"CNY","category":"餐饮","merchant":null,"transaction_at":"2026-10-27T12:00:00+08:00","note":null}"#;
+        for request in [
+            format!(r#"{{"action":"create_record","profile_id":"p","input":{record}}}"#),
+            format!(
+                r#"{{"action":"update_record","profile_id":"p","record_id":"{}","input":{record}}}"#,
+                Uuid::new_v4()
+            ),
+            r#"{"action":"create_subscription","profile_id":"p","input":{"direction":"expense","amount":25,"currency":"CNY","category":"订阅","merchant":null,"note":null,"cycle":"monthly","first_charge_on":"2026-10-27"}}"#.to_string(),
+            r#"{"action":"create_asset","profile_id":"p","input":{"name":"现金","category":"现金","amount":10,"currency":"CNY","recorded_on":"2026-10-27","note":null}}"#.to_string(),
+        ] {
+            assert!(serde_json::from_str::<EngineRequest>(&request).is_ok(), "{request}");
+        }
+        let unknown = format!(
+            r#"{{"action":"create_record","profile_id":"p","input":{}}}"#,
+            record.replace(r#""note":null"#, r#""note":null,"extra":1"#)
+        );
+        assert!(serde_json::from_str::<EngineRequest>(&unknown).is_err());
     }
 }

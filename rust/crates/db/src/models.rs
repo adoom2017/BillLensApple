@@ -421,6 +421,26 @@ pub struct ParsedAssetInfo {
     pub note: Option<String>,
 }
 
+/// 同名在用资产已使用另一种币种。拒绝写入，否则旧快照或新金额会被按错误币种解读。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssetCurrencyMismatch {
+    pub name: String,
+    pub existing: String,
+    pub requested: String,
+}
+
+impl std::fmt::Display for AssetCurrencyMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "资产「{}」已使用 {} 记账，不能记入 {} 金额。请改用 {}，或换一个资产名称。",
+            self.name, self.existing, self.requested, self.existing
+        )
+    }
+}
+
+impl std::error::Error for AssetCurrencyMismatch {}
+
 #[derive(Debug, Clone)]
 pub struct AssetConfirmationCreate {
     pub name: String,

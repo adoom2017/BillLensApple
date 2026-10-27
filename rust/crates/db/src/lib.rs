@@ -73,6 +73,7 @@ impl BillRepository {
         &self,
         id: Uuid,
         profile_id: &str,
+        device_id: &str,
         input: RecordUpdate,
     ) -> Result<Record> {
         let row = sqlx::query_as::<_, RecordRow>(
@@ -85,6 +86,7 @@ impl BillRepository {
                 merchant = ?7,
                 transaction_at = ?8,
                 note = ?9,
+                device_id = ?10,
                 sync_version = sync_version + 1,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?1 AND profile_id = ?2 AND deleted_at IS NULL
@@ -100,6 +102,7 @@ impl BillRepository {
         .bind(input.merchant)
         .bind(input.transaction_at)
         .bind(input.note)
+        .bind(device_id)
         .fetch_optional(&self.pool)
         .await
         .context("failed to update record")?
@@ -293,65 +296,12 @@ impl BillRepository {
                 ));
             }
 
-            let confirmation = match action {
-                ParsedDraftConfirmationAction::Record(create) => {
-                    let record =
-                        insert_record_in_transaction(&mut tx, profile_id, device_id, create)
-                            .await?;
-                    let confirmation = ParsedDraftConfirmation {
-                        record_id: Some(record.id),
-                        ..Default::default()
-                    };
-                    last_record = Some(record);
-                    confirmation
-                }
-                ParsedDraftConfirmationAction::Asset(create) => {
-                    confirm_asset_in_transaction(&mut tx, profile_id, device_id, create).await?
-                }
-                ParsedDraftConfirmationAction::Subscription {
-                    record,
-                    subscription,
-                } => {
-                    let subscription_id = Uuid::new_v4();
-                    sqlx::query(
-                        r#"
-                        INSERT INTO subscriptions (
-                            id, profile_id, direction, amount, currency, category,
-                            merchant, note, cycle, anchor_day, anchor_month,
-                            next_due_at, device_id
-                        )
-                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
-                        "#,
-                    )
-                    .bind(subscription_id.to_string())
-                    .bind(profile_id)
-                    .bind(subscription.direction.as_str())
-                    .bind(subscription.amount)
-                    .bind(subscription.currency)
-                    .bind(subscription.category)
-                    .bind(subscription.merchant)
-                    .bind(subscription.note)
-                    .bind(subscription.cycle.as_str())
-                    .bind(subscription.anchor_day)
-                    .bind(subscription.anchor_month)
-                    .bind(subscription.next_due_at.to_string())
-                    .bind(device_id)
-                    .execute(&mut *tx)
-                    .await
-                    .context("failed to insert subscription while confirming parsed draft")?;
-
-                    let created_record =
-                        insert_record_in_transaction(&mut tx, profile_id, device_id, record)
-                            .await?;
-                    let confirmation = ParsedDraftConfirmation {
-                        record_id: Some(created_record.id),
-                        subscription_id: Some(subscription_id),
-                        ..Default::default()
-                    };
-                    last_record = Some(created_record);
-                    confirmation
-                }
-            };
+            let (confirmation, created_record) =
+                apply_confirmation_action_in_transaction(&mut tx, profile_id, device_id, action)
+                    .await?;
+            if created_record.is_some() {
+                last_record = created_record;
+            }
 
             let confirmation_json = serde_json::to_string(&confirmation)
                 .context("failed to encode parsed draft confirmation")?;
@@ -397,6 +347,27 @@ impl BillRepository {
             .await
             .context("failed to commit parsed draft confirmation transaction")?;
         Ok(last_record)
+    }
+
+    /// 手动新增：与草稿确认相同的写入语义，但不经过 parsed_drafts，也不写对话消息。
+    pub async fn create_manual_entry(
+        &self,
+        profile_id: &str,
+        device_id: &str,
+        action: ParsedDraftConfirmationAction,
+    ) -> Result<(ParsedDraftConfirmation, Option<Record>)> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin manual entry transaction")?;
+        let result =
+            apply_confirmation_action_in_transaction(&mut tx, profile_id, device_id, action)
+                .await?;
+        tx.commit()
+            .await
+            .context("failed to commit manual entry transaction")?;
+        Ok(result)
     }
 
     pub async fn latest_record(&self, profile_id: &str) -> Result<Option<Record>> {
@@ -903,6 +874,12 @@ impl BillRepository {
         currency: &str,
     ) -> Result<Asset> {
         let id = Uuid::new_v4();
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin asset upsert transaction")?;
+        ensure_asset_currency(&mut tx, profile_id, name, currency).await?;
         // Atomic upsert: on conflict with the partial unique index
         // (profile_id, name) WHERE deleted_at IS NULL, touch updated_at so
         // RETURNING always gives us the live row regardless of which branch ran.
@@ -921,9 +898,12 @@ impl BillRepository {
         .bind(category)
         .bind(currency)
         .bind(device_id)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await
         .context("failed to upsert asset")?;
+        tx.commit()
+            .await
+            .context("failed to commit asset upsert transaction")?;
         row.try_into()
     }
 
@@ -1870,6 +1850,74 @@ fn parsed_draft_kind(payload: &ParsedRecordPayload) -> Result<ParsedDraftKind> {
     }
 }
 
+/// 按确认动作写入业务表：草稿确认与手动新增共用，保证两条路径的写入语义一致。
+/// 返回确认结果与新建的账单（订阅动作返回其首笔账单）。
+async fn apply_confirmation_action_in_transaction(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    profile_id: &str,
+    device_id: &str,
+    action: ParsedDraftConfirmationAction,
+) -> Result<(ParsedDraftConfirmation, Option<Record>)> {
+    let mut created_record: Option<Record> = None;
+    let confirmation = match action {
+        ParsedDraftConfirmationAction::Record(create) => {
+            let record = insert_record_in_transaction(tx, profile_id, device_id, create).await?;
+            let confirmation = ParsedDraftConfirmation {
+                record_id: Some(record.id),
+                ..Default::default()
+            };
+            created_record = Some(record);
+            confirmation
+        }
+        ParsedDraftConfirmationAction::Asset(create) => {
+            confirm_asset_in_transaction(tx, profile_id, device_id, create).await?
+        }
+        ParsedDraftConfirmationAction::Subscription {
+            record,
+            subscription,
+        } => {
+            let subscription_id = Uuid::new_v4();
+            sqlx::query(
+                r#"
+                INSERT INTO subscriptions (
+                    id, profile_id, direction, amount, currency, category,
+                    merchant, note, cycle, anchor_day, anchor_month,
+                    next_due_at, device_id
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                "#,
+            )
+            .bind(subscription_id.to_string())
+            .bind(profile_id)
+            .bind(subscription.direction.as_str())
+            .bind(subscription.amount)
+            .bind(subscription.currency)
+            .bind(subscription.category)
+            .bind(subscription.merchant)
+            .bind(subscription.note)
+            .bind(subscription.cycle.as_str())
+            .bind(subscription.anchor_day)
+            .bind(subscription.anchor_month)
+            .bind(subscription.next_due_at.to_string())
+            .bind(device_id)
+            .execute(&mut **tx)
+            .await
+            .context("failed to insert subscription while confirming parsed draft")?;
+
+            let first_record =
+                insert_record_in_transaction(tx, profile_id, device_id, record).await?;
+            let confirmation = ParsedDraftConfirmation {
+                record_id: Some(first_record.id),
+                subscription_id: Some(subscription_id),
+                ..Default::default()
+            };
+            created_record = Some(first_record);
+            confirmation
+        }
+    };
+    Ok((confirmation, created_record))
+}
+
 async fn insert_record_in_transaction(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     profile_id: &str,
@@ -1903,12 +1951,39 @@ async fn insert_record_in_transaction(
     row.try_into()
 }
 
+/// 同名在用资产的币种必须与本次写入一致（资产合并同样拒绝跨币种）。
+async fn ensure_asset_currency(
+    conn: &mut sqlx::SqliteConnection,
+    profile_id: &str,
+    name: &str,
+    currency: &str,
+) -> Result<()> {
+    let existing: Option<String> = sqlx::query_scalar(
+        "SELECT currency FROM assets WHERE profile_id = ?1 AND name = ?2 AND deleted_at IS NULL",
+    )
+    .bind(profile_id)
+    .bind(name)
+    .fetch_optional(&mut *conn)
+    .await
+    .context("failed to look up existing asset currency")?;
+    match existing {
+        Some(existing) if existing != currency => Err(AssetCurrencyMismatch {
+            name: name.to_string(),
+            existing,
+            requested: currency.to_string(),
+        }
+        .into()),
+        _ => Ok(()),
+    }
+}
+
 async fn confirm_asset_in_transaction(
     tx: &mut sqlx::Transaction<'_, Sqlite>,
     profile_id: &str,
     device_id: &str,
     create: AssetConfirmationCreate,
 ) -> Result<ParsedDraftConfirmation> {
+    ensure_asset_currency(tx, profile_id, &create.name, &create.currency).await?;
     let asset_id = Uuid::new_v4();
     let asset_row = sqlx::query_as::<_, AssetRow>(
         r#"
@@ -2450,6 +2525,69 @@ mod tests {
         let assets = repo.list_assets_with_snapshots("p1").await.unwrap();
         assert_eq!(assets[0].snapshots[0].id, target_snapshot);
         assert_eq!(assets[0].snapshots[0].amount, 20.0);
+    }
+
+    #[tokio::test]
+    async fn same_name_asset_with_another_currency_is_rejected_on_every_write_path() {
+        let repo = make_repo().await;
+        let create = |currency: &str, amount: f64| AssetConfirmationCreate {
+            name: "招商银行".to_string(),
+            category: "存款".to_string(),
+            amount,
+            currency: currency.to_string(),
+            recorded_on: NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
+            note: None,
+        };
+        repo.create_manual_entry(
+            "p1",
+            "device",
+            ParsedDraftConfirmationAction::Asset(create("CNY", 100.0)),
+        )
+        .await
+        .unwrap();
+
+        let error = repo
+            .create_manual_entry(
+                "p1",
+                "device",
+                ParsedDraftConfirmationAction::Asset(create("USD", 5.0)),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<AssetCurrencyMismatch>(),
+            Some(&AssetCurrencyMismatch {
+                name: "招商银行".to_string(),
+                existing: "CNY".to_string(),
+                requested: "USD".to_string(),
+            })
+        );
+        let error = repo
+            .find_or_create_asset("p1", "device", "招商银行", "存款", "USD")
+            .await
+            .unwrap_err();
+        assert!(error.downcast_ref::<AssetCurrencyMismatch>().is_some());
+
+        // 币种与快照保持原样；其他 profile 与同币种写入不受影响。
+        let assets = repo.list_assets_with_snapshots("p1").await.unwrap();
+        assert_eq!(assets.len(), 1);
+        assert_eq!(assets[0].currency, "CNY");
+        assert_eq!(assets[0].snapshots.len(), 1);
+        assert_eq!(assets[0].snapshots[0].amount, 100.0);
+        repo.create_manual_entry(
+            "p2",
+            "device",
+            ParsedDraftConfirmationAction::Asset(create("USD", 5.0)),
+        )
+        .await
+        .unwrap();
+        repo.create_manual_entry(
+            "p1",
+            "device",
+            ParsedDraftConfirmationAction::Asset(create("CNY", 120.0)),
+        )
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
@@ -3263,6 +3401,7 @@ mod tests {
         repo.update_record(
             id,
             profile,
+            "dev-a",
             RecordUpdate {
                 direction: RecordDirection::Expense,
                 amount: 200.0,
@@ -3330,6 +3469,7 @@ mod tests {
             repo.update_record(
                 id,
                 profile,
+                "dev-a",
                 RecordUpdate {
                     direction: RecordDirection::Expense,
                     amount: 50.0,

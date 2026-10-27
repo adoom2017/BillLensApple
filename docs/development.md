@@ -168,6 +168,16 @@ BILLLENS_CMB_SAMPLE_EML=/path/账单.eml BILLLENS_CMB_SAMPLE_PDF_TEXT=/path/pdf.
   cargo test -p billlens-apple-core real_cmb -- --ignored --nocapture
 ```
 
+iOS UI 冒烟测试（`apple/Tests/BillLensIOSUITests`）在模拟器上手动新增 / 编辑账单、订阅、资产。建议使用一台专用模拟器并先清空，避免污染日常调试数据：
+
+```bash
+./build.sh xcode-ios-sim   # 构建 Rust 模拟器库并生成工程
+UDID=$(xcrun simctl create "BillLens UITest" "iPhone 18 Pro")
+cd apple && xcodebuild test -project BillLensApple.xcodeproj -scheme BillLens-iOS \
+  -destination "platform=iOS Simulator,id=$UDID" -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO
+xcrun simctl delete "$UDID"
+```
+
 跨层改动还须构建 iOS 模拟器。人工冒烟检查文本/OCR、三类草稿保存与确认、订阅重复检查、时区切换。真实模型下载/取消/更新、iOS 后台恢复、语音权限与录音、CloudKit 多设备冲突必须使用对应设备与签名环境验证；自动化通过不替代这些检查。
 
 ## 数据与清理
