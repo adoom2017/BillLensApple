@@ -3,6 +3,7 @@ import SwiftUI
 struct EntryShell: View {
     @EnvironmentObject private var store: BillLensStore
     @Binding var isImportingImage: Bool
+    @Binding var isImportingStatement: Bool
     @State private var isReviewPresented = false
 
     #if os(iOS)
@@ -18,7 +19,7 @@ struct EntryShell: View {
     }
 
     var body: some View {
-        ChatPanel(isImportingImage: $isImportingImage) { index in
+        ChatPanel(isImportingImage: $isImportingImage, isImportingStatement: $isImportingStatement) { index in
             store.selectDraft(at: index)
             isReviewPresented = true
         }
@@ -53,6 +54,7 @@ struct EntryShell: View {
 struct ChatPanel: View {
     @EnvironmentObject private var store: BillLensStore
     @Binding var isImportingImage: Bool
+    @Binding var isImportingStatement: Bool
     let onReviewDraft: (Int) -> Void
 
     var body: some View {
@@ -62,6 +64,7 @@ struct ChatPanel: View {
                     composerText: $store.composerText,
                     isRecording: store.speechService.isRecording,
                     onImage: { isImportingImage = true },
+                    onStatement: { isImportingStatement = true },
                     onVoice: { store.toggleRecording() },
                     onSubmit: { store.submitText() }
                 )

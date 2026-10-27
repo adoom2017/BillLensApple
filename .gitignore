@@ -80,3 +80,5 @@ re.md
 start.sh
 openai.http
 /dist
+/*.eml
+/*.pdf

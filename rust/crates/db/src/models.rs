@@ -343,6 +343,12 @@ pub struct RecordCreate {
     pub note: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatementImportCounts {
+    pub inserted: usize,
+    pub skipped_existing: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordUpdate {
     pub direction: RecordDirection,

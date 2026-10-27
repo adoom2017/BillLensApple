@@ -526,6 +526,100 @@ impl BillRepository {
         rows.into_iter().map(TryInto::try_into).collect()
     }
 
+    // ── Statement import ────────────────────────────────────────────────
+
+    /// 返回 `ids` 中已存在于 records 的 ID（包括软删除），用于账单导入幂等判断。
+    pub async fn find_existing_record_ids(&self, ids: &[Uuid]) -> Result<Vec<Uuid>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut builder = QueryBuilder::<Sqlite>::new("SELECT id FROM records WHERE id IN (");
+        let mut separated = builder.separated(", ");
+        for id in ids {
+            separated.push_bind(id.to_string());
+        }
+        builder.push(")");
+        let rows = builder
+            .build()
+            .fetch_all(&self.pool)
+            .await
+            .context("failed to look up existing record ids")?;
+        rows.into_iter()
+            .map(|row| {
+                let id: String = row.try_get("id")?;
+                Uuid::parse_str(&id).with_context(|| format!("invalid record id {id}"))
+            })
+            .collect()
+    }
+
+    /// 在单个事务中写入账单导入记录与助手消息。已存在的 ID（含软删除，或另一台设备
+    /// 同步先到达）跳过不覆盖；任一写入失败整体回滚。
+    pub async fn import_statement_records(
+        &self,
+        profile_id: &str,
+        device_id: &str,
+        records: Vec<(Uuid, RecordCreate)>,
+        assistant_message: impl FnOnce(usize, usize) -> String,
+    ) -> Result<StatementImportCounts> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin statement import transaction")?;
+
+        let total = records.len();
+        let mut inserted = 0;
+        for (id, create) in records {
+            let result = sqlx::query(
+                r#"
+                INSERT INTO records (
+                    id, profile_id, direction, amount, currency, category,
+                    merchant, transaction_at, note, device_id
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                ON CONFLICT (id) DO NOTHING
+                "#,
+            )
+            .bind(id.to_string())
+            .bind(profile_id)
+            .bind(create.direction.as_str())
+            .bind(create.amount)
+            .bind(&create.currency)
+            .bind(&create.category)
+            .bind(&create.merchant)
+            .bind(create.transaction_at)
+            .bind(&create.note)
+            .bind(device_id)
+            .execute(&mut *tx)
+            .await
+            .context("failed to insert statement record")?;
+            inserted += result.rows_affected() as usize;
+        }
+        let skipped_existing = total - inserted;
+
+        sqlx::query(
+            r#"
+            INSERT INTO conversation_messages (id, profile_id, role, content, draft_id, record_id)
+            VALUES (?1, ?2, ?3, ?4, NULL, NULL)
+            "#,
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(profile_id)
+        .bind(ConversationRole::Assistant.as_str())
+        .bind(assistant_message(inserted, skipped_existing))
+        .execute(&mut *tx)
+        .await
+        .context("failed to insert statement import message")?;
+
+        tx.commit()
+            .await
+            .context("failed to commit statement import transaction")?;
+        Ok(StatementImportCounts {
+            inserted,
+            skipped_existing,
+        })
+    }
+
     // ── Subscription operations ─────────────────────────────────────────
 
     pub async fn create_subscription(

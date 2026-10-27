@@ -3,6 +3,7 @@ mod llm;
 pub mod local_llm;
 mod logger;
 mod rule_parser;
+pub mod statement;
 pub mod stt;
 
 use anyhow::{Result, anyhow};

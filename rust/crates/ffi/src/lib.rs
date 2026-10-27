@@ -2,6 +2,7 @@ use anyhow::{Context, Result, anyhow};
 use billlens_apple_core::local_llm::{
     self, LocalLlmBackend, LocalLlmCancelFn, LocalLlmFreeStringFn, LocalLlmRunFn, LocalLlmUnloadFn,
 };
+use billlens_apple_core::statement::StatementSourceInput;
 use billlens_apple_core::stt::{
     self, SttBackend, SttCancelFn, SttFreeStringFn, SttStartFn, SttStopFn,
 };
@@ -13,6 +14,7 @@ use billlens_apple_db::BillRepository;
 use chrono::{DateTime, FixedOffset};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char};
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -87,6 +89,16 @@ enum EngineRequest {
     LocalLlmUnload,
     ConfirmAllDrafts {
         profile_id: String,
+    },
+    ParseStatement {
+        profile_id: String,
+        source: StatementSourceInput,
+    },
+    ConfirmStatementImport {
+        profile_id: String,
+        source: StatementSourceInput,
+        selected_line_ids: Vec<Uuid>,
+        category_overrides: HashMap<Uuid, String>,
     },
     DeleteRecord {
         profile_id: String,
@@ -372,6 +384,24 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
             let result = runtime().block_on(app.confirm_all_drafts(&profile_id))?;
             Ok(encode_ok(result))
         }),
+        EngineRequest::ParseStatement { profile_id, source } => with_app(|app| {
+            let preview = runtime().block_on(app.parse_statement(&profile_id, &source))?;
+            Ok(encode_ok(preview))
+        }),
+        EngineRequest::ConfirmStatementImport {
+            profile_id,
+            source,
+            selected_line_ids,
+            category_overrides,
+        } => with_app(|app| {
+            let result = runtime().block_on(app.confirm_statement_import(
+                &profile_id,
+                &source,
+                &selected_line_ids,
+                &category_overrides,
+            ))?;
+            Ok(encode_ok(result))
+        }),
         EngineRequest::DeleteRecord {
             profile_id,
             record_id,
@@ -631,5 +661,40 @@ mod tests {
                 .unwrap()
                 .contains("not valid utf-8")
         );
+    }
+
+    #[test]
+    fn statement_requests_decode_with_strict_source_contract() {
+        let parse: EngineRequest = serde_json::from_str(
+            r#"{"action":"parse_statement","profile_id":"p","source":{"kind":"pdf_text","content":"x"}}"#,
+        )
+        .unwrap();
+        assert!(matches!(parse, EngineRequest::ParseStatement { .. }));
+
+        let id = Uuid::new_v4();
+        let confirm: EngineRequest = serde_json::from_str(&format!(
+            r#"{{"action":"confirm_statement_import","profile_id":"p","source":{{"kind":"eml","content":"eA=="}},"selected_line_ids":["{id}"],"category_overrides":{{"{id}":"餐饮"}}}}"#
+        ))
+        .unwrap();
+        let EngineRequest::ConfirmStatementImport {
+            selected_line_ids,
+            category_overrides,
+            ..
+        } = confirm
+        else {
+            panic!("unexpected request");
+        };
+        assert_eq!(selected_line_ids, vec![id]);
+        assert_eq!(category_overrides[&id], "餐饮");
+
+        for invalid in [
+            r#"{"action":"parse_statement","profile_id":"p","source":{"kind":"docx","content":"x"}}"#,
+            r#"{"action":"parse_statement","profile_id":"p","source":{"kind":"eml","content":"x","extra":1}}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<EngineRequest>(invalid).is_err(),
+                "{invalid}"
+            );
+        }
     }
 }

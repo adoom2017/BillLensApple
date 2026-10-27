@@ -125,6 +125,8 @@ swift test --disable-sandbox \
 | iOS Debug | `BILLLENS_CLOUDKIT_ENABLED=NO`，无受限 entitlement |
 | iOS Release / 正式 macOS Archive | 需要完整开发者权限、正确容器和 provisioning profile |
 
+iOS 分享扩展（`com.shendongchun.BillLensApple.ShareExtension`）与主 App 通过 App Group `group.com.shendongchun.BillLensApple` 交换账单文件，该 entitlement 只在 Release 配置中声明。Debug 构建不带 App Group，扩展会提示「当前安装的版本不支持分享导入」，App 内文件导入不受影响。首次 Archive 依赖 `-allowProvisioningUpdates` 为 App 与扩展注册 App Group 和 profile。
+
 容器为 `iCloud.com.shendongchun.BillLensApple`，工程中的 Team 为 `YH6JCRN97J`。其他开发者应在 `project.yml` 配置自己的签名身份和匹配容器后重新生成工程。
 
 导出默认 `debugging`；可设置 `IOS_EXPORT_METHOD=app-store-connect` 或 `MAC_EXPORT_METHOD=developer-id`。Archive 使用 `-allowProvisioningUpdates`，要求 Xcode 已登录具备相应能力的开发者账号。
@@ -157,6 +159,14 @@ swift test
 ```
 
 Swift 测试分为 `BillLensAppleServicesTests`（清单、下载配置、运行时、FFI 内存）与 `BillLensSharedTests`（同步页面、响应可空值、提醒日期）。Rust 测试覆盖解析、规则时间、路由、数据库迁移、事务回滚、订阅与同步。
+
+信用卡账单导入可用本机真实账单核对（只输出计数与勾稽结果，真实文件已被 `.gitignore` 排除，不得提交）：
+
+```bash
+cd rust
+BILLLENS_CMB_SAMPLE_EML=/path/账单.eml BILLLENS_CMB_SAMPLE_PDF_TEXT=/path/pdf.txt \
+  cargo test -p billlens-apple-core real_cmb -- --ignored --nocapture
+```
 
 跨层改动还须构建 iOS 模拟器。人工冒烟检查文本/OCR、三类草稿保存与确认、订阅重复检查、时区切换。真实模型下载/取消/更新、iOS 后台恢复、语音权限与录音、CloudKit 多设备冲突必须使用对应设备与签名环境验证；自动化通过不替代这些检查。
 

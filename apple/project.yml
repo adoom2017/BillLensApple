@@ -81,6 +81,39 @@ targets:
         product: BillLensShared
       - package: BillLensApple
         product: BillLensAppleServices
+      - target: BillLensShareExtension
+        embed: true
+
+  # 分享扩展只把账单文件写入 App Group 收件箱，不链接 Rust 与 Swift 包，保持体积和内存最小。
+  # App Group 仅在 Release（完整签名）启用；Debug 与主 App 一样清空 entitlements，扩展会提示不支持。
+  BillLensShareExtension:
+    productName: BillLensShareExtension
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Sources/BillLensShareExtension
+        excludes:
+          - Info.plist
+          - BillLensShareExtension.entitlements
+      - path: Resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shendongchun.BillLensApple.ShareExtension
+        PRODUCT_NAME: BillLensShareExtension
+        INFOPLIST_FILE: Sources/BillLensShareExtension/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: 6.0
+        SWIFT_STRICT_CONCURRENCY: complete
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SKIP_INSTALL: YES
+        EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: ""
+        Release:
+          CODE_SIGN_ENTITLEMENTS: Sources/BillLensShareExtension/BillLensShareExtension.entitlements
 
   BillLensMacApp:
     productName: Billumi

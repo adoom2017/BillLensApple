@@ -134,6 +134,7 @@ struct ComposerPanel: View {
     @FocusState private var isInputFocused: Bool
     let isRecording: Bool
     let onImage: () -> Void
+    let onStatement: () -> Void
     let onVoice: () -> Void
     let onSubmit: () -> Void
 
@@ -143,14 +144,24 @@ struct ComposerPanel: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
-            Button(action: onImage) {
-                Image(systemName: "photo.on.rectangle")
+            Menu {
+                Button(action: onImage) {
+                    Label("账单图片", systemImage: "photo.on.rectangle")
+                }
+                Button(action: onStatement) {
+                    Label("信用卡电子账单", systemImage: "creditcard")
+                }
+            } label: {
+                Image(systemName: "plus.circle")
                     .font(.title3)
             }
+            .menuStyle(.button)
             .buttonStyle(.borderless)
+            .menuIndicator(.hidden)
+            .fixedSize()
             .foregroundStyle(.secondary)
-            .help("导入账单图片")
-            .accessibilityLabel("导入账单图片")
+            .help("导入账单图片或信用卡电子账单")
+            .accessibilityLabel("导入")
 
             HStack(spacing: 6) {
                 TextField("打车花了 30 块…", text: $composerText)

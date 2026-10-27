@@ -11,18 +11,46 @@
 		4F550F1AC0AF9D679E8CD519 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = CE4376050C1C7A0F8B76BFFB /* InfoPlist.strings */; };
 		5C8073FCFA8A3DE41DC3DDCF /* BillLensShared in Frameworks */ = {isa = PBXBuildFile; productRef = D6E37C17C3A4A3256FE6A83B /* BillLensShared */; };
 		5FAAABA1B6FAE90C0D5522E7 /* BillLensAppleServices in Frameworks */ = {isa = PBXBuildFile; productRef = 9119C4F24AF97D7C891E6B46 /* BillLensAppleServices */; };
+		7B27368C4DCE954FE1E89172 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = CE4376050C1C7A0F8B76BFFB /* InfoPlist.strings */; };
 		9543F2D4E6CEBB7FB972B18B /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = CE4376050C1C7A0F8B76BFFB /* InfoPlist.strings */; };
+		9AB53B383A2E327739EA8608 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC84C675FE7156E4F7078C70 /* ShareViewController.swift */; };
 		AB99D9AB035EB0257D34CDBB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E34CF59112745D253300A149 /* Assets.xcassets */; };
 		CAB9E0C11D9D4F688A78F662 /* BillLensAppleServices in Frameworks */ = {isa = PBXBuildFile; productRef = 3AF36A7261AB854C4EABAA1F /* BillLensAppleServices */; };
+		D177945999E654749F482396 /* BillLensShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 32D5C856C5E35D2B56037B20 /* BillLensShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		E187370CCDCF509360973837 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 57FCC8A4034B8F0DA7218807 /* Assets.xcassets */; };
 		E2CDEFA3A99A923CFFEC16D7 /* BillLensMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2369E23FE7BDF40B0A1AFE3 /* BillLensMacApp.swift */; };
 		EF836DB681DCFC150E145A9D /* BillLensShared in Frameworks */ = {isa = PBXBuildFile; productRef = 7458D7AC63DB652E864D9498 /* BillLensShared */; };
 		F383B4EDE4A0556F954EC470 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = A6C8413B89227E37F6C098B1 /* AppIcon.icns */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		C6A7641C2B55A5FC12EC0FC2 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D22B7D7B2A9CC6296C228239 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 839061421453352F493C3C0F;
+			remoteInfo = BillLensShareExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		0E40B3862C6507F41EC58788 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				D177945999E654749F482396 /* BillLensShareExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		06E0923D97C073C7CF0C304F /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		09D78360C38804C798214C01 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+		32D5C856C5E35D2B56037B20 /* BillLensShareExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = BillLensShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		37931752EE1A5D888E1874BD /* Billumi.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Billumi.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3E86FB5C63FA63F9EE21FBEC /* apple */ = {isa = PBXFileReference; lastKnownFileType = folder; name = apple; path = .; sourceTree = SOURCE_ROOT; };
 		57FCC8A4034B8F0DA7218807 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -31,6 +59,7 @@
 		A2369E23FE7BDF40B0A1AFE3 /* BillLensMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillLensMacApp.swift; sourceTree = "<group>"; };
 		A6C8413B89227E37F6C098B1 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
 		AF2EDD71EAAC6D9C9F6CDB74 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+		DC84C675FE7156E4F7078C70 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		E34CF59112745D253300A149 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -73,6 +102,14 @@
 			name = Packages;
 			sourceTree = "<group>";
 		};
+		56E3301E93933155FEC574EF /* BillLensShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				DC84C675FE7156E4F7078C70 /* ShareViewController.swift */,
+			);
+			path = BillLensShareExtension;
+			sourceTree = "<group>";
+		};
 		5875F15FF489823D4A29377D /* Resources */ = {
 			isa = PBXGroup;
 			children = (
@@ -86,6 +123,7 @@
 			children = (
 				0B2B26E3025DBCEB5A202978 /* BillLensIOSApp */,
 				6F92965C9BD3B1FCEBB0917D /* BillLensMacApp */,
+				56E3301E93933155FEC574EF /* BillLensShareExtension */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -113,6 +151,7 @@
 		DD06FBF04EB96486913171E1 /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				32D5C856C5E35D2B56037B20 /* BillLensShareExtension.appex */,
 				37931752EE1A5D888E1874BD /* Billumi.app */,
 				7F2359A859EC52115EE8C7D0 /* Billumi.app */,
 			);
@@ -143,6 +182,24 @@
 			productReference = 7F2359A859EC52115EE8C7D0 /* Billumi.app */;
 			productType = "com.apple.product-type.application";
 		};
+		839061421453352F493C3C0F /* BillLensShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E04D57CA3A05B6BE00F8111B /* Build configuration list for PBXNativeTarget "BillLensShareExtension" */;
+			buildPhases = (
+				5038DB74F871DBBE31954509 /* Sources */,
+				2F8BFC484C4D69A416E7A30E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BillLensShareExtension;
+			packageProductDependencies = (
+			);
+			productName = BillLensShareExtension;
+			productReference = 32D5C856C5E35D2B56037B20 /* BillLensShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		AD46254B4CA6B364EE9523EA /* BillLensIOSApp */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 1E83886FECD73B35B87384EB /* Build configuration list for PBXNativeTarget "BillLensIOSApp" */;
@@ -150,10 +207,12 @@
 				E33E37474A904056A7AF0438 /* Sources */,
 				747BCE42EC0C8A93537A727F /* Resources */,
 				6A3B41DA4E473B0ABAC47092 /* Frameworks */,
+				0E40B3862C6507F41EC58788 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				754D358F0C048668C0F598E9 /* PBXTargetDependency */,
 			);
 			name = BillLensIOSApp;
 			packageProductDependencies = (
@@ -174,6 +233,10 @@
 				LastUpgradeCheck = 2700;
 				TargetAttributes = {
 					706DE52D7776039BEEC21A30 = {
+						DevelopmentTeam = YH6JCRN97J;
+						ProvisioningStyle = Automatic;
+					};
+					839061421453352F493C3C0F = {
 						DevelopmentTeam = YH6JCRN97J;
 						ProvisioningStyle = Automatic;
 					};
@@ -203,12 +266,21 @@
 			projectRoot = "";
 			targets = (
 				AD46254B4CA6B364EE9523EA /* BillLensIOSApp */,
+				839061421453352F493C3C0F /* BillLensShareExtension */,
 				706DE52D7776039BEEC21A30 /* BillLensMacApp */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		2F8BFC484C4D69A416E7A30E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7B27368C4DCE954FE1E89172 /* InfoPlist.strings in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		747BCE42EC0C8A93537A727F /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -231,6 +303,14 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		5038DB74F871DBBE31954509 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9AB53B383A2E327739EA8608 /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E33E37474A904056A7AF0438 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -248,6 +328,14 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		754D358F0C048668C0F598E9 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 839061421453352F493C3C0F /* BillLensShareExtension */;
+			targetProxy = C6A7641C2B55A5FC12EC0FC2 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
 		CE4376050C1C7A0F8B76BFFB /* InfoPlist.strings */ = {
@@ -288,6 +376,30 @@
 			};
 			name = Release;
 		};
+		08F0A1FFF8DF75849E35DD8B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Sources/BillLensShareExtension/BillLensShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Sources/BillLensShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.shendongchun.BillLensApple.ShareExtension;
+				PRODUCT_NAME = BillLensShareExtension;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		549B61E0B73747CEC25E2645 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -310,6 +422,30 @@
 				SDKROOT = macosx;
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		58DD4E1F5C6C4B1A0CCDD5B1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "";
+				CODE_SIGN_STYLE = Automatic;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Sources/BillLensShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.shendongchun.BillLensApple.ShareExtension;
+				PRODUCT_NAME = BillLensShareExtension;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -520,6 +656,15 @@
 			buildConfigurations = (
 				549B61E0B73747CEC25E2645 /* Debug */,
 				05FEC086EF2A8CB2005025BE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E04D57CA3A05B6BE00F8111B /* Build configuration list for PBXNativeTarget "BillLensShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				58DD4E1F5C6C4B1A0CCDD5B1 /* Debug */,
+				08F0A1FFF8DF75849E35DD8B /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

@@ -57,6 +57,9 @@ public final class BillLensStore: ObservableObject {
     @Published public var assets: [AssetItem] = []
     @Published public var selectedAssetId: String?
     @Published public var llmConfig: LlmConfigItem?
+    @Published public var statementImport: StatementImportSession?
+    /// 加密 PDF 等待用户输入密码。
+    @Published public var statementPasswordRequest: StatementPasswordRequest?
 
     public let speechService = SpeechCaptureService.shared
 
@@ -410,6 +413,93 @@ public final class BillLensStore: ObservableObject {
             AppLogger.log("draft.confirm_all", "count=\(self.drafts.count)")
             CloudKitSyncService.shared.schedulePush()
         }
+    }
+
+    // MARK: Statement import
+
+    public func importStatement(url: URL, password: String? = nil, inboxFile: URL? = nil) {
+        perform("正在解析信用卡账单") {
+            // 冷启动时收件箱检查早于引擎初始化完成；先等待，避免把未就绪错误当作坏文件删除。
+            try await self.bootstrapTask?.value
+            let source: StatementSourcePayload
+            do {
+                source = try await Task.detached(priority: .userInitiated) {
+                    try StatementImportService.load(from: url, password: password)
+                }.value
+            } catch StatementImportError.passwordRequired, StatementImportError.wrongPassword {
+                self.statementPasswordRequest = StatementPasswordRequest(
+                    fileURL: url,
+                    inboxFile: inboxFile,
+                    isRetry: password != nil
+                )
+                self.statusText = "等待输入 PDF 密码"
+                return
+            } catch {
+                if let inboxFile { StatementInbox.remove(inboxFile) }
+                throw error
+            }
+            let preview: StatementPreview
+            do {
+                preview = try await self.bridge.sendAsync([
+                    "action": "parse_statement",
+                    "profile_id": self.profileID,
+                    "source": source.dictionary
+                ])
+            } catch {
+                // 收件箱里无法解析的文件不会自行变好，删除以免每次回到前台都报错。
+                if let inboxFile { StatementInbox.remove(inboxFile) }
+                throw error
+            }
+            self.statementImport = StatementImportSession(source: source, preview: preview, inboxFile: inboxFile)
+            self.statusText = "账单已解析，等待确认"
+            AppLogger.log("statement.preview", "source=\(source.kind.rawValue) lines=\(preview.lines.count)")
+        }
+    }
+
+    public func confirmStatementImport(selectedLineIds: [String], categoryOverrides: [String: String]) {
+        guard let session = statementImport else { return }
+        perform("正在导入信用卡账单") {
+            let result: StatementImportResult = try await self.bridge.sendAsync([
+                "action": "confirm_statement_import",
+                "profile_id": self.profileID,
+                "source": session.source.dictionary,
+                "selected_line_ids": selectedLineIds,
+                "category_overrides": categoryOverrides
+            ])
+            if let inboxFile = session.inboxFile { StatementInbox.remove(inboxFile) }
+            self.statementImport = nil
+            self.apply(home: result.home)
+            try await self.refreshLedger()
+            self.statusText = result.skippedExisting > 0
+                ? "已导入 \(result.inserted) 笔，跳过已存在的 \(result.skippedExisting) 笔"
+                : "已导入 \(result.inserted) 笔账单"
+            AppLogger.log(
+                "statement.confirm",
+                "inserted=\(result.inserted) skipped_existing=\(result.skippedExisting)"
+            )
+            CloudKitSyncService.shared.schedulePush()
+            // perform 结束后 isBusy 才复位，下一轮再检查收件箱。
+            Task { self.checkStatementInbox() }
+        }
+    }
+
+    public func cancelStatementImport() {
+        if let inboxFile = statementImport?.inboxFile { StatementInbox.remove(inboxFile) }
+        statementImport = nil
+        checkStatementInbox()
+    }
+
+    public func cancelStatementPassword() {
+        if let inboxFile = statementPasswordRequest?.inboxFile { StatementInbox.remove(inboxFile) }
+        statementPasswordRequest = nil
+    }
+
+    /// 打开分享扩展放入收件箱的下一个账单；已有导入会话或密码输入时不打断。
+    public func checkStatementInbox() {
+        guard statementImport == nil, statementPasswordRequest == nil, !isBusy,
+              let file = StatementInbox.oldestFile() else { return }
+        AppLogger.log("statement.inbox", "file=\(file.pathExtension)")
+        importStatement(url: file, inboxFile: file)
     }
 
     public func discardDraft() {

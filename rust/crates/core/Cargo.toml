@@ -17,6 +17,8 @@ thiserror.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 base64.workspace = true
+mail-parser = "1.0.0"
+unicode-normalization = "0.1.26"
 
 [dev-dependencies]
 sqlx.workspace = true

@@ -13,6 +13,7 @@ SwiftUI → BillLensStore → RustBridge → JSON C FFI → AppService → SQLit
 | 目录 | 职责 |
 |---|---|
 | `apple/Sources/BillLensMacApp/` / `BillLensIOSApp/` | 平台入口、权限、通知与生命周期 |
+| `apple/Sources/BillLensShareExtension/` | iOS 分享扩展：把信用卡账单文件放入 App Group 收件箱，不链接 Rust |
 | `apple/Sources/BillLensShared/` | 共享视图、MainActor 状态、FFI DTO、CloudKit、订阅提醒 |
 | `apple/Sources/BillLensAppleServices/` | OCR、Speech、日志、本地模型文件与推理运行时 |
 | `apple/Sources/CBillLensRustBridge/` | C 头文件，Swift/Rust 之间的所有权合同 |
@@ -38,6 +39,22 @@ SwiftUI → BillLensStore → RustBridge → JSON C FFI → AppService → SQLit
 | 云端：资产 | 直接更新资产 / 快照 | 直接更新资产 / 快照 |
 
 `cloud_after_local_failure` 遵循云端保存语义，并携带本地错误。账单、订阅自动保存先持久化一批草稿，再复用确认事务；失败保留完整草稿供查看，不留下该批次的部分账单或订阅。云端资产独立处理，不与同次输入的账单构成跨类型总事务。
+
+## 信用卡电子账单导入
+
+目前支持招商银行信用卡电子账单。入口：记账页「＋」菜单；macOS 在导入面板的拖放区拖入 Mail 邮件（file promise 只能由 AppKit `NSFilePromiseReceiver` 接收，SwiftUI `onDrop` 收不到），或把 Finder 中的 `.eml` / `.html` / `.pdf` 拖进窗口；iOS Mail「打印 → 分享 → 账映」。
+
+```text
+.eml（base64）/ .html / PDFKit 文字 → statement::source（MIME 解码、HTML 转行、NFKC + 部首映射）
+  → statement::cmb（账期、汇总、分区、尾部锚点切分交易行）→ 分类 / 确定性 ID / 状态 → 预览
+确认：同一来源重新解析 → 校验选中 ID 与分类 → 单事务 INSERT … ON CONFLICT(id) DO NOTHING + 助手消息
+```
+
+- 解析只在本机进行，不调用模型或网络；日志只记行数、状态计数与勾稽结果。
+- 记录 ID 为 UUID v5（尾号、分区、记账日、交易日、金额、同 key 序号，**不含摘要**）。同一封账单无论从 eml 还是 PDF、在哪台设备导入，ID 都相同；已导入（含已删除）行不再写入。不需要迁移，CloudKit payload 不变。
+- 消费 / 退款按交易日入账，分期 / 费用 / 利息按记账日；时刻为设备时区 12:00。还款、取现本金不入账。与已有记录金额相同、日期差 ≤ 2 天的行标为疑似重复，默认不勾选。
+- 勾稽：本期新增 = 消费 + 分期 + 取现 + 费用；本期调整 = −退款；本期应还 = 上期账单 + 还款 + 新增 − 调整 + 利息。不一致只警告，仍可导入。
+- iOS 分享扩展先写 `StatementInbox/<uuid>.<ext>.partial` 再改名；主 App 回到前台时取最早的文件打开预览，完成、取消或解析失败后删除。App Group `group.com.shendongchun.BillLensApple` 仅在 Release 签名启用。
 
 ## 草稿与数据库
 
