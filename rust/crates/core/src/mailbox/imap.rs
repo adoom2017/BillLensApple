@@ -25,8 +25,8 @@ const ENVELOPE_BATCH: usize = 100;
 /// 招行每天还会发「每日信用管家」等通知：只下载标题含此关键词的邮件。
 const STATEMENT_SUBJECT_KEYWORD: &str = "账单";
 
-trait ImapStream: AsyncRead + AsyncWrite + Unpin + std::fmt::Debug + Send {}
-impl<T: AsyncRead + AsyncWrite + Unpin + std::fmt::Debug + Send> ImapStream for T {}
+trait ImapStream: AsyncRead + AsyncWrite + Unpin + std::fmt::Debug + Send + Sync {}
+impl<T: AsyncRead + AsyncWrite + Unpin + std::fmt::Debug + Send + Sync> ImapStream for T {}
 
 type ImapSession = Session<Box<dyn ImapStream>>;
 

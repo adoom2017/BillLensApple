@@ -1,5 +1,8 @@
 import Foundation
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 import BillLensAppleServices
 
 @MainActor
@@ -65,6 +68,8 @@ public final class BillLensStore: ObservableObject {
     @Published public private(set) var isMailboxBusy = false
     /// 授权失效：停止自动检查，设置页提示重新连接。
     @Published public private(set) var mailboxNeedsReauth = false
+    /// 同步进行中的进度（每秒轮询），没有同步时为 nil。
+    @Published public private(set) var mailboxSyncProgress: MailSyncProgress?
     /// 最近一次检查的结果说明（本次运行内有效）。
     @Published public private(set) var mailboxLastSyncSummary: String?
     /// 同步最近几个月的账单邮件。调大后立即补扫更早的邮件；调小只影响以后的扫描起点判断，不删除已入账的记录。
@@ -655,6 +660,26 @@ public final class BillLensStore: ObservableObject {
 
     private func runMailboxSync(trigger: String) async {
         lastAutomaticMailSync = .now
+        // 首次同步要下载多封账单，可能持续数分钟：轮询进度显示在设置页。
+        let poller = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard let self, !Task.isCancelled else { return }
+                let progress: MailSyncProgress? = try? await self.bridge.sendAsync(["action": "mail_sync_progress"])
+                if !Task.isCancelled { self.mailboxSyncProgress = progress }
+            }
+        }
+        #if os(iOS)
+        // 切到后台时向系统多要一点时间，尽量处理完当前这封；被挂起后下次从游标继续。
+        let background = BackgroundTaskToken(name: "mailbox.sync")
+        #endif
+        defer {
+            poller.cancel()
+            mailboxSyncProgress = nil
+            #if os(iOS)
+            background.end()
+            #endif
+        }
         do {
             try await bootstrapTask?.value
             let result: MailboxSyncResult = try await bridge.sendAsync(try await mailSyncRequest())
@@ -1402,3 +1427,23 @@ public final class BillLensStore: ObservableObject {
         ]
     }
 }
+
+#if os(iOS)
+/// `beginBackgroundTask` 的配对封装：到期或完成时只结束一次。
+@MainActor
+private final class BackgroundTaskToken {
+    private var identifier = UIBackgroundTaskIdentifier.invalid
+
+    init(name: String) {
+        identifier = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+            MainActor.assumeIsolated { self?.end() }
+        }
+    }
+
+    func end() {
+        guard identifier != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(identifier)
+        identifier = .invalid
+    }
+}
+#endif

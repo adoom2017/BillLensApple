@@ -358,6 +358,8 @@ pub struct AppService {
     time_zone: Arc<RwLock<Tz>>,
     /// 邮箱同步同一时刻只运行一次（前台、手动、后台刷新可能同时触发）。
     mail_sync_lock: Arc<tokio::sync::Mutex<()>>,
+    /// 正在进行的邮箱同步进度，供 Swift 轮询显示。
+    mail_sync_progress: Arc<std::sync::Mutex<Option<mailbox::MailSyncProgress>>>,
 }
 
 fn parse_time_zone(name: &str) -> Result<Tz, CoreError> {
@@ -379,6 +381,7 @@ impl AppService {
             fx: FxClient::new(),
             time_zone: Arc::new(RwLock::new(time_zone)),
             mail_sync_lock: Arc::new(tokio::sync::Mutex::new(())),
+            mail_sync_progress: Arc::new(std::sync::Mutex::new(None)),
         })
     }
 

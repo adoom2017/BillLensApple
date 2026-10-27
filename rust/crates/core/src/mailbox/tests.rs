@@ -504,6 +504,8 @@ struct ImapMockState {
     messages: Vec<(u32, DateTime<Utc>, Vec<u8>)>,
     commands: Vec<String>,
     mime_requests: Vec<u32>,
+    /// 下载正文前的延迟，用于观察进行中的进度。
+    mime_delay: Option<std::time::Duration>,
 }
 
 /// 极简 IMAP 模拟：只实现同步用到的 LOGIN / EXAMINE / UID SEARCH / UID FETCH / LOGOUT。
@@ -521,6 +523,10 @@ async fn mock_imap(state: Arc<Mutex<ImapMockState>>) -> std::net::SocketAddr {
                 write.write_all(b"* OK IMAP ready\r\n").await.unwrap();
                 while let Ok(Some(line)) = lines.next_line().await {
                     let (tag, command) = line.split_once(' ').unwrap();
+                    let delay = state.lock().unwrap().mime_delay;
+                    if let Some(delay) = delay.filter(|_| command.contains("BODY.PEEK[]")) {
+                        tokio::time::sleep(delay).await;
+                    }
                     let reply = imap_reply(&state, tag, command);
                     write.write_all(&reply).await.unwrap();
                     if command.starts_with("LOGOUT") {
@@ -676,6 +682,8 @@ async fn icloud_statement_is_auto_imported_read_only_and_idempotent() {
         "只读打开收件箱，不改动、移动或删除邮件"
     );
 
+    assert_eq!(service.mail_sync_progress(), None, "结束后清除进度");
+
     let again = imap_sync(&service, addr, IMAP_PASSWORD).await;
     assert_eq!((again.imported, again.skipped), (0, 0));
     assert_eq!(state.lock().unwrap().mime_requests, vec![12]);
@@ -717,4 +725,34 @@ async fn icloud_live_rejects_invalid_credentials() {
     let mut source =
         ImapSource::icloud("billumi-nonexistent-test@icloud.com", "aaaa-bbbb-cccc-dddd");
     assert_eq!(source.verify().await, Err(MailboxError::Unauthorized));
+}
+
+#[tokio::test]
+async fn sync_progress_is_visible_while_downloading() {
+    let state = Arc::new(Mutex::new(ImapMockState {
+        messages: vec![(12, days_ago(10), STATEMENT.to_vec())],
+        mime_delay: Some(std::time::Duration::from_millis(400)),
+        ..Default::default()
+    }));
+    let addr = mock_imap(state).await;
+    let service = service().await;
+
+    let running = {
+        let service = service.clone();
+        tokio::spawn(async move { imap_sync(&service, addr, IMAP_PASSWORD).await })
+    };
+    let mut seen = None;
+    for _ in 0..40 {
+        if let Some(progress) = service.mail_sync_progress().filter(|p| p.total.is_some()) {
+            seen = Some(progress);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let seen = seen.expect("下载期间应能读到进度");
+    assert_eq!((seen.total, seen.processed), (Some(1), 0));
+    assert!(seen.current_received_at.is_some());
+
+    assert_eq!(running.await.unwrap().imported, 12);
+    assert_eq!(service.mail_sync_progress(), None);
 }

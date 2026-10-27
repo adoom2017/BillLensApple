@@ -47,6 +47,33 @@ public struct PendingMailStatement: Decodable, Sendable, Identifiable, Equatable
     }
 }
 
+/// Rust `mailbox::MailSyncProgress`：正在进行的同步进度。
+public struct MailSyncProgress: Decodable, Sendable, Equatable {
+    public let total: Int?
+    public let processed: Int
+    public let currentReceivedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case total, processed
+        case currentReceivedAt = "current_received_at"
+    }
+
+    /// 例如「正在下载第 3 / 12 封账单（2025 年 12 月）」。
+    @MainActor
+    public var text: String {
+        guard let total else { return "正在连接邮箱…" }
+        guard total > 0 else { return "正在检查…" }
+        var text = "正在下载第 \(min(processed + 1, total)) / \(total) 封账单"
+        if let date = currentReceivedAt.flatMap(BillLensFormatters.parseISO) {
+            let components = Calendar.current.dateComponents([.year, .month], from: date)
+            if let year = components.year, let month = components.month {
+                text += "（\(year) 年 \(month) 月）"
+            }
+        }
+        return text
+    }
+}
+
 public struct MailboxStatus: Decodable, Sendable, Equatable {
     public let state: MailSyncState?
     public let pending: [PendingMailStatement]

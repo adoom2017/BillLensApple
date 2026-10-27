@@ -48,6 +48,24 @@ pub struct MailboxSyncResult {
     pub home: HomeSnapshot,
 }
 
+/// 正在进行的同步进度：`total` 为本轮要处理的邮件数，`processed` 为已完成数，
+/// `current_received_at` 为正在处理的那封的接收时间。列出邮件前 `total` 为 `None`。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MailSyncProgress {
+    pub total: Option<usize>,
+    pub processed: usize,
+    pub current_received_at: Option<DateTime<Utc>>,
+}
+
+/// 本轮结束（含出错提前返回）时清除进度。
+struct ProgressReset<'a>(&'a AppService);
+
+impl Drop for ProgressReset<'_> {
+    fn drop(&mut self) {
+        self.0.set_mail_sync_progress(None);
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MailboxStatus {
     pub state: Option<MailSyncState>,
@@ -157,6 +175,12 @@ impl AppService {
             )));
         }
         let _guard = self.mail_sync_lock.lock().await;
+        self.set_mail_sync_progress(Some(MailSyncProgress {
+            total: None,
+            processed: 0,
+            current_received_at: None,
+        }));
+        let _progress = ProgressReset(self);
         self.repo
             .connect_mail_account(profile_id, address)
             .await
@@ -193,7 +217,12 @@ impl AppService {
             Ok(messages) => {
                 scanned = messages.len();
                 let mut failure = None;
-                for message in messages {
+                for (index, message) in messages.into_iter().enumerate() {
+                    self.set_mail_sync_progress(Some(MailSyncProgress {
+                        total: Some(scanned),
+                        processed: index,
+                        current_received_at: Some(message.received_at),
+                    }));
                     match self.process_message(source, profile_id, &message).await {
                         Ok(Some(Outcome::Imported { count })) => imported += count,
                         Ok(Some(Outcome::NeedsReview {
@@ -240,6 +269,21 @@ impl AppService {
             pending: status.pending,
             home: self.home(profile_id).await.map_err(map_internal)?,
         })
+    }
+
+    /// 当前同步进度；没有同步在进行时为 `None`。
+    pub fn mail_sync_progress(&self) -> Option<MailSyncProgress> {
+        self.mail_sync_progress
+            .lock()
+            .expect("mail sync progress lock poisoned")
+            .clone()
+    }
+
+    fn set_mail_sync_progress(&self, progress: Option<MailSyncProgress>) {
+        *self
+            .mail_sync_progress
+            .lock()
+            .expect("mail sync progress lock poisoned") = progress;
     }
 
     /// 返回 `Ok(None)` 表示此前已处理过。下载失败返回 `Err`，由调用方停止本轮。

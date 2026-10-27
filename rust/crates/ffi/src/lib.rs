@@ -129,6 +129,7 @@ enum EngineRequest {
     MailStatus {
         profile_id: String,
     },
+    MailSyncProgress,
     MailStatementSource {
         profile_id: String,
         message_id: String,
@@ -244,12 +245,16 @@ fn app_slot() -> &'static RwLock<Option<AppService>> {
     APP.get_or_init(|| RwLock::new(None))
 }
 
+/// 取当前引擎的副本后立即释放读锁再执行：邮箱同步等长请求可能运行数分钟，
+/// 持锁期间 `update_llm_config` 的写锁会排队，并挡住其后所有请求（parking_lot 写优先）。
+/// 副本共享连接池、时区与同步锁；之后的配置更新只影响后续请求。
 fn with_app<T>(f: impl FnOnce(&AppService) -> Result<T>) -> Result<T> {
-    let guard = app_slot().read();
-    let app = guard
+    let app = app_slot()
+        .read()
         .as_ref()
+        .cloned()
         .ok_or_else(|| anyhow!("engine is not bootstrapped"))?;
-    f(app)
+    f(&app)
 }
 
 fn encode_ok<T: Serialize>(data: T) -> *mut c_char {
@@ -493,6 +498,7 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
             runtime().block_on(app.verify_icloud_mailbox(&account_address, &password))?;
             Ok(encode_ok(serde_json::json!({})))
         }),
+        EngineRequest::MailSyncProgress => with_app(|app| Ok(encode_ok(app.mail_sync_progress()))),
         EngineRequest::MailStatus { profile_id } => with_app(|app| {
             let status = runtime().block_on(app.mailbox_status(&profile_id))?;
             Ok(encode_ok(status))
@@ -859,6 +865,7 @@ mod tests {
             r#"{"action":"mail_sync_imap","profile_id":"p","account_address":"a@icloud.com","password":"x"}"#,
             r#"{"action":"mail_verify_imap","account_address":"a@icloud.com","password":"x"}"#,
             r#"{"action":"mail_status","profile_id":"p"}"#,
+            r#"{"action":"mail_sync_progress"}"#,
             r#"{"action":"mail_statement_source","profile_id":"p","message_id":"m"}"#,
             r#"{"action":"mail_resolve_statement","profile_id":"p","message_id":"m"}"#,
             r#"{"action":"mail_disconnect","profile_id":"p"}"#,

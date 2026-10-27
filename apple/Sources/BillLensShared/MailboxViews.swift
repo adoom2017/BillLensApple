@@ -73,7 +73,7 @@ struct MailboxSettingsSection: View {
                     Task { await store.syncMailbox(trigger: "manual", force: true) }
                 } label: {
                     HStack {
-                        Text(store.isMailboxBusy ? "正在检查，下载账单可能需要几分钟" : "立即检查")
+                        Text(store.isMailboxBusy ? (store.mailboxSyncProgress?.text ?? "正在检查…") : "立即检查")
                         if store.isMailboxBusy {
                             Spacer()
                             ProgressView().controlSize(.small)
