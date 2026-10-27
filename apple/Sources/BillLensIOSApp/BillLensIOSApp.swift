@@ -52,7 +52,10 @@ final class SubscriptionBackgroundRefreshCoordinator {
                 try Task.checkCancellation()
                 try schedule()
                 AppLogger.log("subscription.background.complete", "charged=\(charged)")
-                backgroundTask.setTaskCompleted(success: true)
+                // 邮箱账单搭同一后台任务顺带检查（订阅维护先完成并已调度下一次）；失败只记录在
+                // 同步状态里。过期取消时不报告订阅检查失败。
+                await store.syncMailbox(trigger: "background_refresh")
+                backgroundTask.setTaskCompleted(success: !Task.isCancelled)
             } catch {
                 AppLogger.log("subscription.background.error", error.localizedDescription)
                 store.errorText = error.localizedDescription

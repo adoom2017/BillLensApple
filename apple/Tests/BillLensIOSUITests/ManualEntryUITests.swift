@@ -80,6 +80,28 @@ final class ManualEntryUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["添加账单"].exists, "校验失败时表单应保持打开")
     }
 
+    func testSettingsOffersHotmailConnectionWhenClientIDIsConfigured() {
+        tap(app.buttons["设置"])
+        let connect = app.buttons["连接 Hotmail"]
+        XCTAssertTrue(scrollUntilVisible(connect), "已配置 Client ID 时应提供连接按钮")
+        XCTAssertFalse(text(containing: "未配置微软应用 ID").exists)
+
+        let icloud = app.buttons["连接 iCloud 邮箱"]
+        XCTAssertTrue(scrollUntilVisible(icloud), "应提供 iCloud 邮箱连接")
+        icloud.tap()
+        XCTAssertTrue(app.textFields["icloud.address"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.secureTextFields["icloud.password"].exists)
+        let sheetBar = app.navigationBars["连接 iCloud 邮箱"]
+        XCTAssertFalse(sheetBar.buttons["连接"].isEnabled, "未填写时不能连接")
+        tap(sheetBar.buttons["取消"])
+
+        let range = app.steppers["mailbox.lookbackMonths"]
+        XCTAssertTrue(scrollUntilVisible(range), "应可调整同步范围")
+        XCTAssertTrue(text(containing: "最近 3 个月").exists, "默认同步最近 3 个月")
+        range.buttons.element(boundBy: 1).tap()
+        XCTAssertTrue(text(containing: "最近 4 个月").waitForExistence(timeout: 2))
+    }
+
     // MARK: Helpers
 
     private func openTab(_ title: String) {

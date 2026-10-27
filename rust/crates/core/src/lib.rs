@@ -2,6 +2,7 @@ mod fx;
 mod llm;
 pub mod local_llm;
 mod logger;
+pub mod mailbox;
 pub mod manual;
 mod rule_parser;
 pub mod statement;
@@ -355,6 +356,8 @@ pub struct AppService {
     fx: FxClient,
     /// 本地日期（账本按天分组、月/年范围、订阅扣费日）都按此时区计算，含夏令时规则。
     time_zone: Arc<RwLock<Tz>>,
+    /// 邮箱同步同一时刻只运行一次（前台、手动、后台刷新可能同时触发）。
+    mail_sync_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 fn parse_time_zone(name: &str) -> Result<Tz, CoreError> {
@@ -375,6 +378,7 @@ impl AppService {
             llm,
             fx: FxClient::new(),
             time_zone: Arc::new(RwLock::new(time_zone)),
+            mail_sync_lock: Arc::new(tokio::sync::Mutex::new(())),
         })
     }
 

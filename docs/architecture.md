@@ -40,6 +40,26 @@ SwiftUI → BillLensStore → RustBridge → JSON C FFI → AppService → SQLit
 
 `cloud_after_local_failure` 遵循云端保存语义，并携带本地错误。账单、订阅自动保存先持久化一批草稿，再复用确认事务；失败保留完整草稿供查看，不留下该批次的部分账单或订阅。云端资产独立处理，不与同次输入的账单构成跨类型总事务。
 
+## 邮箱账单同步（Hotmail / iCloud）
+
+```text
+Swift：OAuth 授权码 + PKCE（ASWebAuthenticationSession）→ 钥匙串存 refresh token → 刷新 access token
+  → FFI mail_sync {access_token} → Rust：Graph 列出 ccsvc@message.cmbchina.com 邮件（升序、分页、游标）
+  或：钥匙串存 iCloud 地址 + App 专用密码 → FFI mail_sync_imap → Rust：IMAP（imap.mail.me.com:993）
+     SELECT INBOX → UID SEARCH FROM 招行 → BODY.PEEK[] 下载（不改已读）
+  → 逐封下载 MIME → 复用账单导入（解析 / 确定性 ID / 疑似重复 / 勾稽）→ 自动入账或留待确认
+```
+
+- 同一时间只连接一个邮箱；连接 iCloud 会清除 Hotmail 授权，反之亦然。两种来源实现同一个 `MailSource` 抽象，同步编排共用。
+- iCloud 没有 OAuth 邮件接口，用 App 专用密码；连接前 `mail_verify_imap` 校验登录。密码只存本机钥匙串，Rust 不落盘、不写日志。
+- 只申请 `Mail.Read`、`User.Read`、`offline_access`；refresh token 仅存本机钥匙串（`AfterFirstUnlockThisDeviceOnly`，不同步），Rust 只接收短期 access token，不落盘。
+- 勾稽通过：默认勾选且未入账的行自动入账（单事务 + 助手消息）；疑似重复、「其他」分区留待确认。勾稽失败：整封留待确认。非账单邮件记为跳过。
+- 同步范围：设置页可选最近 1–24 个月（默认 3，存 `UserDefaults`，随 `mail_sync` 传入）。调大时 Rust 按 `synced_from` 判断并清空游标补扫更早邮件，已处理的邮件按 id 跳过；调小不重扫。
+- `mail_sync_state` / `mail_messages`（迁移 0012、0013）只在本机；待确认账单保留原始邮件，确认或忽略后清空；断开连接全部删除，已入账记录保留。
+- 触发：启动 / 回到前台（自动触发间隔 ≥ 15 分钟）、设置页「立即检查」、iOS 后台刷新（与订阅维护同一任务）。同一时刻只运行一次。
+- 401 → 需要重新连接；429/503/网络错误 → 进度停在出错前一封，下次续传。分页链接必须仍指向 Graph 主机才跟随。
+- Client ID 来自构建设置 `BILLLENS_MICROSOFT_CLIENT_ID`（Info.plist `BillLensMicrosoftClientID`）；为空时设置页提示未配置。
+
 ## 手动新增与编辑
 
 账单、订阅、资产页面的「＋」与账单行编辑、资产详情「更新估值」走 FFI `create_record` / `update_record` / `create_subscription` / `create_asset`。

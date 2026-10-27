@@ -8,6 +8,8 @@
 	</array>
 	<key>BillLensCloudKitEnabled</key>
 	<string>$(BILLLENS_CLOUDKIT_ENABLED)</string>
+	<key>BillLensMicrosoftClientID</key>
+	<string>$(BILLLENS_MICROSOFT_CLIENT_ID)</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>

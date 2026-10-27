@@ -60,6 +60,35 @@ public final class BillLensStore: ObservableObject {
     @Published public var statementImport: StatementImportSession?
     /// 加密 PDF 等待用户输入密码。
     @Published public var statementPasswordRequest: StatementPasswordRequest?
+    /// 邮箱账单同步状态（连接的邮箱、上次检查、待确认账单）。
+    @Published public private(set) var mailboxStatus: MailboxStatus?
+    @Published public private(set) var isMailboxBusy = false
+    /// 授权失效：停止自动检查，设置页提示重新连接。
+    @Published public private(set) var mailboxNeedsReauth = false
+    /// 最近一次检查的结果说明（本次运行内有效）。
+    @Published public private(set) var mailboxLastSyncSummary: String?
+    /// 同步最近几个月的账单邮件。调大后立即补扫更早的邮件；调小只影响以后的扫描起点判断，不删除已入账的记录。
+    @Published public var mailboxLookbackMonths = BillLensStore.storedMailboxLookbackMonths {
+        didSet {
+            UserDefaults.standard.set(mailboxLookbackMonths, forKey: Self.mailboxLookbackMonthsKey)
+            guard mailboxLookbackMonths > oldValue else { return }
+            // 连续点按步进器时只在停下后检查一次。
+            mailboxRangeSyncTask?.cancel()
+            mailboxRangeSyncTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                await self?.syncMailbox(trigger: "range", force: true)
+            }
+        }
+    }
+    public static let mailboxLookbackMonthsRange = 1...24
+    private static let mailboxLookbackMonthsKey = "mailboxLookbackMonths"
+    private static var storedMailboxLookbackMonths: Int {
+        let saved = UserDefaults.standard.object(forKey: mailboxLookbackMonthsKey) as? Int ?? 3
+        return min(max(saved, mailboxLookbackMonthsRange.lowerBound), mailboxLookbackMonthsRange.upperBound)
+    }
+    private var mailboxRangeSyncTask: Task<Void, Never>?
+    private var lastAutomaticMailSync: Date?
 
     public let speechService = SpeechCaptureService.shared
 
@@ -467,6 +496,9 @@ public final class BillLensStore: ObservableObject {
                 "category_overrides": categoryOverrides
             ])
             if let inboxFile = session.inboxFile { StatementInbox.remove(inboxFile) }
+            if let messageId = session.mailMessageId {
+                try await self.resolveMailStatement(messageId)
+            }
             self.statementImport = nil
             self.apply(home: result.home)
             try await self.refreshLedger()
@@ -534,6 +566,184 @@ public final class BillLensStore: ObservableObject {
             AppLogger.log("record.delete", "record_id=\(recordId)")
             CloudKitSyncService.shared.schedulePush()
         }
+    }
+
+    // MARK: - Mailbox sync
+
+    /// 是否可连接 Hotmail（需要构建时配置微软应用 ID）。iCloud 不需要。
+    public var isMailboxConfigured: Bool { MicrosoftOAuthConfig.fromBundle != nil }
+    /// 当前连接的邮箱。同一时间只连接一个；iCloud 优先（连接任一种时会清除另一种）。
+    public var mailboxProvider: MailboxProvider? {
+        if ICloudMailCredentialStore.shared.connectedAddress != nil { return .icloud }
+        if MicrosoftAuthService.shared.connectedAddress != nil { return .hotmail }
+        return nil
+    }
+    public var isMailboxConnected: Bool { mailboxProvider != nil }
+
+    public func loadMailboxStatus() async {
+        do {
+            try await bootstrapTask?.value
+            mailboxStatus = try await bridge.sendAsync([
+                "action": "mail_status",
+                "profile_id": profileID
+            ])
+        } catch {
+            AppLogger.log("mailbox.status.error", error.localizedDescription)
+        }
+    }
+
+    /// 打开微软登录完成授权后立即同步。错误抛给设置页就地显示。
+    public func connectMailbox() async throws {
+        guard let config = MicrosoftOAuthConfig.fromBundle else { throw MicrosoftAuthError.notConfigured }
+        guard !isMailboxBusy else { return }
+        isMailboxBusy = true
+        defer { isMailboxBusy = false }
+        _ = try await MicrosoftAuthService.shared.connect(config: config)
+        ICloudMailCredentialStore.shared.delete()
+        mailboxNeedsReauth = false
+        await runMailboxSync(trigger: "connect")
+    }
+
+    /// 校验 iCloud 邮箱地址与 App 专用密码，保存到钥匙串后在后台开始同步。错误抛给连接表单就地显示。
+    public func connectICloudMailbox(address: String, appPassword: String) async throws {
+        guard !isMailboxBusy else { return }
+        let address = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Apple 显示的 App 专用密码带连字符，粘贴时可能夹带空格。
+        let password = appPassword.filter { !$0.isWhitespace }
+        isMailboxBusy = true
+        defer { isMailboxBusy = false }
+        try await bootstrapTask?.value
+        let _: EmptyResponse = try await bridge.sendAsync([
+            "action": "mail_verify_imap",
+            "account_address": address,
+            "password": password
+        ])
+        try ICloudMailCredentialStore.shared.save(.init(accountAddress: address, appPassword: password))
+        MicrosoftAuthService.shared.disconnect()
+        mailboxNeedsReauth = false
+        AppLogger.log("mailbox.icloud.connected", "ok")
+        // 首次同步要下载多封账单，iCloud IMAP 可能要几分钟：表单先关闭，同步在后台进行，设置页显示进度。
+        Task { await self.syncMailbox(trigger: "connect", force: true) }
+    }
+
+    public func disconnectMailbox() async throws {
+        MicrosoftAuthService.shared.disconnect()
+        ICloudMailCredentialStore.shared.delete()
+        let _: EmptyResponse = try await bridge.sendAsync([
+            "action": "mail_disconnect",
+            "profile_id": profileID
+        ])
+        mailboxNeedsReauth = false
+        mailboxStatus = nil
+        mailboxLastSyncSummary = nil
+        AppLogger.log("mailbox.disconnect", "ok")
+    }
+
+    /// 启动、回到前台、后台刷新与「立即检查」的统一入口。自动触发至少间隔 15 分钟；
+    /// 未配置、未连接、需要重新授权或正在同步时直接返回。不抛错：结果写入 `mailboxStatus`。
+    public func syncMailbox(trigger: String, force: Bool = false) async {
+        guard isMailboxConnected, !mailboxNeedsReauth, !isMailboxBusy else {
+            // 授权失效后钥匙串已清空，但待确认账单仍在本机：启动时也要加载，横幅才能显示。
+            if mailboxStatus == nil, !isMailboxBusy { await loadMailboxStatus() }
+            return
+        }
+        if !force, let last = lastAutomaticMailSync, Date.now.timeIntervalSince(last) < 15 * 60 { return }
+        isMailboxBusy = true
+        defer { isMailboxBusy = false }
+        await runMailboxSync(trigger: trigger)
+    }
+
+    private func runMailboxSync(trigger: String) async {
+        lastAutomaticMailSync = .now
+        do {
+            try await bootstrapTask?.value
+            let result: MailboxSyncResult = try await bridge.sendAsync(try await mailSyncRequest())
+            mailboxStatus = MailboxStatus(state: result.state, pending: result.pending)
+            mailboxLastSyncSummary = result.summary(lookbackMonths: mailboxLookbackMonths)
+            if result.needsReauth {
+                // iCloud 保留已存的地址，「重新连接」时预填；Hotmail 只丢弃缓存的 access token。
+                MicrosoftAuthService.shared.invalidateAccessToken()
+                mailboxNeedsReauth = true
+            }
+            if result.imported > 0 {
+                apply(home: result.home)
+                try await refreshLedger()
+                CloudKitSyncService.shared.schedulePush()
+            }
+            await MailboxNotifier.notify(imported: result.imported, newPending: result.newPendingStatements)
+            AppLogger.log(
+                "mailbox.sync",
+                "trigger=\(trigger) imported=\(result.imported) pending=\(result.pending.count) skipped=\(result.skipped) scanned=\(result.scanned) reauth=\(result.needsReauth)"
+            )
+        } catch MicrosoftAuthError.reauthRequired {
+            mailboxNeedsReauth = true
+            await loadMailboxStatus()
+        } catch {
+            AppLogger.log("mailbox.sync.error", "trigger=\(trigger) \(error.localizedDescription)")
+            mailboxLastSyncSummary = "检查失败：\(error.localizedDescription)"
+            await loadMailboxStatus()
+        }
+    }
+
+    /// 按当前连接的邮箱组装同步请求。凭据只在内存中传给 Rust，不写日志。
+    private func mailSyncRequest() async throws -> [String: Any] {
+        if let credential = ICloudMailCredentialStore.shared.load() {
+            return [
+                "action": "mail_sync_imap",
+                "profile_id": profileID,
+                "account_address": credential.accountAddress,
+                "password": credential.appPassword,
+                "lookback_months": mailboxLookbackMonths
+            ]
+        }
+        guard let config = MicrosoftOAuthConfig.fromBundle else { throw MicrosoftAuthError.notConfigured }
+        let (token, address) = try await MicrosoftAuthService.shared.accessToken(config: config)
+        return [
+            "action": "mail_sync",
+            "profile_id": profileID,
+            "access_token": token,
+            "account_address": address,
+            "lookback_months": mailboxLookbackMonths
+        ]
+    }
+
+    /// 打开待确认的邮箱账单，复用信用卡账单导入预览。
+    public func openPendingMailStatement(_ messageId: String) {
+        perform("正在打开待确认账单") {
+            let dto: StatementSourceDTO = try await self.bridge.sendAsync([
+                "action": "mail_statement_source",
+                "profile_id": self.profileID,
+                "message_id": messageId
+            ])
+            let source = try dto.payload
+            let preview: StatementPreview = try await self.bridge.sendAsync([
+                "action": "parse_statement",
+                "profile_id": self.profileID,
+                "source": source.dictionary
+            ])
+            var session = StatementImportSession(source: source, preview: preview, inboxFile: nil)
+            session.mailMessageId = messageId
+            self.statementImport = session
+            self.statusText = "待确认账单已打开"
+        }
+    }
+
+    /// 预览中选择「忽略这封账单」：未入账的行保持不入账，不再提示。
+    public func ignoreMailStatement() {
+        guard let messageId = statementImport?.mailMessageId else { return }
+        perform("正在忽略账单") {
+            try await self.resolveMailStatement(messageId)
+            self.statementImport = nil
+            self.statusText = "已忽略这封账单的剩余条目"
+        }
+    }
+
+    private func resolveMailStatement(_ messageId: String) async throws {
+        mailboxStatus = try await bridge.sendAsync([
+            "action": "mail_resolve_statement",
+            "profile_id": profileID,
+            "message_id": messageId
+        ])
     }
 
     // MARK: - Manual entry

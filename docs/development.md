@@ -143,6 +143,27 @@ iOS 分享扩展（`com.shendongchun.BillLensApple.ShareExtension`）与主 App 
 - macOS 推送权限键是 `com.apple.developer.aps-environment`（iOS 是 `aps-environment`）；导出分发版本时 Xcode 自动改为 production。
 - 正式签名版本使用 CloudKit **Production** 环境，需先在 CloudKit Console 把 schema 部署到 Production。
 
+## Hotmail 邮箱账单（Azure 应用）
+
+邮箱同步需要一个 Azure 公共客户端应用（免费，只需注册一次）：
+
+1. 用微软账号登录 <https://portal.azure.com> → Microsoft Entra ID → 应用注册 → 新注册，名称 `Billumi`，帐户类型选 **仅个人 Microsoft 帐户**。
+2. 重定向 URI 选「公共客户端/本机（移动和桌面）」：`billumi-auth://oauth`。
+3. API 权限添加 Microsoft Graph 委托权限 `Mail.Read`、`User.Read`、`offline_access`；「身份验证」中开启「允许公共客户端流」。
+4. 把「应用程序(客户端) ID」填入 `apple/project.yml` 的 `BILLLENS_MICROSOFT_CLIENT_ID` 后执行 `./build.sh xcode`。Client ID 不是密钥，可以提交。
+
+未配置时设置页不显示「连接 Hotmail」，其他功能不受影响。
+
+## iCloud 邮箱账单
+
+不需要任何构建配置。用户在设置 →「邮箱账单」→「连接 iCloud 邮箱」填入收件地址和 App 专用密码（account.apple.com →「登录与安全」→「App 专用密码」），连接前会先校验登录。
+
+验证真实 iCloud 的 TLS 握手与登录拒绝映射（需要网络，使用不存在的账号）：
+
+```bash
+cd rust && cargo test -p billlens-apple-core icloud_live -- --ignored
+```
+
 ## 检查与冒烟
 
 ```bash

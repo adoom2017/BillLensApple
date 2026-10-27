@@ -1,7 +1,9 @@
+mod mailbox;
 mod models;
 
 use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, NaiveDate, Utc};
+pub use mailbox::{MailMessageRecord, MailMessageStatus, MailSyncState, PendingMailStatement};
 pub use models::*;
 use sqlx::{
     FromRow, QueryBuilder, Row, Sqlite, SqlitePool,

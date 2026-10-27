@@ -104,6 +104,7 @@ struct SettingsShell: View {
             Form {
                 localModelSection
                 cloudModelSection
+                MailboxSettingsSection()
 
                 Section {
                     Toggle(isOn: $store.autoConfirm) {

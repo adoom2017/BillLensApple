@@ -108,6 +108,38 @@ enum EngineRequest {
         profile_id: String,
         input: ParsedAssetInfo,
     },
+    MailSync {
+        profile_id: String,
+        access_token: String,
+        account_address: String,
+        #[serde(default = "default_lookback_months")]
+        lookback_months: u32,
+    },
+    MailSyncImap {
+        profile_id: String,
+        account_address: String,
+        password: String,
+        #[serde(default = "default_lookback_months")]
+        lookback_months: u32,
+    },
+    MailVerifyImap {
+        account_address: String,
+        password: String,
+    },
+    MailStatus {
+        profile_id: String,
+    },
+    MailStatementSource {
+        profile_id: String,
+        message_id: String,
+    },
+    MailResolveStatement {
+        profile_id: String,
+        message_id: String,
+    },
+    MailDisconnect {
+        profile_id: String,
+    },
     ParseStatement {
         profile_id: String,
         source: StatementSourceInput,
@@ -198,6 +230,10 @@ enum EngineRequest {
     ProcessDueSubscriptions {
         profile_id: String,
     },
+}
+
+fn default_lookback_months() -> u32 {
+    billlens_apple_core::mailbox::DEFAULT_LOOKBACK_MONTHS
 }
 
 fn runtime() -> &'static Runtime {
@@ -421,6 +457,64 @@ fn handle_request_inner(request_json: *const c_char) -> Result<*mut c_char> {
         EngineRequest::CreateAsset { profile_id, input } => with_app(|app| {
             let result = runtime().block_on(app.create_manual_asset(&profile_id, input))?;
             Ok(encode_ok(result))
+        }),
+        EngineRequest::MailSync {
+            profile_id,
+            access_token,
+            account_address,
+            lookback_months,
+        } => with_app(|app| {
+            let result = runtime().block_on(app.sync_mailbox(
+                &profile_id,
+                &access_token,
+                &account_address,
+                lookback_months,
+            ))?;
+            Ok(encode_ok(result))
+        }),
+        EngineRequest::MailSyncImap {
+            profile_id,
+            account_address,
+            password,
+            lookback_months,
+        } => with_app(|app| {
+            let result = runtime().block_on(app.sync_icloud_mailbox(
+                &profile_id,
+                &account_address,
+                &password,
+                lookback_months,
+            ))?;
+            Ok(encode_ok(result))
+        }),
+        EngineRequest::MailVerifyImap {
+            account_address,
+            password,
+        } => with_app(|app| {
+            runtime().block_on(app.verify_icloud_mailbox(&account_address, &password))?;
+            Ok(encode_ok(serde_json::json!({})))
+        }),
+        EngineRequest::MailStatus { profile_id } => with_app(|app| {
+            let status = runtime().block_on(app.mailbox_status(&profile_id))?;
+            Ok(encode_ok(status))
+        }),
+        EngineRequest::MailStatementSource {
+            profile_id,
+            message_id,
+        } => with_app(|app| {
+            let source = runtime().block_on(app.mail_statement_source(&profile_id, &message_id))?;
+            Ok(encode_ok(source))
+        }),
+        EngineRequest::MailResolveStatement {
+            profile_id,
+            message_id,
+        } => with_app(|app| {
+            let status =
+                runtime().block_on(app.resolve_mail_statement(&profile_id, &message_id))?;
+            Ok(encode_ok(status))
+        }),
+        EngineRequest::MailDisconnect { profile_id } => with_app(|app| {
+            runtime().block_on(app.disconnect_mailbox(&profile_id))?;
+            Ok(encode_ok(serde_json::json!({})))
         }),
         EngineRequest::ParseStatement { profile_id, source } => with_app(|app| {
             let preview = runtime().block_on(app.parse_statement(&profile_id, &source))?;
@@ -755,5 +849,30 @@ mod tests {
             record.replace(r#""note":null"#, r#""note":null,"extra":1"#)
         );
         assert!(serde_json::from_str::<EngineRequest>(&unknown).is_err());
+    }
+
+    #[test]
+    fn mailbox_requests_decode_strictly() {
+        for request in [
+            r#"{"action":"mail_sync","profile_id":"p","access_token":"t","account_address":"a@hotmail.com"}"#,
+            r#"{"action":"mail_sync","profile_id":"p","access_token":"t","account_address":"a@hotmail.com","lookback_months":12}"#,
+            r#"{"action":"mail_sync_imap","profile_id":"p","account_address":"a@icloud.com","password":"x"}"#,
+            r#"{"action":"mail_verify_imap","account_address":"a@icloud.com","password":"x"}"#,
+            r#"{"action":"mail_status","profile_id":"p"}"#,
+            r#"{"action":"mail_statement_source","profile_id":"p","message_id":"m"}"#,
+            r#"{"action":"mail_resolve_statement","profile_id":"p","message_id":"m"}"#,
+            r#"{"action":"mail_disconnect","profile_id":"p"}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<EngineRequest>(request).is_ok(),
+                "{request}"
+            );
+        }
+        assert!(
+            serde_json::from_str::<EngineRequest>(
+                r#"{"action":"mail_sync","profile_id":"p","access_token":"t"}"#
+            )
+            .is_err()
+        );
     }
 }

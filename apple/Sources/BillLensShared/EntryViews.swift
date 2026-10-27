@@ -59,6 +59,9 @@ struct ChatPanel: View {
 
     var body: some View {
         ChatScrollView(onReviewDraft: onReviewDraft)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                PendingMailStatementsBanner()
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 ComposerPanel(
                     composerText: $store.composerText,

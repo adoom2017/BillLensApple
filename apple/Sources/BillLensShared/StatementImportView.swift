@@ -50,6 +50,16 @@ struct StatementImportView: View {
                         Text("\(section.title) · \(lines.count) 笔")
                     }
                 }
+                if session.mailMessageId != nil {
+                    Section {
+                        Button("忽略这封账单的剩余条目", role: .destructive) {
+                            store.ignoreMailStatement()
+                        }
+                        .disabled(store.isBusy)
+                    } footer: {
+                        Text("已自动记账的条目不受影响；剩余条目不入账，也不再提醒。")
+                    }
+                }
                 if !excludedLines.isEmpty {
                     Section {
                         DisclosureGroup("还款等不计入收支的 \(excludedLines.count) 笔", isExpanded: $showsExcluded) {
@@ -74,7 +84,8 @@ struct StatementImportView: View {
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { store.cancelStatementImport() }
+                    // 邮箱账单取消后仍保留在待确认中，下次可继续处理。
+                    Button(session.mailMessageId == nil ? "取消" : "稍后") { store.cancelStatementImport() }
                         .disabled(store.isBusy)
                 }
                 ToolbarItem(placement: .confirmationAction) {

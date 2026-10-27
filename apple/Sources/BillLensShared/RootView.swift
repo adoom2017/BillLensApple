@@ -95,7 +95,10 @@ public struct RootView: View {
             }
             .animation(.snappy, value: store.errorText)
             .onChange(of: scenePhase, initial: true) { _, phase in
-                if phase == .active { store.checkStatementInbox() }
+                if phase == .active {
+                    store.checkStatementInbox()
+                    Task { await store.syncMailbox(trigger: "foreground") }
+                }
             }
     }
 

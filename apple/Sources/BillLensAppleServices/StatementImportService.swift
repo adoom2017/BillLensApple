@@ -12,6 +12,11 @@ public struct StatementSourcePayload: Sendable {
 
     public let kind: Kind
     public let content: String
+
+    public init(kind: Kind, content: String) {
+        self.kind = kind
+        self.content = content
+    }
 }
 
 public enum StatementImportError: LocalizedError, Equatable {

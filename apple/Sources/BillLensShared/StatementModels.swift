@@ -116,6 +116,8 @@ public struct StatementImportSession: Identifiable {
     public let preview: StatementPreview
     /// 来自 iOS 分享扩展收件箱的文件，导入完成或取消后删除。
     public let inboxFile: URL?
+    /// 来自邮箱同步的待确认账单：确认或忽略后通知 Rust 清除原始邮件；取消则保留待下次处理。
+    public var mailMessageId: String? = nil
 }
 
 public struct StatementPasswordRequest: Identifiable {

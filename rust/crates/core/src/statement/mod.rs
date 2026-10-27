@@ -14,9 +14,11 @@ use crate::{
     AppService, CoreError, HomeSnapshot, RecordCreate, RecordDirection, RecordsStatsRange,
     STATS_CURRENCY, is_valid_record_category_for_direction, logger, map_internal,
 };
+use billlens_apple_db::StatementImportCounts;
 use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
 use chrono_tz::Tz;
-use cmb::{CmbRow, CmbStatement};
+use cmb::CmbRow;
+pub(crate) use cmb::CmbStatement;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use uuid::Uuid;
@@ -154,18 +156,7 @@ impl AppService {
             if !is_valid_record_category_for_direction(Some(&direction), &category) {
                 return Err(CoreError::bad_request(format!("无效的分类：{category}")));
             }
-            records.push((
-                *id,
-                RecordCreate {
-                    direction,
-                    amount: line.amount,
-                    currency: STATS_CURRENCY.to_string(),
-                    category,
-                    merchant: Some(line.merchant.clone()),
-                    transaction_at: line.transaction_at,
-                    note: Some(line.note.clone()),
-                },
-            ));
+            records.push((*id, record_create(line, direction, category)));
         }
         if let Some(unknown) = category_overrides.keys().find(|id| !seen.contains(id)) {
             return Err(CoreError::bad_request(format!(
@@ -173,24 +164,9 @@ impl AppService {
             )));
         }
 
-        let card = card_label(&statement.rows);
-        let period = format!(
-            "{}–{}",
-            statement.period_start.format("%Y/%m/%d"),
-            statement.period_end.format("%Y/%m/%d")
-        );
         let counts = self
-            .repo
-            .import_statement_records(profile_id, &self.device_id, records, |inserted, skipped| {
-                let mut message = format!("已导入{BANK_NAME}（{card}）{period} 账单 {inserted} 笔");
-                if skipped > 0 {
-                    message.push_str(&format!("，跳过已存在的 {skipped} 笔"));
-                }
-                message.push('。');
-                message
-            })
-            .await
-            .map_err(map_internal)?;
+            .import_lines(profile_id, &statement, records, "已导入")
+            .await?;
         logger::info(
             "statement.confirm",
             format!(
@@ -205,7 +181,30 @@ impl AppService {
         })
     }
 
-    async fn mark_existing_and_duplicates(
+    /// 单事务写入账单行与一条助手消息；手动确认与邮箱自动导入共用。
+    pub(crate) async fn import_lines(
+        &self,
+        profile_id: &str,
+        statement: &CmbStatement,
+        records: Vec<(Uuid, RecordCreate)>,
+        verb: &str,
+    ) -> Result<StatementImportCounts, CoreError> {
+        let card = card_label(&statement.rows);
+        let period = period_label(statement);
+        self.repo
+            .import_statement_records(profile_id, &self.device_id, records, |inserted, skipped| {
+                let mut message = format!("{verb}{BANK_NAME}（{card}）{period} 账单 {inserted} 笔");
+                if skipped > 0 {
+                    message.push_str(&format!("，跳过已存在的 {skipped} 笔"));
+                }
+                message.push('。');
+                message
+            })
+            .await
+            .map_err(map_internal)
+    }
+
+    pub(crate) async fn mark_existing_and_duplicates(
         &self,
         profile_id: &str,
         lines: &mut [StatementLine],
@@ -290,7 +289,7 @@ impl AppService {
     }
 }
 
-fn decode_statement(source: &StatementSourceInput) -> Result<CmbStatement, CoreError> {
+pub(crate) fn decode_statement(source: &StatementSourceInput) -> Result<CmbStatement, CoreError> {
     let decoded = source::decode(source).map_err(|e| CoreError::bad_request(format!("{e:#}")))?;
     let is_cmb_sender = decoded
         .sender
@@ -309,7 +308,7 @@ fn decode_statement(source: &StatementSourceInput) -> Result<CmbStatement, CoreE
     cmb::parse(&decoded.lines).map_err(|e| CoreError::bad_request(format!("{e:#}")))
 }
 
-fn build_lines(
+pub(crate) fn build_lines(
     profile_id: &str,
     statement: &CmbStatement,
     time_zone: Tz,
@@ -426,7 +425,7 @@ fn build_preview(statement: CmbStatement, lines: Vec<StatementLine>) -> Statemen
 
 /// 勾稽：本期新增 = 消费 + 分期 + 取现 + 费用；本期调整 = −退款；循环利息 = 利息；
 /// 本期应还 = 上期账单 + 还款 + 新增 − 调整 + 利息。「其他」分区不参与，差额会暴露出来。
-fn reconcile(statement: &CmbStatement) -> Vec<ReconciliationCheck> {
+pub(crate) fn reconcile(statement: &CmbStatement) -> Vec<ReconciliationCheck> {
     use StatementSection::*;
     let Some(summary) = statement.summary else {
         return Vec::new();
@@ -458,6 +457,30 @@ fn reconcile(statement: &CmbStatement) -> Vec<ReconciliationCheck> {
         check("循环利息", summary.interest, interest),
         check("本期应还", summary.amount_due, amount_due),
     ]
+}
+
+pub(crate) fn period_label(statement: &CmbStatement) -> String {
+    format!(
+        "{}–{}",
+        statement.period_start.format("%Y/%m/%d"),
+        statement.period_end.format("%Y/%m/%d")
+    )
+}
+
+pub(crate) fn record_create(
+    line: &StatementLine,
+    direction: RecordDirection,
+    category: String,
+) -> RecordCreate {
+    RecordCreate {
+        direction,
+        amount: line.amount,
+        currency: STATS_CURRENCY.to_string(),
+        category,
+        merchant: Some(line.merchant.clone()),
+        transaction_at: line.transaction_at,
+        note: Some(line.note.clone()),
+    }
 }
 
 fn card_label(rows: &[CmbRow]) -> String {
