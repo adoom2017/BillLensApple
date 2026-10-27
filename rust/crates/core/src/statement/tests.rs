@@ -221,12 +221,19 @@ async fn reimport_from_any_source_is_idempotent_and_deleted_rows_stay_deleted() 
 }
 
 #[tokio::test]
-async fn manual_records_within_two_days_are_suspected_duplicates_one_to_one() {
+async fn manual_records_on_the_same_day_are_suspected_duplicates_one_to_one() {
     let service = service().await;
+    // 账单只有日期：同一自然日内的任意时刻都算，相差一天不算。
+    let shanghai = |month, day, hour| {
+        chrono_tz::Asia::Shanghai
+            .with_ymd_and_hms(2026, month, day, hour, 0, 0)
+            .unwrap()
+            .with_timezone(&Utc)
+    };
     for (amount, at) in [
-        (424.83, shanghai_noon(10, 3)),
-        (9.90, shanghai_noon(9, 29)),
-        (100.0, shanghai_noon(10, 20)),
+        (424.83, shanghai(10, 1, 21)),
+        (9.90, shanghai(9, 28, 8)),
+        (100.0, shanghai(10, 16, 12)),
     ] {
         service
             .repo
@@ -258,7 +265,7 @@ async fn manual_records_within_two_days_are_suspected_duplicates_one_to_one() {
         .filter(|l| l.status == StatementLineStatus::SuspectedDuplicate)
         .map(|l| (l.merchant.as_str(), l.default_selected))
         .collect();
-    // 加油站差 1 天命中；两笔 9.90 只标第一笔；电信差 5 天不命中。
+    // 加油站同日晚上命中；两笔 9.90 只标第一笔；电信差 1 天不命中。
     assert_eq!(
         duplicates,
         vec![

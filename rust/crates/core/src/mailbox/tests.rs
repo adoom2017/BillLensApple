@@ -242,7 +242,7 @@ async fn suspected_duplicates_are_held_for_review_while_the_rest_is_imported() {
     }));
     let base = mock_graph(state).await;
     let service = service().await;
-    // 与账单中 10/02 的 424.83 加油站消费金额相同、相差 1 天的手动记录。
+    // 与账单中 10/01 的 424.83 加油站消费金额相同、同一天的手动记录。
     service
         .repo
         .create_record(
@@ -256,7 +256,7 @@ async fn suspected_duplicates_are_held_for_review_while_the_rest_is_imported() {
                 category: "交通".into(),
                 merchant: Some("加油".into()),
                 transaction_at: chrono_tz::Asia::Shanghai
-                    .with_ymd_and_hms(2026, 10, 3, 9, 0, 0)
+                    .with_ymd_and_hms(2026, 10, 1, 9, 0, 0)
                     .unwrap()
                     .with_timezone(&Utc),
                 note: None,

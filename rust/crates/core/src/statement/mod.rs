@@ -26,8 +26,8 @@ use uuid::Uuid;
 const BANK_NAME: &str = "招商银行信用卡";
 /// 账单行记录 ID 的 UUID v5 命名空间。已发布后不得修改，否则重复导入会产生新记录。
 const STATEMENT_NAMESPACE: Uuid = Uuid::from_u128(0x6b1f_93c2_7d0e_4c55_9a3e_51d8_0f2c_b7a4);
-/// 与手动记录比对疑似重复时允许的日期差。
-const DUPLICATE_WINDOW_DAYS: i64 = 2;
+/// 与已有记录比对疑似重复时允许的本地日期差：只认同一天。账单没有交易时刻，不比较小时。
+const DUPLICATE_WINDOW_DAYS: i64 = 0;
 /// 账单只有日期，入账时刻统一取设备时区当天中午。
 const STATEMENT_HOUR: u32 = 12;
 
