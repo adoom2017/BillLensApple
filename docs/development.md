@@ -7,6 +7,7 @@
 | Xcode | 提供 Swift 6.1+ 与 Apple SDK；`xcode-select -p` 指向完整 Xcode |
 | Rust / Cargo / rustup | 构建 `billlens_ffi`；脚本安装 iOS arm64 target |
 | XcodeGen | `brew install xcodegen` |
+| create-dmg（可选） | `brew install create-dmg`；打包带安装指引的 DMG 窗口，缺少时退回无排版 DMG。首次运行需允许终端控制 Finder |
 | 部署目标 | macOS 14+、iOS 17+ |
 | 构建主机 | Apple Silicon；macOS 工程与 iOS 模拟器配置使用 arm64 |
 
@@ -64,7 +65,7 @@ App 经 LaunchServices 启动，不能假定会继承终端环境变量。日常
 | 命令 | 行为与输出 |
 |---|---|
 | `./build.sh dev` | macOS Debug，`apple/build/DerivedData/Build/Products/Debug/Billumi.app`，构建并启动 |
-| `./build.sh mac` | 复用 `xcode-mac` 生成 Release App，并打包 `dist/Billumi.dmg` |
+| `./build.sh mac` | 复用 `xcode-mac` 生成 Release App，并打包 `dist/Billumi.dmg`（安装窗口背景 `apple/Packaging/dmg-background.tiff`，改文案或布局后运行同目录 `make_dmg_background.py` 重新生成，图标坐标与 `build.sh` 的 `create_dmg` 保持一致） |
 | `./build.sh ios-sim` | Rust `aarch64-apple-ios-sim` 静态库 |
 | `./build.sh ios` | Rust `aarch64-apple-ios` 静态库 |
 | `./build.sh all` | macOS、iOS 模拟器、iOS 真机三份 Rust 库 |

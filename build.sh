@@ -331,15 +331,36 @@ notarize_mac_app() {
 }
 
 # 生成带 /Applications 快捷方式的压缩 DMG，便于拖拽安装。
+# 有 create-dmg（brew install create-dmg）时排版安装窗口：720×460、128 点图标、带指引的背景
+# （apple/Packaging/dmg-background.tiff，由同目录 make_dmg_background.py 生成，坐标需与此处一致）。
 create_dmg() {
     local app="$1"
     local dmg="$2"
     local staging
     staging="$(mktemp -d)"
     ditto "$app" "$staging/$(basename "$app")"
-    ln -s /Applications "$staging/Applications"
     rm -f "$dmg"
-    hdiutil create -volname Billumi -srcfolder "$staging" -ov -format UDZO "$dmg"
+    if command -v create-dmg >/dev/null 2>&1; then
+        # create-dmg 用 Finder 排版：首次运行需允许终端控制 Finder。
+        create-dmg \
+            --volname Billumi \
+            --volicon "$REPO_ROOT/apple/Sources/BillLensMacApp/AppIcon.icns" \
+            --background "$REPO_ROOT/apple/Packaging/dmg-background.tiff" \
+            --window-pos 200 120 \
+            --window-size 720 460 \
+            --icon-size 128 \
+            --text-size 14 \
+            --icon "$(basename "$app")" 190 210 \
+            --hide-extension "$(basename "$app")" \
+            --app-drop-link 530 210 \
+            --app-drop-link-name 应用程序 \
+            --no-internet-enable \
+            "$dmg" "$staging"
+    else
+        echo "warning: 未安装 create-dmg（brew install create-dmg），生成无排版的 DMG。" >&2
+        ln -s /Applications "$staging/Applications"
+        hdiutil create -volname Billumi -srcfolder "$staging" -ov -format UDZO "$dmg"
+    fi
     rm -rf "$staging"
 }
 
