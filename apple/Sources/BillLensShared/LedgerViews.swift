@@ -386,7 +386,6 @@ struct LedgerCalendarView: View {
     let onShift: (Int) -> Void
 
     private static let weekdays = ["日", "一", "二", "三", "四", "五", "六"]
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 7)
 
     var body: some View {
         VStack(spacing: 12) {
@@ -396,35 +395,57 @@ struct LedgerCalendarView: View {
                 onShift: onShift
             )
 
-            LazyVGrid(columns: columns, spacing: 2) {
-                ForEach(Self.weekdays, id: \.self) { label in
-                    Text(label)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity)
+            // 嵌在 List 行里时不能用 LazyVGrid：惰性网格的高度在滚动中反复重算，
+            // 会让行高抖动，按钮也会被重建导致点击丢失。
+            Grid(horizontalSpacing: 0, verticalSpacing: 2) {
+                GridRow {
+                    ForEach(Self.weekdays, id: \.self) { label in
+                        Text(label)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                    }
                 }
-                ForEach(cells) { cell in
-                    if let day = cell.dayNumber, let date = cell.date {
-                        Button {
-                            selectedDate = date
-                        } label: {
-                            CalendarDayCell(
-                                day: day,
-                                amountText: cell.amountText,
-                                isSelected: date == selectedDate,
-                                isHot: cell.isHot,
-                                isToday: cell.isToday
-                            )
+                ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
+                    GridRow {
+                        ForEach(week) { cell in
+                            dayCell(cell)
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("\(month)月\(day)日 \(cell.amountText)")
-                        .accessibilityAddTraits(date == selectedDate ? .isSelected : [])
-                    } else {
-                        Color.clear.frame(height: 46)
                     }
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func dayCell(_ cell: Cell) -> some View {
+        if let day = cell.dayNumber, let date = cell.date {
+            Button {
+                selectedDate = date
+            } label: {
+                CalendarDayCell(
+                    day: day,
+                    amountText: cell.amountText,
+                    isSelected: date == selectedDate,
+                    isHot: cell.isHot,
+                    isToday: cell.isToday
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(month)月\(day)日 \(cell.amountText)")
+            .accessibilityAddTraits(date == selectedDate ? .isSelected : [])
+        } else {
+            Color.clear
+                .frame(maxWidth: .infinity, minHeight: 46)
+        }
+    }
+
+    private var weeks: [[Cell]] {
+        var cells = cells
+        while cells.count % 7 != 0 {
+            cells.append(Cell(id: cells.count, date: nil, dayNumber: nil, amountText: "", isHot: false, isToday: false))
+        }
+        return stride(from: 0, to: cells.count, by: 7).map { Array(cells[$0..<$0 + 7]) }
     }
 
     private struct Cell: Identifiable {
@@ -576,39 +597,47 @@ private struct LedgerYearGrid: View {
                 subtitle: "\(items.filter(\.hasData).count) 个月有账单",
                 onShift: onShift
             )
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
-                ForEach(items) { item in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("\(item.month)月")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(item.hasData ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
-                        if item.hasData {
-                            Text(BillLensFormatters.currencyString(item.expenseAmount, currencyCode: item.statsCurrency))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                            if item.incomeAmount > 0 {
-                                Text("+" + BillLensFormatters.currencyString(item.incomeAmount, currencyCode: item.statsCurrency))
-                                    .font(.caption2)
-                                    .foregroundStyle(AppColors.income)
-                            }
-                            Text("\(item.recordCount) 笔")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        } else {
-                            Text("暂无")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
+            Grid(horizontalSpacing: 8, verticalSpacing: 8) {
+                ForEach(Array(stride(from: 0, to: items.count, by: 3)), id: \.self) { start in
+                    GridRow {
+                        ForEach(items[start..<min(start + 3, items.count)]) { item in
+                            monthCell(item)
                         }
                     }
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
-                    .padding(8)
-                    .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .accessibilityElement(children: .combine)
                 }
             }
         }
+    }
+
+    private func monthCell(_ item: LedgerMonthItem) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("\(item.month)月")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(item.hasData ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+            if item.hasData {
+                Text(BillLensFormatters.currencyString(item.expenseAmount, currencyCode: item.statsCurrency))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if item.incomeAmount > 0 {
+                    Text("+" + BillLensFormatters.currencyString(item.incomeAmount, currencyCode: item.statsCurrency))
+                        .font(.caption2)
+                        .foregroundStyle(AppColors.income)
+                }
+                Text("\(item.recordCount) 笔")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else {
+                Text("暂无")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .monospacedDigit()
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
+        .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
+        .padding(8)
+        .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 }
